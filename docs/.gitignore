@@ -1,0 +1,13 @@
+_site
+Gemfile*
+pandoc/bin
+pandoc/pandoc*
+build
+build-contributors
+build-docs
+tmp*
+pdf/friction.md
+pdf/friction.pdf
+*.friction_backup
+
+.DS_Store

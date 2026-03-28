@@ -1,0 +1,13 @@
+[General]
+author=Codex
+bindings="fps = $scene.fps;\nframe = $frame;\nvalue = $value;"
+categories=Core, Math, Interpolation
+definitions=
+description="Smooth interpolation between two values. Similar to After Effects ease() expression."
+highlighters=
+id=graphics.friction.ease
+license=
+script="time = frame / fps;\n\n// Ease interpolation settings\nstartValue = 0;\nendValue = 100;\nstartTime = 0;\nendTime = 1;\n\n// Clamp time to the range\nt = Math.max(startTime, Math.min(time, endTime));\n\n// Calculate smooth interpolation\nif (endTime > startTime) {\n    progress = (t - startTime) / (endTime - startTime);\n    // Apply ease function (smoothstep)\n    easeProgress = progress * progress * (3 - 2 * progress);\n    return startValue + (endValue - startValue) * easeProgress;\n} else {\n    return startValue;\n}"
+title=Ease
+url=
+version=1

@@ -1,0 +1,13 @@
+[General]
+author=Codex
+bindings="fps = $scene.fps;\nframe = $frame;\nvalue = $value;"
+categories=Core, Motion, Loop
+definitions=
+description="Loops the animation from the beginning. Similar to After Effects loopIn() expression."
+highlighters=
+id=graphics.friction.loopin
+license=
+script="time = frame / fps;\n\n// Loop settings\ntype = \"cycle\"; // \"cycle\", \"pingpong\", or \"continue\"\nnumKeyframes = 2; // Number of keyframes in the loop\nloopDuration = 1; // Duration of one loop in seconds\n\n// Calculate loop position\nif (time < loopDuration) {\n    if (type === \"cycle\") {\n        return value + Math.sin(time * Math.PI * 2 / loopDuration) * 100;\n    } else if (type === \"pingpong\") {\n        cycleTime = time;\n        if (cycleTime > loopDuration / 2) {\n            cycleTime = loopDuration - cycleTime;\n        }\n        return value + Math.sin(cycleTime * Math.PI * 2 / (loopDuration / 2)) * 100;\n    } else {\n        return value + Math.sin(time * Math.PI * 2 / loopDuration) * 100;\n    }\n} else {\n    return value + Math.sin(loopDuration * Math.PI * 2 / loopDuration) * 100;\n}"
+title=Loop In
+url=
+version=1

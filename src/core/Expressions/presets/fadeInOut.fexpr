@@ -1,0 +1,13 @@
+[General]
+author=Codex
+bindings="frame = $frame;\nrangeMin = $scene.rangeMin;\nrangeMax = $scene.rangeMax;\nvalue = $value;"
+categories=Core, Utility, Opacity
+definitions=
+description="Fades in at the work-area start and fades out at the work-area end."
+highlighters=
+id=graphics.friction.fadeInOut
+license=
+script="fadeFrames = 12;\nfadeFrames = Math.max(1, fadeFrames);\n\nfadeIn = clamp((frame - rangeMin) / fadeFrames, 0, 1);\nfadeOut = clamp((rangeMax - frame) / fadeFrames, 0, 1);\n\nreturn value * Math.min(fadeIn, fadeOut);"
+title=Fade In/Out
+url=
+version=1

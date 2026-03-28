@@ -1,0 +1,12 @@
+<RCC>
+    <qresource prefix="/docs">
+        <file>LICENSE</file>
+        <file>about.html</file>
+        <file>privacy.html</file>
+        <file>3rdparty/gperftools.html</file>
+        <file>3rdparty/skia.html</file>
+        <file>3rdparty/icons.html</file>
+        <file>3rdparty/easing.html</file>
+        <file>shortcuts.html</file>
+    </qresource>
+</RCC>

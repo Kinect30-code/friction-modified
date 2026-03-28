@@ -1,0 +1,13 @@
+[General]
+author=Codex
+bindings="fps = $scene.fps;\nframe = $frame;\nvalue = $value;"
+categories=Core, Motion, Scale
+definitions=
+description="A gentle breathing pulse around the current value."
+highlighters=
+id=graphics.friction.breathe
+license=
+script="time = frame / fps;\n\nfrequency = 0.8;\namount = 0.05; // 5 percent\nphase = 0;\n\nreturn value * (1 + Math.sin(time * Math.PI * 2 * frequency + phase) * amount);"
+title=Breathe
+url=
+version=1

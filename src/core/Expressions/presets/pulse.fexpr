@@ -1,0 +1,13 @@
+[General]
+author=Codex
+bindings="fps = $scene.fps;\nframe = $frame;\nvalue = $value;"
+categories=Core, Motion, Scale
+definitions=
+description="A simple sine-wave pulse around the current value."
+highlighters=
+id=graphics.friction.pulse
+license=
+script="time = frame / fps;\n\nspeed = 1.5;\namplitude = 25;\nphase = 0;\n\nreturn value + Math.sin(time * Math.PI * 2 * speed + phase) * amplitude;"
+title=Pulse
+url=
+version=1

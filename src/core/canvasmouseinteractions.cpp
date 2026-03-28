@@ -1,0 +1,1528 @@
+/*
+#
+# Friction - https://friction.graphics
+#
+# Copyright (c) Ole-André Rodlie and contributors
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+# See 'README.md' for more information.
+#
+*/
+
+// Fork of enve - Copyright (C) 2016-2020 Maurycy Liebner
+
+#include "canvas.h"
+
+#include "eevent.h"
+
+#include "Private/document.h"
+#include "Private/esettings.h"
+#include "GUI/dialogsinterface.h"
+
+#include "Boxes/boundingbox.h"
+#include "Boxes/circle.h"
+#include "Boxes/rectangle.h"
+#include "Boxes/animationbox.h"
+#include "Boxes/imagebox.h"
+#include "Boxes/textbox.h"
+#include "Boxes/internallinkbox.h"
+#include "Boxes/containerbox.h"
+#include "Boxes/pathbox.h"
+#include "MovablePoints/smartctrlpoint.h"
+#include "MovablePoints/pathpointshandler.h"
+#include "Boxes/smartvectorpath.h"
+//#include "Boxes/paintbox.h"
+#include "Boxes/nullobject.h"
+
+#include "pointtypemenu.h"
+#include "pointhelpers.h"
+#include "clipboardcontainer.h"
+
+#include "PathEffects/patheffect.h"
+#include "PathEffects/patheffectsinclude.h"
+#include "RasterEffects/rastereffect.h"
+#include "RasterEffects/puppeteffect.h"
+#include "BlendEffects/layermaskeffect.h"
+
+#include "MovablePoints/smartnodepoint.h"
+#include "MovablePoints/pathpivot.h"
+#include "Animators/SmartPath/smartpathcollection.h"
+#include "Animators/SmartPath/smartpathanimator.h"
+#include <QSignalBlocker>
+
+#include <QDesktopWidget>
+#include <QScreen>
+#include <QMouseEvent>
+#include <QMenu>
+#include <QInputDialog>
+#include <QApplication>
+
+using namespace Friction::Core;
+
+namespace {
+static constexpr const char* kAeMaskStorageName = "Masks";
+static constexpr const char* kAeLegacyMaskStorageName = "__AE_LAYER_MASKS__";
+
+static PuppetEffect* findPuppetEffect(BoundingBox* const target) {
+    if(!target) {
+        return nullptr;
+    }
+    PuppetEffect* result = nullptr;
+    target->ca_execOnDescendants([target, &result](Property* const prop) {
+        if(result) {
+            return;
+        }
+        const auto puppet = enve_cast<PuppetEffect*>(prop);
+        if(!puppet) {
+            return;
+        }
+        if(puppet->getFirstAncestor<BoundingBox>() != target) {
+            return;
+        }
+        result = puppet;
+    });
+    return result;
+}
+
+static QPointF absoluteToPuppetNormalized(BoundingBox* const target,
+                                          const QPointF& absPos) {
+    if(!target) {
+        return QPointF(0.5, 0.5);
+    }
+    const QRectF rect = target->getRelBoundingRect();
+    const QPointF relPos = target->mapAbsPosToRel(absPos);
+    const qreal width = qMax<qreal>(1., rect.width());
+    const qreal height = qMax<qreal>(1., rect.height());
+    return {
+        qBound<qreal>(0., (relPos.x() - rect.left())/width, 1.),
+        qBound<qreal>(0., (relPos.y() - rect.top())/height, 1.)
+    };
+}
+
+static PuppetEffect* ensurePuppetEffect(BoundingBox* const target) {
+    if(!target) {
+        return nullptr;
+    }
+    if(auto* const existing = findPuppetEffect(target)) {
+        return existing;
+    }
+    auto effect = enve::make_shared<PuppetEffect>();
+    auto* const result = effect.get();
+    target->addRasterEffect(effect);
+    target->setRasterEffectsEnabled(true);
+    target->refreshCanvasControls();
+    return result;
+}
+
+static LayerMaskEffect* findLayerMaskEffectForPath(
+        BoundingBox* const target,
+        PathBox* const path) {
+    if(!target || !path) return nullptr;
+    LayerMaskEffect* result = nullptr;
+    target->ca_execOnDescendants([&result, path](Property* const prop) {
+        if(result) return;
+        const auto layerMask = enve_cast<LayerMaskEffect*>(prop);
+        if(!layerMask) return;
+        if(layerMask->maskPathSource() != path) return;
+        result = layerMask;
+    });
+    return result;
+}
+
+static void configureAeMaskVectorPath(PathBox* const maskPath,
+                                      const QString& maskName) {
+    if(!maskPath) {
+        return;
+    }
+    maskPath->prp_setName(maskName);
+    maskPath->prp_setDrawingOnCanvasEnabled(false);
+
+    const auto vectorMask = enve_cast<SmartVectorPath*>(maskPath);
+    if(!vectorMask) {
+        return;
+    }
+
+    auto* const paths = vectorMask->getPathAnimator();
+    if(!paths) {
+        return;
+    }
+    paths->prp_setName(QStringLiteral("Path"));
+    paths->prp_setDrawingOnCanvasEnabled(true);
+
+    const int childCount = paths->ca_getNumberOfChildren();
+    if(childCount > 0) {
+        paths->ca_setGUIProperty(paths->ca_getChildAt<Property>(0));
+    }
+    for(int i = 0; i < childCount; ++i) {
+        auto* const path = paths->ca_getChildAt<SmartPathAnimator>(i);
+        if(!path) {
+            continue;
+        }
+        path->prp_setName(QStringLiteral("Path"));
+        path->prp_setDrawingOnCanvasEnabled(true);
+    }
+}
+
+static Property* firstAeMaskEditablePath(PathBox* const maskPath) {
+    const auto vectorMask = enve_cast<SmartVectorPath*>(maskPath);
+    if(!vectorMask) {
+        return nullptr;
+    }
+    auto* const paths = vectorMask->getPathAnimator();
+    if(!paths) {
+        return nullptr;
+    }
+    if(paths->ca_getNumberOfChildren() > 0) {
+        if(auto* const firstPath = paths->ca_getChildAt<Property>(0)) {
+            return firstPath;
+        }
+    }
+    return paths;
+}
+
+static void syncAeMaskSelection(Canvas* const scene,
+                                BoundingBox* const target) {
+    if(!scene || !target) {
+        return;
+    }
+    scene->clearSelectedProps();
+    bool addedAny = false;
+    target->ca_execOnDescendants([scene, &addedAny](Property* const prop) {
+        const auto layerMask = enve_cast<LayerMaskEffect*>(prop);
+        if(!layerMask) {
+            return;
+        }
+        const auto vectorMask =
+                enve_cast<SmartVectorPath*>(layerMask->maskPathSource());
+        if(!vectorMask) {
+            return;
+        }
+        auto* const paths = vectorMask->getPathAnimator();
+        if(!paths) {
+            return;
+        }
+        const int pathCount = paths->ca_getNumberOfChildren();
+        for(int i = 0; i < pathCount; ++i) {
+            if(auto* const path = paths->ca_getChildAt<Property>(i)) {
+                scene->addToSelectedProps(path);
+                addedAny = true;
+            }
+        }
+    });
+    if(!addedAny) {
+        target->ca_execOnDescendants([scene, &addedAny](Property* const prop) {
+            if(addedAny) {
+                return;
+            }
+            const auto layerMask = enve_cast<LayerMaskEffect*>(prop);
+            if(!layerMask) {
+                return;
+            }
+            if(auto* const editable = firstAeMaskEditablePath(layerMask->maskPathSource())) {
+                scene->addToSelectedProps(editable);
+                addedAny = true;
+            }
+        });
+    }
+}
+
+static void focusAeMaskEditablePath(Canvas* const scene,
+                                    BoundingBox* const target,
+                                    PathBox* const maskPath) {
+    if(!scene || !target || !maskPath) {
+        return;
+    }
+    scene->clearBoxesSelection();
+    scene->addBoxToSelection(target);
+    scene->clearPointsSelection();
+    scene->clearSelectedProps();
+    if(auto* const editable = firstAeMaskEditablePath(maskPath)) {
+        scene->addToSelectedProps(editable);
+    }
+    scene->requestUpdate();
+}
+
+static void prepareMaskSource(PathBox* const maskPath) {
+    if(!maskPath) {
+        return;
+    }
+    const bool prevFillFlat = eSettings::instance().fLastFillFlatEnabled;
+    const bool prevStrokeFlat = eSettings::instance().fLastStrokeFlatEnabled;
+    maskPath->setVisible(false);
+    maskPath->setVisibleForScene(false);
+    if(auto* fill = maskPath->getFillSettings()) {
+        const QSignalBlocker blocker(fill);
+        fill->setPaintType(PaintType::NOPAINT);
+    }
+    if(auto* stroke = maskPath->getStrokeSettings()) {
+        const QSignalBlocker blocker(stroke);
+        stroke->setPaintType(PaintType::NOPAINT);
+    }
+    eSettings::sInstance->fLastFillFlatEnabled = prevFillFlat;
+    eSettings::sInstance->fLastStrokeFlatEnabled = prevStrokeFlat;
+    maskPath->setBlendModeSk(SkBlendMode::kSrcOver);
+}
+
+static bool isValidAeMaskTarget(BoundingBox* const box) {
+    if(!box || !box->getFirstParentLayerOrSelf()) {
+        return false;
+    }
+    if(enve_cast<PathBox*>(box)) {
+        return false;
+    }
+    return true;
+}
+
+static bool isMaskStorageContainer(ContainerBox* const box) {
+    if(!box) {
+        return false;
+    }
+    const auto name = box->prp_getName();
+    return name == QString::fromLatin1(kAeMaskStorageName) ||
+           name == QString::fromLatin1(kAeLegacyMaskStorageName);
+}
+
+static bool isAeShapeLayer(ContainerBox* const layer) {
+    if(!layer || !layer->isLayer()) {
+        return false;
+    }
+    bool hasShapeChild = false;
+    for(const auto* child : layer->getContainedBoxes()) {
+        if(!child) {
+            continue;
+        }
+        if(const auto childContainer = enve_cast<ContainerBox*>(child)) {
+            if(isMaskStorageContainer(childContainer)) {
+                continue;
+            }
+        }
+        if(enve_cast<PathBox*>(child)) {
+            hasShapeChild = true;
+            continue;
+        }
+        return false;
+    }
+    return hasShapeChild;
+}
+
+static ContainerBox* resolveAeShapeLayer(
+        BoundingBox* const currentBox,
+        const ConnContextObjList<BoundingBox*>& selectedBoxes) {
+    const auto toShapeLayer = [](BoundingBox* const box) -> ContainerBox* {
+        if(!box) {
+            return nullptr;
+        }
+        if(const auto layer = enve_cast<ContainerBox*>(box)) {
+            if(isAeShapeLayer(layer)) {
+                return layer;
+            }
+        }
+        if(const auto path = enve_cast<PathBox*>(box)) {
+            const auto layer = path->getFirstParentLayerOrSelf();
+            if(isAeShapeLayer(layer)) {
+                return layer;
+            }
+        }
+        return nullptr;
+    };
+    if(const auto layer = toShapeLayer(currentBox)) {
+        return layer;
+    }
+    for(const auto& box : selectedBoxes) {
+        if(const auto layer = toShapeLayer(box)) {
+            return layer;
+        }
+    }
+    return nullptr;
+}
+
+static ContainerBox* createAeShapeLayer(ContainerBox* const parent) {
+    if(!parent) {
+        return nullptr;
+    }
+    const auto shapeLayer = enve::make_shared<ContainerBox>(
+                parent->makeNameUniqueForContained(QStringLiteral("Shape Layer")),
+                eBoxType::layer);
+    parent->addContained(shapeLayer);
+    return shapeLayer.get();
+}
+
+template <typename ShapeT>
+static ShapeT* addAeShapeToLayer(ContainerBox* const layer,
+                                 const QString& baseName) {
+    if(!layer) {
+        return nullptr;
+    }
+    const auto shape = enve::make_shared<ShapeT>();
+    shape->prp_setName(layer->makeNameUniqueForContained(baseName));
+    layer->addContained(shape);
+    return shape.get();
+}
+}
+
+bool Canvas::isAeMaskDrawableTarget(BoundingBox * const box)
+{
+    return isValidAeMaskTarget(box);
+}
+
+QString Canvas::nextAeMaskName(BoundingBox * const target,
+                              ContainerBox * const parent)
+{
+    if(!target) return QStringLiteral("Mask 1");
+    const QString prefix = target->prp_getName() + " Mask ";
+    int maxIndex = 0;
+    const auto layer = target->getFirstParentLayerOrSelf();
+    const auto scanContainer = [prefix, &maxIndex](ContainerBox* const container) {
+        if(!container) return;
+        for(const auto* child : container->getContainedBoxes()) {
+            if(!child) continue;
+            const QString name = child->prp_getName();
+            if(!name.startsWith(prefix)) continue;
+            bool ok = false;
+            const int index = name.mid(prefix.length()).toInt(&ok);
+            if(ok) maxIndex = qMax(maxIndex, index);
+        }
+    };
+    scanContainer(parent);
+    if(layer && layer != parent) {
+        for(const auto* child : layer->getContainedBoxes()) {
+            auto* group = enve_cast<ContainerBox*>(child);
+            if(!group || group->prp_getName() != kAeMaskStorageName) continue;
+            scanContainer(group);
+            break;
+        }
+    }
+    return prefix + QString::number(maxIndex + 1);
+}
+
+void Canvas::attachLayerMaskEffect(BoundingBox * const target,
+                                  PathBox * const maskPath)
+{
+    if(!target || !maskPath) return;
+
+    ContainerBox* maskStorage = nullptr;
+    if(const auto layer = target->getFirstParentLayerOrSelf()) {
+        for(const auto* child : layer->getContainedBoxes()) {
+            auto* group = enve_cast<ContainerBox*>(child);
+            if(!group || group->prp_getName() != kAeMaskStorageName) continue;
+            maskStorage = group;
+            break;
+        }
+        if(!maskStorage) {
+            const auto storage = enve::make_shared<ContainerBox>(
+                        QString::fromLatin1(kAeMaskStorageName), eBoxType::group);
+            storage->SWT_hide();
+            storage->setVisibleForScene(false);
+            layer->addContained(storage);
+            maskStorage = storage.get();
+        }
+    }
+
+    if(maskStorage) {
+        const auto child = maskPath->ref<eBoxOrSound>();
+        auto* const oldParent = maskPath->getParentGroup();
+        if(oldParent && oldParent != maskStorage) {
+            oldParent->removeContained_k(child);
+        }
+        if(maskPath->getParentGroup() != maskStorage) {
+            maskStorage->addContained(child);
+        }
+    }
+
+    prepareMaskSource(maskPath);
+    maskPath->setParentTransformKeepTransform(target->getTransformAnimator());
+    if(enve_cast<SmartVectorPath*>(maskPath)) {
+        configureAeMaskVectorPath(maskPath, maskPath->prp_getName());
+        if(auto* const vectorMask = enve_cast<SmartVectorPath*>(maskPath)) {
+            if(auto* const pathAnimator = vectorMask->getPathAnimator()) {
+                pathAnimator->anim_setAbsFrame(target->anim_getCurrentAbsFrame());
+                pathAnimator->prp_afterChangedCurrent(UpdateReason::userChange);
+            }
+        }
+    }
+    maskPath->anim_setAbsFrame(target->anim_getCurrentAbsFrame());
+
+    const auto effect = enve::make_shared<LayerMaskEffect>();
+    effect->setClipPathSource(maskPath);
+    target->addBlendEffect(effect);
+    effect->syncMaskDisplayName();
+    target->ensureBlendEffectsVisible();
+    target->refreshCanvasControls();
+    target->prp_afterWholeInfluenceRangeChanged();
+    if(auto* const scene = target->getParentScene()) {
+        if(target->isSelected()) {
+            syncAeMaskSelection(scene, target);
+        }
+        scene->requestUpdate();
+    }
+}
+
+void Canvas::finalizeAeMaskShapePath(PathBox * const maskPath)
+{
+    if(!maskPath) return;
+    if(enve_cast<SmartVectorPath*>(maskPath)) return;
+
+    const auto storage = maskPath->getParentGroup();
+    if(!storage || storage->prp_getName() != QString::fromLatin1(kAeMaskStorageName)) {
+        return;
+    }
+    const auto target = storage->getFirstParentLayerOrSelf();
+    if(!target) return;
+
+    const auto layerMask = findLayerMaskEffectForPath(target, maskPath);
+    if(!layerMask) return;
+
+    auto* const maskParentTransform = maskPath->getParentTransform();
+    const auto vectorMask = maskPath->objectToVectorPathBox();
+    if(!vectorMask) return;
+
+    prepareMaskSource(vectorMask);
+    vectorMask->setParentTransform(maskParentTransform);
+    configureAeMaskVectorPath(vectorMask, maskPath->prp_getName());
+
+    layerMask->setClipPathSource(vectorMask);
+    maskPath->removeFromParent_k();
+    target->prp_afterWholeInfluenceRangeChanged();
+    if(auto* const scene = target->getParentScene()) {
+        focusAeMaskEditablePath(scene, target, vectorMask);
+    }
+    mDocument.actionFinished();
+}
+
+void Canvas::handleMovePathMousePressEvent(const eMouseEvent& e)
+{
+    mPressedBox = mCurrentContainer->getBoxAt(e.fPos);
+    if (e.shiftMod()) { return; }
+    if (mPressedBox ? !mPressedBox->isSelected() : true) {
+        clearBoxesSelection();
+    }
+}
+
+static BoundingBox* resolveAeMaskTarget(
+        BoundingBox* const currentBox,
+        const ConnContextObjList<BoundingBox*>& selectedBoxes) {
+    const auto toMaskTarget = [](BoundingBox* const box) -> BoundingBox* {
+        if(!box) return nullptr;
+        if(box->prp_getName() == QString::fromLatin1(kAeMaskStorageName)) {
+            return nullptr;
+        }
+        return isValidAeMaskTarget(box) ? box : nullptr;
+    };
+    if(const auto target = toMaskTarget(currentBox)) {
+        return target;
+    }
+    for(const auto& box : selectedBoxes) {
+        if(const auto target = toMaskTarget(box)) {
+            return target;
+        }
+    }
+    return nullptr;
+}
+
+void Canvas::addActionsToMenu(QMenu *const menu)
+{
+    const auto clipboard = mDocument.getBoxesClipboard();
+    if (clipboard) {
+        QAction * const pasteAct = menu->addAction(tr("Paste"), this,
+                                                   &Canvas::pasteAction);
+        pasteAct->setShortcut(Qt::CTRL + Qt::Key_V);
+    }
+
+    const auto sceneIcon = QIcon::fromTheme("sequence");
+    QMenu * const linkCanvasMenu = menu->addMenu(sceneIcon,
+                                                 tr("Link Scene"));
+    for (const auto& canvas : mDocument.fScenes) {
+        const auto slot = [this, canvas]() {
+            auto newLink = canvas->createLink(false);
+            mCurrentContainer->addContained(newLink);
+            newLink->centerPivotPosition();
+        };
+        QAction * const action = linkCanvasMenu->addAction(sceneIcon,
+                                                           canvas->prp_getName(),
+                                                           this,
+                                                           slot);
+        if (canvas == this) {
+            action->setEnabled(false);
+            action->setVisible(false);
+        }
+    }
+
+    menu->addAction(QIcon::fromTheme("duplicate"),
+                    tr("Duplicate Scene"), [this]() {
+        const auto newScene = Document::sInstance->createNewScene();
+        newScene->setCanvasSize(mWidth, mHeight);
+        newScene->setFps(mFps);
+        newScene->setFrameRange(mRange, false);
+        BoxClipboard::sCopyAndPaste(this, newScene);
+        newScene->prp_setNameAction(newScene->prp_getName() + " copy");
+    });
+
+    const auto parentWidget = menu->parentWidget();
+    menu->addAction(QIcon::fromTheme("file_movie"),
+                    tr("Map to Different Fps"), [this, parentWidget]() {
+        bool ok;
+        const qreal newFps = QInputDialog::getDouble(
+                    parentWidget, "Map to Different Fps",
+                    "New Fps:", mFps, 1, 999, 2, &ok);
+        if (ok) { changeFpsTo(newFps); }
+    });
+
+    menu->addAction(QIcon::fromTheme("sequence"),
+                    tr("Scene Properties"), [this]() {
+        const auto& dialogs = DialogsInterface::instance();
+        dialogs.showSceneSettingsDialog(this);
+    });
+}
+
+void Canvas::handleRightButtonMouseRelease(const eMouseEvent& e)
+{
+    if (e.fMouseGrabbing) {
+        cancelCurrentTransform();
+        e.fReleaseMouse();
+        mValueInput.clearAndDisableInput();
+    } else {
+        mPressedBox = mHoveredBox;
+        mPressedPoint = mHoveredPoint_d;
+        if (mPressedPoint) {
+            QMenu qMenu;
+            PointTypeMenu menu(&qMenu, this, e.fWidget);
+            if (mPressedPoint->selectionEnabled()) {
+                if (!mPressedPoint->isSelected()) {
+                    if (!e.shiftMod()) { clearPointsSelection(); }
+                    addPointToSelection(mPressedPoint);
+                }
+                for (const auto& pt : mSelectedPoints_d) { pt->canvasContextMenu(&menu); }
+            } else { mPressedPoint->canvasContextMenu(&menu); }
+            qMenu.exec(e.fGlobalPos);
+        } else if (mPressedBox) {
+            if (!mPressedBox->isSelected()) {
+                if (!e.shiftMod()) { clearBoxesSelection(); }
+                addBoxToSelection(mPressedBox);
+            }
+
+            QMenu qMenu(e.fWidget);
+            PropertyMenu menu(&qMenu, this, e.fWidget);
+            for (const auto& box : mSelectedBoxes) { box->setupCanvasMenu(&menu); }
+            qMenu.exec(e.fGlobalPos);
+        } else {
+            clearPointsSelection();
+            clearBoxesSelection();
+            QMenu menu(e.fWidget);
+            addActionsToMenu(&menu);
+            menu.exec(e.fGlobalPos);
+        }
+    }
+    mDocument.actionFinished();
+}
+
+void Canvas::clearHoveredEdge()
+{
+    mHoveredNormalSegment.reset();
+}
+
+void Canvas::handleMovePointMousePressEvent(const eMouseEvent& e)
+{
+    if (mHoveredNormalSegment.isValid()) {
+        if (e.ctrlMod()) {
+            clearPointsSelection();
+            mPressedPoint = mHoveredNormalSegment.divideAtAbsPos(e.fPos);
+        } else {
+            mCurrentNormalSegment = mHoveredNormalSegment;
+            mCurrentNormalSegmentT = mCurrentNormalSegment.closestAbsT(e.fPos);
+            clearPointsSelection();
+            clearCurrentSmartEndPoint();
+            clearLastPressedPoint();
+        }
+        clearHovered();
+    } else if (mPressedPoint) {
+        if (mPressedPoint->isSelected()) { return; }
+        if (!e.shiftMod() && mPressedPoint->selectionEnabled()) {
+            clearPointsSelection();
+        }
+        if (!mPressedPoint->selectionEnabled()) {
+            addPointToSelection(mPressedPoint);
+        }
+    }
+}
+
+
+void Canvas::handleLeftButtonMousePress(const eMouseEvent& e)
+{
+    if (e.fMouseGrabbing) {
+        //handleMouseRelease(event->pos());
+        //releaseMouseAndDontTrack();
+        return;
+    }
+
+    mDoubleClick = false;
+    //mMovesToSkip = 2;
+    mStartTransform = true;
+    mHasCreationPressPos = false;
+
+    const qreal invScale = 1/e.fScale;
+    const qreal invScaleUi = (qApp ? qApp->devicePixelRatio() : 1.0) * invScale;
+
+    if (tryStartShearGizmo(e, invScaleUi)) {
+        mPressedPoint = nullptr;
+        return;
+    }
+    if (tryStartScaleGizmo(e, invScaleUi)) {
+        mPressedPoint = nullptr;
+        return;
+    }
+    if (tryStartAxisGizmo(e, invScaleUi)) {
+        mPressedPoint = nullptr;
+        return;
+    }
+    if (tryStartRotateWithGizmo(e, invScaleUi)) {
+        mPressedPoint = nullptr;
+        return;
+    }
+
+    mPressedPoint = getPointAtAbsPos(e.fPos, mCurrentMode, invScale);
+
+    if (mRotPivot->isPointAtAbsPos(e.fPos, mCurrentMode, invScale)) {
+        return mRotPivot->setSelected(true);
+    }
+    if (mCurrentMode == CanvasMode::boxTransform) {
+        if (mHoveredPoint_d) { handleMovePointMousePressEvent(e); }
+        else { handleMovePathMousePressEvent(e); }
+    } else if (mCurrentMode == CanvasMode::pathCreate) {
+        handleAddSmartPointMousePress(e);
+    } else if (mCurrentMode == CanvasMode::pointTransform) {
+        handleMovePointMousePressEvent(e);
+    } else if (mCurrentMode == CanvasMode::puppetPinCreate) {
+        if(mPressedPoint) {
+            handleMovePointMousePressEvent(e);
+        } else {
+            BoundingBox* const target = mCurrentBox ? mCurrentBox.data() :
+                                       (mSelectedBoxes.isEmpty() ? nullptr
+                                                                 : mSelectedBoxes.last());
+            if(!target) {
+                DialogsInterface::instance().showStatusMessage(
+                    QObject::tr("Select a layer or shape before adding a puppet pin."));
+                return;
+            }
+
+            auto* const puppet = ensurePuppetEffect(target);
+            if(!puppet) {
+                return;
+            }
+
+            const QPointF snappedPos = snapEventPos(e, false);
+            const QPointF normalizedPos = absoluteToPuppetNormalized(target, snappedPos);
+            if(!puppet->addPinAtNormalized(normalizedPos)) {
+                return;
+            }
+
+            target->refreshCanvasControls();
+            emit requestUpdate();
+
+            mPressedPoint = getPointAtAbsPos(e.fPos, mCurrentMode, invScale);
+            handleMovePointMousePressEvent(e);
+        }
+    } else if (mCurrentMode == CanvasMode::drawPath) {
+        const bool manual = mDocument.fDrawPathManual;
+        bool start;
+        if (manual) {
+            start = mManualDrawPathState == ManualDrawPathState::none;
+            if (mManualDrawPathState == ManualDrawPathState::drawn) {
+                qreal dist;
+                const int forceSplit = mDrawPath.nearestForceSplit(e.fPos, &dist);
+                const int maxDist = 10;
+                if (dist < maxDist) { mDrawPath.removeForceSplit(forceSplit); }
+                else {
+                    const int smoothPt = mDrawPath.nearestSmoothPt(e.fPos, &dist);
+                    if (dist < maxDist) { mDrawPath.addForceSplit(smoothPt); }
+                }
+                mDrawPath.fit(DBL_MAX/5, false);
+            }
+        } else { start = true; }
+        if (start) {
+            mDrawPathFirst = getPointAtAbsPos(e.fPos, mCurrentMode, invScale);
+            mDrawPathFit = 0;
+            drawPathClear();
+            mDrawPathMaskTarget = resolveAeMaskTarget(
+                        mCurrentBox, mSelectedBoxes);
+            mDrawPath.lineTo(e.fPos);
+        }
+    } else if (mCurrentMode == CanvasMode::pickFillStroke ||
+               mCurrentMode == CanvasMode::pickFillStrokeEvent) {
+        //mPressedBox = getBoxAtFromAllDescendents(e.fPos);
+    } else if (mCurrentMode == CanvasMode::circleCreate) {
+        ContainerBox* const shapeLayer = resolveAeShapeLayer(
+                    mCurrentBox, mSelectedBoxes);
+        BoundingBox* maskTarget = resolveAeMaskTarget(
+                    mCurrentBox, mSelectedBoxes);
+        Circle* newPath = nullptr;
+
+        if (maskTarget && !shapeLayer) {
+            const auto shape = enve::make_shared<Circle>();
+            newPath = shape.get();
+            newPath->planCenterPivotPosition();
+            mCurrentContainer->addContained(shape);
+            const QPointF snappedPos = snapEventPos(e, false);
+            newPath->setAbsolutePos(snappedPos);
+            newPath->prp_setName(Canvas::nextAeMaskName(maskTarget, nullptr));
+            Canvas::attachLayerMaskEffect(maskTarget, newPath);
+            DialogsInterface::instance().showStatusMessage(
+                QObject::tr("AE: Created mask for %1")
+                    .arg(maskTarget->prp_getName()));
+        } else {
+            ContainerBox* targetLayer = shapeLayer;
+            if(!targetLayer) {
+                targetLayer = createAeShapeLayer(mCurrentContainer.data());
+                if(!targetLayer) {
+                    return;
+                }
+                targetLayer->setAbsolutePos(QPointF(getCanvasWidth()/2.0,
+                                                    getCanvasHeight()/2.0));
+                targetLayer->planCenterPivotPosition();
+            }
+            newPath = addAeShapeToLayer<Circle>(targetLayer, QStringLiteral("Ellipse"));
+            if(!newPath) {
+                return;
+            }
+            const QPointF snappedPos = snapEventPos(e, false);
+            newPath->setAbsolutePos(snappedPos);
+        }
+        clearBoxesSelection();
+        if(maskTarget) {
+            addBoxToSelection(maskTarget);
+        } else {
+            addBoxToSelection(newPath);
+        }
+        mCurrentCircle = newPath;
+        mCreationPressPos = newPath->getAbsolutePos();
+        mHasCreationPressPos = true;
+    } else if (mCurrentMode == CanvasMode::nullCreate) {
+        const auto newPath = enve::make_shared<NullObject>();
+        newPath->planCenterPivotPosition();
+        mCurrentContainer->addContained(newPath);
+        newPath->setAbsolutePos(e.fPos);
+        clearBoxesSelection();
+        addBoxToSelection(newPath.get());
+    } else if (mCurrentMode == CanvasMode::rectCreate) {
+        ContainerBox* const shapeLayer = resolveAeShapeLayer(
+                    mCurrentBox, mSelectedBoxes);
+        BoundingBox* maskTarget = resolveAeMaskTarget(
+                    mCurrentBox, mSelectedBoxes);
+        RectangleBox* newPath = nullptr;
+
+        if (maskTarget && !shapeLayer) {
+            const auto shape = enve::make_shared<RectangleBox>();
+            newPath = shape.get();
+            newPath->planCenterPivotPosition();
+            mCurrentContainer->addContained(shape);
+            const QPointF snappedPos = snapEventPos(e, false);
+            newPath->setAbsolutePos(snappedPos);
+            newPath->prp_setName(Canvas::nextAeMaskName(maskTarget, nullptr));
+            Canvas::attachLayerMaskEffect(maskTarget, newPath);
+            DialogsInterface::instance().showStatusMessage(
+                QObject::tr("AE: Created mask for %1")
+                    .arg(maskTarget->prp_getName()));
+        } else {
+            ContainerBox* targetLayer = shapeLayer;
+            if(!targetLayer) {
+                targetLayer = createAeShapeLayer(mCurrentContainer.data());
+                if(!targetLayer) {
+                    return;
+                }
+                targetLayer->setAbsolutePos(QPointF(getCanvasWidth()/2.0,
+                                                    getCanvasHeight()/2.0));
+                targetLayer->planCenterPivotPosition();
+            }
+            newPath = addAeShapeToLayer<RectangleBox>(targetLayer, QStringLiteral("Rectangle"));
+            if(!newPath) {
+                return;
+            }
+            const QPointF snappedPos = snapEventPos(e, false);
+            newPath->setAbsolutePos(snappedPos);
+        }
+        clearBoxesSelection();
+        if(maskTarget) {
+            addBoxToSelection(maskTarget);
+        } else {
+            addBoxToSelection(newPath);
+        }
+        mCurrentRectangle = newPath;
+        mCreationPressPos = newPath->getAbsolutePos();
+        mHasCreationPressPos = true;
+    } else if (mCurrentMode == CanvasMode::textCreate) {
+        if (enve_cast<TextBox*>(mHoveredBox)) {
+            setCurrentBox(mHoveredBox);
+            emit openTextEditor();
+        } else {
+            const auto newPath = enve::make_shared<TextBox>();
+            newPath->planCenterPivotPosition();
+            newPath->setFontFamilyAndStyle(mDocument.fFontFamily,
+                                           mDocument.fFontStyle);
+            newPath->setFontSize(mDocument.fFontSize);
+            mCurrentContainer->addContained(newPath);
+            newPath->setAbsolutePos(e.fPos);
+            if (mDocument.fAeVerticalText) {
+                if (const auto transform = newPath->getBoxTransformAnimator()) {
+                    if (const auto rotation = transform->getRotAnimator()) {
+                        rotation->setCurrentBaseValue(90.0);
+                    }
+                }
+            }
+            mCurrentTextBox = newPath.get();
+            clearBoxesSelection();
+            addBoxToSelection(newPath.get());
+            emit openTextEditor();
+        }
+    }
+}
+
+void Canvas::cancelCurrentTransform()
+{
+    mGizmos.fState.rotatingFromHandle = false;
+
+    if (mCurrentMode == CanvasMode::pointTransform ||
+        mCurrentMode == CanvasMode::puppetPinCreate) {
+        if (mCurrentNormalSegment.isValid()) {
+            mCurrentNormalSegment.cancelPassThroughTransform();
+        } else { cancelSelectedPointsTransform(); }
+    } else if (mCurrentMode == CanvasMode::boxTransform) {
+        if (mRotPivot->isSelected()) { mRotPivot->cancelTransform(); }
+        else { cancelSelectedBoxesTransform(); }
+    } else if (mCurrentMode == CanvasMode::pathCreate) {
+        //
+    } else if (mCurrentMode == CanvasMode::pickFillStroke ||
+               mCurrentMode == CanvasMode::pickFillStrokeEvent) {
+        //mCanvasWindow->setCanvasMode(MOVE_PATH);
+    }
+    mValueInput.clearAndDisableInput();
+    mTransMode = TransformMode::none;
+    cancelCurrentTransformGimzos();
+}
+
+void Canvas::handleMovePointMouseRelease(const eMouseEvent &e)
+{
+    if (mRotPivot->isSelected()) {
+        mRotPivot->setSelected(false);
+    } else if (mTransMode == TransformMode::rotate ||
+               mTransMode == TransformMode::scale ||
+               mTransMode == TransformMode::shear) {
+        finishSelectedPointsTransform();
+        mTransMode = TransformMode::none;
+    } else if (mSelecting) {
+        mSelecting = false;
+        if (!e.shiftMod()) { clearPointsSelection(); }
+        moveSecondSelectionPoint(e.fPos);
+        selectAndAddContainedPointsToSelection(mSelectionRect);
+    } else if (mStartTransform) {
+        if (mPressedPoint) {
+            if (mPressedPoint->isCtrlPoint()) { removePointFromSelection(mPressedPoint); }
+            else if (e.shiftMod()) {
+                if (mPressedPoint->isSelected()) { removePointFromSelection(mPressedPoint); }
+                else { addPointToSelection(mPressedPoint); }
+            } else { selectOnlyLastPressedPoint(); }
+        } else {
+            mPressedBox = mCurrentContainer->getBoxAt(e.fPos);
+            if (mPressedBox ? !!enve_cast<ContainerBox*>(mPressedBox) : true) {
+                const auto pressedBox = getBoxAtFromAllDescendents(e.fPos);
+                if (!pressedBox) {
+                    if (!e.shiftMod()) { clearPointsSelectionOrDeselect(); }
+                } else {
+                    clearPointsSelection();
+                    clearCurrentSmartEndPoint();
+                    clearLastPressedPoint();
+                    setCurrentBoxesGroup(pressedBox->getParentGroup());
+                    addBoxToSelection(pressedBox);
+                    mPressedBox = pressedBox;
+                }
+            }
+            if (mPressedBox) {
+                if (e.shiftMod()) {
+                    if (mPressedBox->isSelected()) { removeBoxFromSelection(mPressedBox); }
+                    else { addBoxToSelection(mPressedBox); }
+                } else {
+                    clearPointsSelection();
+                    clearCurrentSmartEndPoint();
+                    clearLastPressedPoint();
+                    selectOnlyLastPressedBox();
+                }
+            }
+        }
+    } else {
+        finishSelectedPointsTransform();
+        if (mPressedPoint) {
+            if (!mPressedPoint->selectionEnabled()) { removePointFromSelection(mPressedPoint); }
+        }
+    }
+}
+
+void Canvas::handleMovePathMouseRelease(const eMouseEvent &e)
+{
+    if (mRotPivot->isSelected()) {
+        if (!mStartTransform) { mRotPivot->finishTransform(); }
+        mRotPivot->setSelected(false);
+    } else if (mTransMode == TransformMode::rotate) {
+        pushUndoRedoName("Rotate Objects");
+        finishSelectedBoxesTransform();
+    } else if (mTransMode == TransformMode::scale) {
+        pushUndoRedoName("Scale Objects");
+        finishSelectedBoxesTransform();
+    } else if (mTransMode == TransformMode::shear) {
+        pushUndoRedoName("Shear Objects");
+        finishSelectedBoxesTransform();
+    } else if (mStartTransform) {
+        mSelecting = false;
+        if (e.shiftMod() && mPressedBox) {
+            if (mPressedBox->isSelected()) { removeBoxFromSelection(mPressedBox); }
+            else { addBoxToSelection(mPressedBox); }
+        } else { selectOnlyLastPressedBox(); }
+    } else if (mSelecting) {
+        moveSecondSelectionPoint(e.fPos);
+        mCurrentContainer->addContainedBoxesToSelection(mSelectionRect);
+        mSelecting = false;
+    } else {
+        pushUndoRedoName("Move Objects");
+        finishSelectedBoxesTransform();
+    }
+}
+
+SmartNodePoint* drawPathAppend(const QList<qCubicSegment2D>& fitted,
+                               SmartNodePoint* endPoint)
+{
+    for (int i = 0; i < fitted.count(); i++) {
+        const auto& seg = fitted.at(i);
+        endPoint->moveC2ToAbsPos(seg.c1());
+        endPoint = endPoint->actionAddPointAbsPos(seg.p3());
+        endPoint->moveC0ToAbsPos(seg.c2());
+    }
+    return endPoint;
+}
+
+qsptr<SmartVectorPath> drawPathNew(QList<qCubicSegment2D>& fitted)
+{
+    const QPointF& begin = fitted.first().p0();
+    const QPointF& end = fitted.last().p3();
+    const qreal beginEndDist = pointToLen(end - begin);
+    const bool close = beginEndDist < 7 && fitted.count() > 1;
+    if (close) { fitted.last().setP3(begin); }
+    const auto newPath = enve::make_shared<SmartVectorPath>();
+    CubicList fittedList(fitted);
+    newPath->loadSkPath(fittedList.toSkPath());
+    newPath->planCenterPivotPosition();
+    return newPath;
+}
+
+void Canvas::drawPathClear()
+{
+    mManualDrawPathState = ManualDrawPathState::none;
+    mDrawPathFirst.clear();
+    mDrawPath.clear();
+    mDrawPathTmp.reset();
+    mDrawPathMaskTarget = nullptr;
+}
+
+void Canvas::drawPathFinish(const qreal invScale)
+{
+    mDrawPath.smooth(mDocument.fDrawPathSmooth);
+    const bool manual = mDocument.fDrawPathManual;
+    const qreal error = manual ? DBL_MAX/5 :
+                                 mDocument.fDrawPathMaxError;
+    mDrawPath.fit(error, !manual);
+
+    auto& fitted = mDrawPath.getFitted();
+    if (!fitted.isEmpty()) {
+        const QPointF& begin = fitted.first().p0();
+        const QPointF& end = fitted.last().p3();
+        const auto beginHover = getPointAtAbsPos(begin, mCurrentMode, invScale);
+        const auto beginNode = enve_cast<SmartNodePoint*>(beginHover);
+        const auto endHover = getPointAtAbsPos(end, mCurrentMode, invScale);
+        const auto endNode = enve_cast<SmartNodePoint*>(endHover);
+        const bool beginEndPoint = beginNode ? beginNode->isEndPoint() : false;
+        const bool endEndPoint = endNode ? endNode->isEndPoint() : false;
+        bool createNew = false;
+
+        if (beginNode && endNode && beginNode != endNode) {
+            const auto beginParent = beginNode->getTargetAnimator();
+            const auto endParent = endNode->getTargetAnimator();
+            const bool sampeParent = beginParent == endParent;
+
+            if (sampeParent) {
+                const auto transform = beginNode->getTransform();
+                const auto matrix = transform->getTotalTransform();
+                const auto invMatrix = matrix.inverted();
+                std::for_each(fitted.begin(), fitted.end(),
+                              [&invMatrix](qCubicSegment2D& seg) {
+                    seg.transform(invMatrix);
+                });
+                const int beginId = beginNode->getNodeId();
+                const int endId = endNode->getNodeId();
+                beginParent->actionReplaceSegments(beginId, endId, fitted);
+            } else if (beginEndPoint && endEndPoint) {
+                const bool reverse = endNode->hasNextPoint();
+
+                const auto orderedBegin = reverse ? endNode : beginNode;
+                const auto orderedEnd = reverse ? beginNode : endNode;
+
+                if (orderedEnd->hasNextPoint() || !endNode->hasNextPoint()) {
+                    std::reverse(fitted.begin(), fitted.end());
+                    std::for_each(fitted.begin(), fitted.end(),
+                                  [](qCubicSegment2D& seg) { seg.reverse(); });
+                }
+
+                const auto& lastSeg = fitted.last();
+                const auto mid = fitted.mid(0, fitted.count() - 1);
+                const auto last = drawPathAppend(mid, orderedEnd);
+                last->moveC2ToAbsPos(lastSeg.c1());
+                orderedBegin->moveC0ToAbsPos(lastSeg.c2());
+                last->actionConnectToNormalPoint(orderedBegin);
+            } else { createNew = true; }
+        } else if (beginNode && beginEndPoint) {
+            drawPathAppend(fitted, beginNode);
+        } else if (endNode && endEndPoint) {
+            drawPathAppend(fitted, endNode);
+        } else { createNew = true; }
+        if (createNew) {
+            const auto maskTarget = mDrawPathMaskTarget;
+            auto * const insertParent = mCurrentContainer.data();
+            const auto matrix = insertParent->getTotalTransform();
+            const auto invMatrix = matrix.inverted();
+            std::for_each(fitted.begin(), fitted.end(),
+                          [&invMatrix](qCubicSegment2D& seg) {
+                seg.transform(invMatrix);
+            });
+            const auto newPath = drawPathNew(fitted);
+            insertParent->addContained(newPath);
+            if (maskTarget) {
+                newPath->prp_setName(nextAeMaskName(maskTarget, nullptr));
+                attachLayerMaskEffect(maskTarget, newPath.get());
+                DialogsInterface::instance().showStatusMessage(
+                    QObject::tr("AE: Created mask for %1")
+                        .arg(maskTarget->prp_getName()));
+            }
+            clearBoxesSelection();
+            if(maskTarget) {
+                addBoxToSelection(maskTarget);
+            } else {
+                addBoxToSelection(newPath.get());
+            }
+        }
+    }
+
+    drawPathClear();
+}
+
+const QColor Canvas::pickPixelColor(const QPoint &pos)
+{
+    // try the "safe" option first
+    if (QApplication::activeWindow()) {
+        const auto nPos = QApplication::activeWindow()->mapFromGlobal(pos);
+        return QApplication::activeWindow()->grab(QRect(QPoint(nPos.x(), nPos.y()),
+                                                        QSize(1, 1))).toImage().pixel(0, 0);
+    }
+
+    // "insecure" fallback (will not work in a sandbox or wayland)
+    // will prompt for permissions on macOS
+    // Windows and X11 don't care
+    QScreen *screen = QApplication::screenAt(pos);
+    if (!screen) { return QColor(); }
+    WId wid = QApplication::desktop()->winId();
+    const auto pix = screen->grabWindow(wid, pos.x(), pos.y(), 1, 1);
+    return QColor(pix.toImage().pixel(0, 0));
+}
+
+void Canvas::applyPixelColor(const QColor &color,
+                             const bool &fill)
+{
+    if (!color.isValid()) { return; }
+    for (const auto& box : mSelectedBoxes) {
+        if (fill) {
+            auto settings = box->getFillSettings();
+            if (settings) {
+                if (settings->getPaintType() == PaintType::NOPAINT) {
+                    settings->setPaintType(PaintType::FLATPAINT);
+                }
+                settings->setCurrentColor(color, true);
+                box->fillStrokeSettingsChanged();
+            }
+        } else {
+            auto settings = box->getStrokeSettings();
+            if (settings) {
+                if (settings->getPaintType() == PaintType::NOPAINT) {
+                    settings->setPaintType(PaintType::FLATPAINT);
+                }
+                settings->setCurrentColor(color, true);
+                box->fillStrokeSettingsChanged();
+            }
+        }
+    }
+}
+
+void Canvas::handleLeftMouseRelease(const eMouseEvent &e)
+{
+    if (e.fMouseGrabbing) { e.fReleaseMouse(); }
+
+    handleLeftMouseGizmos();
+
+    if (mCurrentNormalSegment.isValid()) {
+        if (!mStartTransform) { mCurrentNormalSegment.finishPassThroughTransform(); }
+        mHoveredNormalSegment = mCurrentNormalSegment;
+        mHoveredNormalSegment.generateSkPath();
+        mCurrentNormalSegment.reset();
+        return;
+    }
+    if (mDoubleClick) { return; }
+    if (mCurrentMode == CanvasMode::pointTransform ||
+        mCurrentMode == CanvasMode::puppetPinCreate) {
+        handleMovePointMouseRelease(e);
+    } else if (mCurrentMode == CanvasMode::boxTransform) {
+        if (!mPressedPoint) { handleMovePathMouseRelease(e); }
+        else {
+            handleMovePointMouseRelease(e);
+            clearPointsSelection();
+        }
+    } else if (mCurrentMode == CanvasMode::pathCreate) {
+        handleAddSmartPointMouseRelease(e);
+    } else if (mCurrentMode == CanvasMode::drawPath) {
+        const bool manual = mDocument.fDrawPathManual;
+        if (manual) { mManualDrawPathState = ManualDrawPathState::drawn; }
+        else { drawPathFinish(1/e.fScale); }
+    } else if (mCurrentMode == CanvasMode::pickFillStrokeEvent) {
+        emit currentPickedColor(pickPixelColor(e.fGlobalPos));
+    }
+    mValueInput.clearAndDisableInput();
+    mTransMode = TransformMode::none;
+}
+
+QPointF Canvas::getMoveByValueForEvent(const eMouseEvent &e)
+{
+    if (mValueInput.inputEnabled()) {
+        return mValueInput.getPtValue();
+    }
+    const QPointF moveByPoint = e.fPos - e.fLastPressPos;
+    mValueInput.setDisplayedValue(moveByPoint);
+    if (mValueInput.yOnlyMode()) { return {0, moveByPoint.y()}; }
+    else if (mValueInput.xOnlyMode()) { return {moveByPoint.x(), 0}; }
+    return moveByPoint;
+}
+
+void Canvas::handleMovePointMouseMove(const eMouseEvent &e)
+{
+    if (mRotPivot->isSelected()) {
+        if (mStartTransform) { mRotPivot->startTransform(); }
+        mRotPivot->moveByAbs(getMoveByValueForEvent(e));
+    } else if (mTransMode == TransformMode::scale) {
+        scaleSelected(e);
+    } else if (mTransMode == TransformMode::shear) {
+        shearSelected(e);
+    } else if (mTransMode == TransformMode::rotate) {
+        rotateSelected(e);
+    } else if (mCurrentNormalSegment.isValid()) {
+        if (mStartTransform) { mCurrentNormalSegment.startPassThroughTransform(); }
+        mCurrentNormalSegment.makePassThroughAbs(e.fPos, mCurrentNormalSegmentT);
+    } else {
+        const auto& gridSettings = mDocument.getGrid()->getSettings();
+        const bool snappingActive = gridSettings.snapEnabled;
+        const bool boxesSnapEnabled = snappingActive && gridSettings.snapToBoxes;
+        const bool includeSelectedBounds = boxesSnapEnabled && mPressedPoint && mPressedPoint->isPivotPoint();
+
+        if (mPressedPoint) {
+            addPointToSelection(mPressedPoint);
+            const auto mods = QGuiApplication::queryKeyboardModifiers();
+            if (mPressedPoint->isSmartNodePoint()) {
+                if (mods & Qt::ControlModifier) {
+                    const auto nodePt = static_cast<SmartNodePoint*>(mPressedPoint.data());
+                    if (nodePt->isDissolved()) {
+                        const int selId = nodePt->moveToClosestSegment(e.fPos);
+                        const auto handler = nodePt->getHandler();
+                        const auto dissPt = handler->getPointWithId<SmartNodePoint>(selId);
+                        if (nodePt->getNodeId() != selId) {
+                            removePointFromSelection(nodePt);
+                            addPointToSelection(dissPt);
+                        }
+                        mPressedPoint = dissPt;
+                        return;
+                    }
+                } else if (mods & Qt::ShiftModifier) {
+                    const auto nodePt = static_cast<SmartNodePoint*>(mPressedPoint.data());
+                    const auto nodePtAnim = nodePt->getTargetAnimator();
+                    if (nodePt->isNormal()) {
+                        SmartNodePoint* closestNode = nullptr;
+                        qreal minDist = 10/e.fScale;
+                        for (const auto& sBox : mSelectedBoxes) {
+                            if (!enve_cast<SmartVectorPath*>(sBox)) { continue; }
+                            const auto sPatBox = static_cast<SmartVectorPath*>(sBox);
+                            const auto sAnim = sPatBox->getPathAnimator();
+                            for (int i = 0; i < sAnim->ca_getNumberOfChildren(); i++) {
+                                const auto sPath = sAnim->getChild(i);
+                                if (sPath == nodePtAnim) { continue; }
+                                const auto sHandler = static_cast<PathPointsHandler*>(sPath->getPointsHandler());
+                                const auto node = sHandler->getClosestNode(e.fPos, minDist);
+                                if (node) {
+                                    closestNode = node;
+                                    minDist = pointToLen(closestNode->getAbsolutePos() - e.fPos);
+                                }
+                            }
+                        }
+                        if (closestNode) {
+                            const bool reverse = mods & Qt::ALT;
+
+                            const auto sC0 = reverse ? closestNode->getC2Pt() : closestNode->getC0Pt();
+                            const auto sC2 = reverse ? closestNode->getC0Pt() : closestNode->getC2Pt();
+
+                            nodePt->setCtrlsMode(closestNode->getCtrlsMode());
+                            nodePt->setC0Enabled(sC0->enabled());
+                            nodePt->setC2Enabled(sC2->enabled());
+                            nodePt->setAbsolutePos(closestNode->getAbsolutePos());
+                            nodePt->getC0Pt()->setAbsolutePos(sC0->getAbsolutePos());
+                            nodePt->getC2Pt()->setAbsolutePos(sC2->getAbsolutePos());
+                        } else {
+                            if (mStartTransform) { mPressedPoint->startTransform(); }
+                            mPressedPoint->moveByAbs(getMoveByValueForEvent(e));
+                        }
+                        return;
+                    }
+                }
+            }
+
+            if (!mPressedPoint->selectionEnabled()) {
+                if (mStartTransform) {
+                    mPressedPoint->startTransform();
+                    mGridMoveStartPivot = mPressedPoint->getAbsolutePos();
+                }
+
+                auto moveBy = getMoveByValueForEvent(e);
+                if (snappingActive) {
+                    const auto snapped = moveBySnapTargets(e.fModifiers,
+                                                           moveBy,
+                                                           gridSettings,
+                                                           includeSelectedBounds,
+                                                           false,
+                                                           false);
+                    if (snapped.first) { moveBy = snapped.second; }
+                }
+
+                mPressedPoint->moveByAbs(moveBy);
+                return;
+            }
+        }
+
+        if (mStartTransform && !mSelectedPoints_d.isEmpty()) {
+            mGridMoveStartPivot = getSelectedPointsAbsPivotPos();
+        }
+
+        auto moveBy = getMoveByValueForEvent(e);
+        if (snappingActive && !mSelectedPoints_d.isEmpty()) {
+            const auto snapped = moveBySnapTargets(e.fModifiers,
+                                                   moveBy,
+                                                   gridSettings,
+                                                   includeSelectedBounds,
+                                                   false,
+                                                   false);
+            if (snapped.first) { moveBy = snapped.second; }
+        }
+
+        moveSelectedPointsByAbs(moveBy, mStartTransform);
+    }
+}
+
+void Canvas::scaleSelected(const eMouseEvent& e)
+{
+    const QPointF absPos = mRotPivot->getAbsolutePos();
+    const QPointF distMoved = e.fPos - e.fLastPressPos;
+
+    qreal scaleBy;
+    if (mValueInput.inputEnabled()) { scaleBy = mValueInput.getValue(); }
+    else {
+        scaleBy = 1 + distSign({distMoved.x(), -distMoved.y()})*0.003;
+    }
+
+    qreal scaleX;
+    qreal scaleY;
+    if (mValueInput.xOnlyMode()) {
+        scaleX = scaleBy;
+        scaleY = 1;
+    } else if (mValueInput.yOnlyMode()) {
+        scaleX = 1;
+        scaleY = scaleBy;
+    } else {
+        scaleX = scaleBy;
+        scaleY = scaleBy;
+    }
+
+    if (mCurrentMode == CanvasMode::boxTransform) {
+        scaleSelectedBy(scaleX,
+                        scaleY,
+                        absPos,
+                        mStartTransform);
+    } else {
+        scaleSelectedPointsBy(scaleX,
+                              scaleY,
+                              absPos,
+                              mStartTransform);
+    }
+
+    if (!mValueInput.inputEnabled()) {
+        mValueInput.setDisplayedValue({scaleX, scaleY});
+    }
+    mRotPivot->setMousePos(e.fPos);
+}
+
+void Canvas::shearSelected(const eMouseEvent& e)
+{
+    const QPointF absPos = mRotPivot->getAbsolutePos();
+    const QPointF distMoved = e.fPos - e.fLastPressPos;
+
+    qreal shearBy;
+    if (mValueInput.inputEnabled()) {
+        shearBy = mValueInput.getValue();
+    } else {
+        qreal axisDelta;
+        if (mValueInput.xOnlyMode()) { axisDelta = -distMoved.x(); }
+        else { axisDelta = distMoved.y(); }
+        shearBy = axisDelta * 0.01;
+    }
+
+    qreal shearX = 0;
+    qreal shearY = 0;
+    if (mValueInput.xOnlyMode()) { shearX = shearBy; }
+    else if (mValueInput.yOnlyMode()) { shearY = shearBy; }
+    else {
+        shearX = shearBy;
+        shearY = shearBy;
+    }
+
+    if (mCurrentMode == CanvasMode::boxTransform) {
+        shearSelectedBy(shearX,
+                        shearY,
+                        absPos,
+                        mStartTransform);
+    } else {
+        shearSelectedPointsBy(shearX,
+                              shearY,
+                              absPos,
+                              mStartTransform);
+    }
+
+    if (!mValueInput.inputEnabled()) {
+        mValueInput.setDisplayedValue({shearX, shearY});
+    }
+    mRotPivot->setMousePos(e.fPos);
+}
+
+void Canvas::rotateSelected(const eMouseEvent& e)
+{
+    const QPointF absPos = mRotPivot->getAbsolutePos();
+    qreal rot;
+    if (mValueInput.inputEnabled()) {
+        rot = mValueInput.getValue();
+    } else {
+        const QLineF dest_line(absPos, e.fPos);
+        const QLineF prev_line(absPos, e.fLastPressPos);
+        qreal d_rot = dest_line.angleTo(prev_line);
+        if (d_rot > 180) { d_rot -= 360; }
+        if (mLastDRot - d_rot > 90) { mRotHalfCycles += 2; }
+        else if (mLastDRot - d_rot < -90) { mRotHalfCycles -= 2; }
+        mLastDRot = d_rot;
+        rot = d_rot + mRotHalfCycles*180;
+    }
+
+    if (mCurrentMode == CanvasMode::boxTransform) {
+        rotateSelectedBy(rot, absPos, mStartTransform);
+    } else {
+        rotateSelectedPointsBy(rot, absPos, mStartTransform);
+    }
+
+    if (!mValueInput.inputEnabled()) {
+        mValueInput.setDisplayedValue(rot);
+    }
+    mRotPivot->setMousePos(e.fPos);
+}
+
+bool Canvas::prepareRotation(const QPointF &startPos,
+                             bool fromHandle)
+{
+    if (mCurrentMode != CanvasMode::boxTransform &&
+        mCurrentMode != CanvasMode::pointTransform) { return false; }
+    if (mSelectedBoxes.isEmpty()) { return false; }
+    if (mCurrentMode == CanvasMode::pointTransform) {
+        if (mSelectedPoints_d.isEmpty()) { return false; }
+    }
+
+    mGizmos.fState.rotatingFromHandle = fromHandle;
+    mValueInput.clearAndDisableInput();
+    mValueInput.setupRotate();
+
+    if (fromHandle) { setGizmosSuppressed(true); }
+
+    mRotPivot->setMousePos(startPos);
+    mTransMode = TransformMode::rotate;
+    mRotHalfCycles = 0;
+    mLastDRot = 0;
+
+    mDoubleClick = false;
+    mStartTransform = true;
+    return true;
+}
+
+void Canvas::handleMovePathMouseMove(const eMouseEvent& e)
+{
+    if (mRotPivot->isSelected()) {
+        if (mStartTransform) { mRotPivot->startTransform(); }
+        mRotPivot->moveByAbs(getMoveByValueForEvent(e));
+    } else if (mTransMode == TransformMode::scale) {
+        scaleSelected(e);
+    } else if (mTransMode == TransformMode::shear) {
+        shearSelected(e);
+    } else if (mTransMode == TransformMode::rotate) {
+        rotateSelected(e);
+    } else {
+        if (mPressedBox) {
+            addBoxToSelection(mPressedBox);
+            mPressedBox = nullptr;
+        }
+
+        const auto& gridSettings = mDocument.getGrid()->getSettings();
+
+        if (mStartTransform && !mSelectedBoxes.isEmpty()) {
+            collectAnchorOffsets(gridSettings);
+        }
+
+        auto moveBy = getMoveByValueForEvent(e);
+        if (gridSettings.snapEnabled && !mSelectedBoxes.isEmpty()) {
+            const auto snapped = moveBySnapTargets(e.fModifiers,
+                                                   moveBy,
+                                                   gridSettings,
+                                                   false,
+                                                   true,
+                                                   true);
+            if (snapped.first) { moveBy = snapped.second; }
+        }
+
+        moveSelectedBoxesByAbs(moveBy, mStartTransform);
+    }
+}
+
+void Canvas::updateTransformation(const eKeyEvent &e)
+{
+    if (mSelecting) {
+        moveSecondSelectionPoint(e.fPos);
+    } else if (mCurrentMode == CanvasMode::pointTransform ||
+               mCurrentMode == CanvasMode::puppetPinCreate) {
+        handleMovePointMouseMove(e);
+    } else if (mCurrentMode == CanvasMode::boxTransform) {
+        if (!mPressedPoint) { handleMovePathMouseMove(e); }
+        else { handleMovePointMouseMove(e); }
+    } else if (mCurrentMode == CanvasMode::pathCreate) {
+        handleAddSmartPointMouseMove(e);
+    }
+}

@@ -1,0 +1,57 @@
+latest_version: 0.9.6.1
+unstable_version: 1.0.0-rc.2
+github_release_suffix_windows_setup: "setup-win64.exe"
+github_release_suffix_windows_portable: "windows-x64.7z"
+github_release_suffix_linux_portable: "linux-x86_64.tar.xz"
+github_release_suffix_linux_appimage: "x86_64.AppImage"
+github_release_suffix_linux_rpm: "1.x86_64.rpm"
+github_release_suffix_mac_intel_dmg: "x86_64.dmg"
+github_release_suffix_mac_arm_dmg: "arm64.dmg"
+github_release_url: "https://github.com/friction2d/friction/releases/tag/"
+github_download_url: "https://github.com/friction2d/friction/releases/download/"
+sourceforge_download_url: "https://sourceforge.net/projects/friction/files/"
+future: true
+title: Friction
+domain: "friction.graphics"
+url: "https://friction.graphics"
+description: "Friction is a powerful and versatile motion graphics application that allows you to create vector and raster animations for web and video."
+permalink: /:categories/:title:output_ext
+exclude:
+  - README.md
+  - Gemfile
+  - CNAME
+  - LICENSE
+  - .gitignore
+  - .gitmodules
+  - build
+  - wip
+  - Generate/
+  - "*.frag"
+  - "*.gre"
+  - "*.sh"
+  - pandoc
+  - about.html
+  - privacy.html
+  - shortcuts.html
+  - "*.qrc"
+  - 3rdparty
+  - about.md
+  - pdf/
+  - build-docs/
+  - _config_app.yml
+  - _layouts_app/
+  - assets/style-docs.css
+  - branding/
+nav:
+  - title: News
+    url: /news/
+    ext: false
+  - title: Download
+    url: /download.html
+  - title: Documentation
+    url: /documentation/
+    ext: false
+    ext: false
+  - title: Community
+    url: /community.html
+    ext: false

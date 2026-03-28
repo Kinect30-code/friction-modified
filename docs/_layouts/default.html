@@ -1,0 +1,21 @@
+{% include assign.html %}
+<!DOCTYPE html>
+<html lang="{{ site.lang | default: "en-US" }}">
+    {% include head.html %}
+    <body>
+        <div id="headerDefault">
+            {% include header.html %}
+        </div>
+        <div id="content">
+            <div id="contentInner">
+                {{ content }}
+                {% if page.permalink == 'documentation/shaders/' %}
+                {% include shaders.html %}
+                {% endif %}
+            </div>
+        </div>
+        <div id="footer">
+            {% include footer.html %}
+        </div>
+    </body>
+</html>

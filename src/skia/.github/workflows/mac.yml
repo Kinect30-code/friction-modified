@@ -1,0 +1,11 @@
+name: macOS
+
+on: [push, pull_request]
+
+jobs:
+  sequoia:
+    runs-on: macos-15
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build
+      run: OSX=1 ./ci.sh

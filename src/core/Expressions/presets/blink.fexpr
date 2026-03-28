@@ -1,0 +1,13 @@
+[General]
+author=Codex
+bindings="fps = $scene.fps;\nframe = $frame;\nvalue = $value;"
+categories=Core, Utility, Opacity
+definitions=
+description="Turns a value on and off in a repeating pattern. Useful for opacity or quick visibility flicker."
+highlighters=
+id=graphics.friction.blink
+license=
+script="time = frame / fps;\n\nonValue = value;\noffValue = 0;\nfrequency = 4;   // times per second\ndutyCycle = 0.5; // 0..1, how long it stays on\nphase = 0;\n\ncycle = (time * frequency + phase) % 1;\nreturn cycle < dutyCycle ? onValue : offValue;"
+title=Blink
+url=
+version=1

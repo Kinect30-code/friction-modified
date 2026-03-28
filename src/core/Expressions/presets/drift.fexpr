@@ -1,0 +1,13 @@
+[General]
+author=Codex
+bindings="fps = $scene.fps;\nframe = $frame;\nvalue = $value;"
+categories=Core, Motion, Utility
+definitions=
+description="Moves the current value at a constant speed over time."
+highlighters=
+id=graphics.friction.drift
+license=
+script="time = frame / fps;\n\nspeed = 100; // units per second\ndirection = 1;\n\nreturn value + time * speed * direction;"
+title=Drift
+url=
+version=1

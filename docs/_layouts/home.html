@@ -1,0 +1,107 @@
+{% include assign.html %}
+<!DOCTYPE html>
+<html lang="{{ site.lang | default: "en-US" }}">
+    {% include head.html %}
+    <body>
+        <video id="heroVideo" poster="{{ site.url }}/assets/hero-poster.jpg" autoplay loop muted>
+            <source src="{{ site.url }}/assets/hero-h264.mp4" type="video/mp4">
+            <source src="{{ site.url }}/assets/hero-vp9.webm" type="video/webm">
+        </video>
+        <div id="header">
+            {% include header.html %}
+        </div>
+        <div id="hero">
+            <div class="blurry">
+                <h3>{{ site.description }}</h3>
+            </div>
+        </div>
+        <div class="bigTitle"><h1>Features</h1></div>
+        <div class="blocks">
+            <div class="block darkAlpha blurry">
+                <img src="{{ site.url }}/assets/screenshots/friction-screenshot.jpg" />
+                <h2>High Performance</h2>
+                <p>Friction provides a scalable, high-performance GPU/CPU vector and raster pipeline developed in C++, using Skia and the Qt framework.</p>
+            </div>
+            <div class="block darkAlpha blurry">
+                <img src="{{ site.url }}/assets/screenshots/friction-web-animations.jpg" />
+                <h2>Animations for the Web</h2>
+                <p>Create smooth and responsive animations for the web with Friction! Using Friction, you can create animated scalable vector graphics (SVG) using the synchronized multimedia integration language (SMIL), as recommended by the World Wide Web Consortium (W3C).</p>
+            </div>
+            <div class="block darkAlpha blurry">
+                <img src="{{ site.url }}/assets/screenshots/friction-multiple-scenes.jpg" />
+                <h2>Multiple Scenes and Timelines</h2>
+                <p>Friction gives you the flexibility to work on multiple scenes at once, with multiple viewers, timelines, and graphs. Adjust it to fit your needs and screen real estate.</p>
+            </div>
+            <div class="block darkAlpha blurry">
+                <img src="{{ site.url }}/assets/screenshots/friction-expressions.jpg" />
+                <h2>Powerful Expression Editor</h2>
+                <p>Power users are welcome! Friction provides support for expressions with ECMAScript in parameters and effects. Additionally, it includes a complete code editor with autocompletion, syntax highlighting, custom functions, and more.</p>
+            </div>
+            <div class="block darkAlpha blurry">
+                <img src="{{ site.url }}/assets/screenshots/friction-text-effect.jpg" />
+                <h2>Text and Path Effects</h2>
+                <p>Friction includes a diverse range of effects for enhancing your vector graphics and text. Stay tuned for upcoming releases, as we continue to expand our collection of effects.</p>
+            </div>
+            <div class="block darkAlpha blurry">
+                <a href="/documentation/shaders"><img src="{{ site.url }}/assets/screenshots/friction-shader-effects.jpg" /></a>
+                <h2>Raster/Shader Effects</h2>
+                <p>Friction offers experimental support for user-customizable shader effects. A limited set of effects are included.</p>
+            </div>
+        </div>
+        <div class="bigTitle" id="download"><h1>Download</h1></div>
+        <div class="bigTitle darkAlpha blurry round">
+            <h2>Production release v{{ site.latest_version }}</h2>
+            <div class="downloads">
+                <a title="Download setup for Windows 10/11 x64" href="{{ site.github_download_url }}v{{ site.latest_version }}/friction-{{ site.latest_version }}-{{ site.github_release_suffix_windows_setup }}"><img class="platform" src="{{ site.url }}/assets/buttons/windows-setup.svg"></a>
+                <a title="Download portable for Windows 10/11 x64" href="{{ site.github_download_url }}v{{ site.latest_version }}/friction-{{ site.latest_version }}-{{ site.github_release_suffix_windows_portable }}"><img class="platform" src="{{ site.url }}/assets/buttons/windows-portable.svg"></a>
+                <a title="Download AppImage for Linux x86_64" href="{{ site.github_download_url }}v{{ site.latest_version }}/Friction-{{ site.latest_version }}-{{ site.github_release_suffix_linux_appimage }}"><img class="platform" src="{{ site.url }}/assets/buttons/linux-appimage.svg"></a>
+                <a title="Download portable tarball for Linux x86_64" href="{{ site.github_download_url }}v{{ site.latest_version }}/friction-{{ site.latest_version }}-{{ site.github_release_suffix_linux_portable }}"><img class="platform" src="{{ site.url }}/assets/buttons/linux-portable.svg"></a>
+                <!-- <a title="Download RPM for Enterprise Linux (VFX Reference Platform)" href="{{ site.github_download_url }}v{{ site.latest_version }}/friction-{{ site.latest_version }}-{{ site.github_release_suffix_linux_rpm }}"><img class="platform" src="{{ site.url }}/assets/buttons/rhel-rpm.svg"></a> -->
+                <!-- <a title="Download DMG for macOS 12.7+ (Apple Silicon)" href="{{ site.github_download_url }}v{{ site.latest_version }}/friction-{{ site.latest_version }}-{{ site.github_release_suffix_mac_arm_dmg }}"><img class="platform" src="{{ site.url }}/assets/buttons/macos-arm.svg"></a> -->
+                <!-- <a title="Download DMG for macOS 12.7+ (Intel)" href="{{ site.github_download_url }}v{{ site.latest_version }}/friction-{{ site.latest_version }}-{{ site.github_release_suffix_mac_intel_dmg }}"><img class="platform" src="{{ site.url }}/assets/buttons/macos-intel.svg"></a> -->
+            </div>
+            <p class="shadow noDeco"><a href="{{ site.url }}/releases/friction-{{ site.latest_version | remove: '.' }}.html">Please read the release notes before usage.</a></p>
+        </div>
+        {% if site.unstable_version != nil %}
+        <div class="bigTitle darkAlpha blurry round">
+            <h2>Development release v{{ site.unstable_version }}</h2>
+            <div class="downloads">
+                <a title="Download setup for Windows 10/11 x64" href="{{ site.github_download_url }}v{{ site.unstable_version }}/friction-{{ site.unstable_version }}-{{ site.github_release_suffix_windows_setup }}"><img class="platform" src="{{ site.url }}/assets/buttons/windows-setup.svg"></a>
+                <a title="Download portable for Windows 10/11 x64" href="{{ site.github_download_url }}v{{ site.unstable_version }}/friction-{{ site.unstable_version }}-{{ site.github_release_suffix_windows_portable }}"><img class="platform" src="{{ site.url }}/assets/buttons/windows-portable.svg"></a>
+                <a title="Download AppImage for Linux x86_64" href="{{ site.github_download_url }}v{{ site.unstable_version }}/Friction-{{ site.unstable_version }}-{{ site.github_release_suffix_linux_appimage }}"><img class="platform" src="{{ site.url }}/assets/buttons/linux-appimage.svg"></a>
+                <a title="Download portable tarball for Linux x86_64" href="{{ site.github_download_url }}v{{ site.unstable_version }}/friction-{{ site.unstable_version }}-{{ site.github_release_suffix_linux_portable }}"><img class="platform" src="{{ site.url }}/assets/buttons/linux-portable.svg"></a>
+                <!-- <a title="Download RPM for Enterprise Linux (VFX Reference Platform)" href="{{ site.github_download_url }}v{{ site.unstable_version }}/friction-{{ site.unstable_version | replace: '-beta', '.beta' }}-{{ site.github_release_suffix_linux_rpm }}"><img class="platform" src="{{ site.url }}/assets/buttons/rhel-rpm.svg"></a> -->
+                <a title="Download DMG for macOS 12.7+ (Apple Silicon)" href="{{ site.github_download_url }}v{{ site.unstable_version }}/friction-{{ site.unstable_version }}-{{ site.github_release_suffix_mac_arm_dmg }}"><img class="platform" src="{{ site.url }}/assets/buttons/macos-arm.svg"></a>
+                <a title="Download DMG for macOS 12.7+ (Intel)" href="{{ site.github_download_url }}v{{ site.unstable_version }}/friction-{{ site.unstable_version }}-{{ site.github_release_suffix_mac_intel_dmg }}"><img class="platform" src="{{ site.url }}/assets/buttons/macos-intel.svg"></a>
+            </div>
+            <p class="shadow noDeco"><a href="{{ site.url }}/releases/friction-{{ site.unstable_version | remove: '.' }}.html">Please read the release notes before usage.</a></p>
+        </div>
+        {% endif %}
+        <div class="bigTitle"><h1>Friction is powered by</h1></div>
+        <div class="blocks">
+            <div class="block darkAlpha blurry">
+                <img class="svg" src="{{ site.url }}/assets/qt-white.svg" alt="Qt® and logo is a registered trademark of The Qt Company Ltd. and its subsidiaries." />
+                <h2>The Qt Framework</h2>
+                <p>Qt® is a cross-platform application development framework for creating graphical user interfaces as well as cross-platform applications that run on various software and hardware platforms.</p>
+            </div>
+            <div class="block darkAlpha blurry">
+                <img class="svg" src="{{ site.url }}/assets/skia-white.svg" />
+                <h2>Skia Graphics Engine</h2>
+                <p>Skia is an open source 2D graphics library which provides common APIs that work across a variety of hardware and software platforms.</p>
+            </div>
+            <div class="block darkAlpha blurry">
+                <img class="svg" src="{{ site.url }}/assets/ffmpeg-white.svg" />
+                <h2>FFmpeg Multimedia Framework</h2>
+                <p>FFmpeg is the leading multimedia framework, able to decode, encode, transcode, mux, demux, stream, filter and play pretty much anything that humans and machines have created.</p>
+            </div>
+            <div class="block darkAlpha blurry">
+                <img class="svg" src="{{ site.url }}/assets/opengl-white.svg" alt="OpenGL® and the oval logo are trademarks or registered trademarks of Hewlett Packard Enterprise in the United States and/or other countries worldwide." />
+                <h2>Open Graphics Library</h2>
+                <p>The Industry's Foundation for High Performance Graphics. OpenGL® is a cross-language, cross-platform application programming interface for rendering 2D and 3D vector graphics.</p>
+            </div>
+        </div>
+        <div id="footer">
+            {% include footer.html %}
+        </div>
+    </body>
+</html>

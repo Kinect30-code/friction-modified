@@ -1,0 +1,13 @@
+[General]
+author=Codex
+bindings="fps = $scene.fps;\nframe = $frame;\nvalue = $value;"
+categories=Core, Math, Interpolation
+definitions=
+description="Linear interpolation between two values. Similar to After Effects linear() expression."
+highlighters=
+id=graphics.friction.linear
+license=
+script="time = frame / fps;\n\n// Linear interpolation settings\nstartValue = 0;\nendValue = 100;\nstartTime = 0;\nendTime = 1;\n\n// Clamp time to the range\nt = Math.max(startTime, Math.min(time, endTime));\n\n// Calculate interpolation\nif (endTime > startTime) {\n    progress = (t - startTime) / (endTime - startTime);\n    return startValue + (endValue - startValue) * progress;\n} else {\n    return startValue;\n}"
+title=Linear
+url=
+version=1

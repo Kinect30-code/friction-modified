@@ -1,0 +1,13 @@
+[General]
+author=Codex
+bindings="fps = $scene.fps;\nframe = $frame;\nvalue = $value;"
+categories=Core, Motion, Loop
+definitions=
+description="Loops a bounce from the current value toward a target offset."
+highlighters=
+id=graphics.friction.bounceLoop
+license=
+script="time = frame / fps;\n\namplitude = 200;\nloopsPerSecond = 1;\nstart = value;\nend = value + amplitude;\ncycle = (time * loopsPerSecond) % 1;\n\nreturn Math.easeOutBounce(cycle, start, end - start, 1);"
+title=Bounce Loop
+url=
+version=1

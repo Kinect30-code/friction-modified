@@ -1,0 +1,13 @@
+[General]
+author=Codex
+bindings="fps = $scene.fps;\nframe = $frame;\nvalue = $value;"
+categories=Core, Motion, Loop
+definitions=
+description="Moves back and forth around the current value."
+highlighters=
+id=graphics.friction.pingPong
+license=
+script="time = frame / fps;\n\namplitude = 150;\nloopsPerSecond = 1;\nphase = 0;\n\nloop = (time * loopsPerSecond + phase) % 2;\nif (loop > 1) {\n    loop = 2 - loop;\n}\n\nreturn value + (loop * 2 - 1) * amplitude;"
+title=Ping Pong
+url=
+version=1

@@ -1,0 +1,13 @@
+[General]
+author=Codex
+bindings="fps = $scene.fps;\nframe = $frame;\nvalue = $value;"
+categories=Core, Motion, Loop
+definitions=
+description="Loops the animation infinitely. Similar to After Effects loopOut() expression."
+highlighters=
+id=graphics.friction.loopout
+license=
+script="time = frame / fps;\n\n// Loop settings\ntype = \"cycle\"; // \"cycle\", \"pingpong\", or \"continue\"\nnumKeyframes = 2; // Number of keyframes in the loop\nloopDuration = 1; // Duration of one loop in seconds\n\n// Calculate loop position\nif (type === \"cycle\") {\n    cycleTime = time % loopDuration;\n    return value + Math.sin(cycleTime * Math.PI * 2 / loopDuration) * 100;\n} else if (type === \"pingpong\") {\n    cycleTime = (time % (loopDuration * 2));\n    if (cycleTime > loopDuration) {\n        cycleTime = loopDuration * 2 - cycleTime;\n    }\n    return value + Math.sin(cycleTime * Math.PI * 2 / loopDuration) * 100;\n} else {\n    return value + Math.sin(time * Math.PI * 2 / loopDuration) * 100;\n}"
+title=Loop Out
+url=
+version=1

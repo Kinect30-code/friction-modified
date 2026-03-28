@@ -1,0 +1,43 @@
+<RCC>
+    <qresource prefix="/styles">
+        <file>friction.qss</file>
+    </qresource>
+    <qresource prefix="/cursors">
+        <file alias="cursor-node.xpm">pixmaps/cursor-node.xpm</file>
+        <file alias="cursor_color_picker.png">pixmaps/cursor_color_picker.png</file>
+        <file alias="cursor_crosshair_precise_open.png">pixmaps/cursor_crosshair_precise_open.png</file>
+        <file alias="cursor_crosshair_open.png">pixmaps/cursor_crosshair_open.png</file>
+        <file alias="cursor-ellipse.xpm">pixmaps/cursor-ellipse.xpm</file>
+        <file alias="cursor-rect.xpm">pixmaps/cursor-rect.xpm</file>
+        <file alias="cursor-text.xpm">pixmaps/cursor-text.xpm</file>
+        <file alias="cursor-pen.xpm">pixmaps/cursor-pen.xpm</file>
+        <file alias="cursor-pencil.xpm">pixmaps/cursor-pencil.xpm</file>
+    </qresource>
+    <qresource prefix="/other"/>
+    <qresource prefix="/checkbox">
+        <file alias="Checkbox_checked_normal.png">pixmaps/Checkbox_checked_normal.png</file>
+        <file alias="Checkbox_checked_disabled.png">pixmaps/Checkbox_checked_disabled.png</file>
+    </qresource>
+    <qresource prefix="/arrows">
+        <file alias="up-arrow.png">pixmaps/up-arrow.png</file>
+        <file alias="down-arrow.png">pixmaps/down-arrow.png</file>
+    </qresource>
+    <qresource prefix="/config"/>
+    <qresource prefix="/">
+        <file>presets/render/006-friction-preset-tiff.conf</file>
+        <file>presets/render/005-friction-preset-png.conf</file>
+        <file>presets/render/004-friction-preset-prores-444-aac.conf</file>
+        <file>presets/render/003-friction-preset-prores-444.conf</file>
+        <file>presets/render/002-friction-preset-mp4-h264-mp3.conf</file>
+        <file>presets/render/001-friction-preset-mp4-h264.conf</file>
+        <file>xdg/friction.xml</file>
+        <file>xdg/friction.desktop</file>
+        <file>icons/hicolor/scalable/apps/graphics.friction.Friction.svg</file>
+        <file>icons/splash/splash-00001.png</file>
+        <file>icons/splash/splash-00002.png</file>
+        <file>icons/splash/splash-00003.png</file>
+        <file>icons/splash/splash-00004.png</file>
+        <file>icons/splash/splash-00005.png</file>
+        <file>icons/splash/splash-00006.png</file>
+    </qresource>
+</RCC>
