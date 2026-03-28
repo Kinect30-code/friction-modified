@@ -1,16 +1,23 @@
-# Friction
+# Friction Modified
 
-[![Windows](https://github.com/friction2d/friction/actions/workflows/windows.yml/badge.svg)](https://github.com/friction2d/friction/actions/workflows/windows.yml?query=branch%3Amain) [![Linux](https://github.com/friction2d/friction/actions/workflows/linux.yml/badge.svg)](https://github.com/friction2d/friction/actions/workflows/linux.yml?query=branch%3Amain) [![macOS](https://github.com/friction2d/friction/actions/workflows/macos.yml/badge.svg)](https://github.com/friction2d/friction/actions/workflows/macos.yml?query=branch%3Amain)
+这是一个基于 [Friction](https://github.com/friction2d/friction) 2D动画软件的修改版本。
 
-[Friction](https://friction.graphics) is a powerful and versatile motion graphics application that allows you to create vector and raster animations for web and video.
+**注意：这不是原作者的官方版本，请勿将问题提交给原Friction项目维护者。**
 
 ![Screenshot of Friction 1.0.0](https://friction.graphics/assets/screenshots/100/friction-100rc2-screenshot.png?v=1)
 
-## Contribute
+## 本版本的修改内容
 
-We accept any contributions, big or small. Before submitting a pull request it's recommended that you communicate with the developers first (on [GitHub](https://github.com/friction2d/friction/issues), [GitLab](https://gitlab.com/friction-graphics/friction/issues) or [Codeberg](https://codeberg.org/friction/friction/issues)).
+- WebM alpha通道支持（使用libvpx解码器）
+- AE风格的蒙版创建功能（选中轨道时使用钢笔/方块/圆圈工具会自动创建蒙版）
+- Mark快捷键从M键改为小键盘*键
+- 修复了视频alpha通道处理的颜色格式问题
 
-It's always preferred to submit pull requests against the `main` branch.
+## 原项目信息
+
+原项目：[Friction](https://friction.graphics) by Ole-André Rodlie and contributors
+
+原项目GitHub：https://github.com/friction2d/friction
 
 ## Branches and versions
 
