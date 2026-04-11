@@ -30,6 +30,8 @@
 #include "Private/document.h"
 #include "Private/esettings.h"
 #include "GUI/dialogsinterface.h"
+#include "../modules/ae_masks/aemaskmodule.h"
+#include "../modules/puppet/puppettoolmodule.h"
 
 #include "Boxes/boundingbox.h"
 #include "Boxes/circle.h"
@@ -53,7 +55,6 @@
 #include "PathEffects/patheffect.h"
 #include "PathEffects/patheffectsinclude.h"
 #include "RasterEffects/rastereffect.h"
-#include "RasterEffects/puppeteffect.h"
 #include "BlendEffects/layermaskeffect.h"
 
 #include "MovablePoints/smartnodepoint.h"
@@ -74,216 +75,6 @@ using namespace Friction::Core;
 namespace {
 static constexpr const char* kAeMaskStorageName = "Masks";
 static constexpr const char* kAeLegacyMaskStorageName = "__AE_LAYER_MASKS__";
-
-static PuppetEffect* findPuppetEffect(BoundingBox* const target) {
-    if(!target) {
-        return nullptr;
-    }
-    PuppetEffect* result = nullptr;
-    target->ca_execOnDescendants([target, &result](Property* const prop) {
-        if(result) {
-            return;
-        }
-        const auto puppet = enve_cast<PuppetEffect*>(prop);
-        if(!puppet) {
-            return;
-        }
-        if(puppet->getFirstAncestor<BoundingBox>() != target) {
-            return;
-        }
-        result = puppet;
-    });
-    return result;
-}
-
-static QPointF absoluteToPuppetNormalized(BoundingBox* const target,
-                                          const QPointF& absPos) {
-    if(!target) {
-        return QPointF(0.5, 0.5);
-    }
-    const QRectF rect = target->getRelBoundingRect();
-    const QPointF relPos = target->mapAbsPosToRel(absPos);
-    const qreal width = qMax<qreal>(1., rect.width());
-    const qreal height = qMax<qreal>(1., rect.height());
-    return {
-        qBound<qreal>(0., (relPos.x() - rect.left())/width, 1.),
-        qBound<qreal>(0., (relPos.y() - rect.top())/height, 1.)
-    };
-}
-
-static PuppetEffect* ensurePuppetEffect(BoundingBox* const target) {
-    if(!target) {
-        return nullptr;
-    }
-    if(auto* const existing = findPuppetEffect(target)) {
-        return existing;
-    }
-    auto effect = enve::make_shared<PuppetEffect>();
-    auto* const result = effect.get();
-    target->addRasterEffect(effect);
-    target->setRasterEffectsEnabled(true);
-    target->refreshCanvasControls();
-    return result;
-}
-
-static LayerMaskEffect* findLayerMaskEffectForPath(
-        BoundingBox* const target,
-        PathBox* const path) {
-    if(!target || !path) return nullptr;
-    LayerMaskEffect* result = nullptr;
-    target->ca_execOnDescendants([&result, path](Property* const prop) {
-        if(result) return;
-        const auto layerMask = enve_cast<LayerMaskEffect*>(prop);
-        if(!layerMask) return;
-        if(layerMask->maskPathSource() != path) return;
-        result = layerMask;
-    });
-    return result;
-}
-
-static void configureAeMaskVectorPath(PathBox* const maskPath,
-                                      const QString& maskName) {
-    if(!maskPath) {
-        return;
-    }
-    maskPath->prp_setName(maskName);
-    maskPath->prp_setDrawingOnCanvasEnabled(false);
-
-    const auto vectorMask = enve_cast<SmartVectorPath*>(maskPath);
-    if(!vectorMask) {
-        return;
-    }
-
-    auto* const paths = vectorMask->getPathAnimator();
-    if(!paths) {
-        return;
-    }
-    paths->prp_setName(QStringLiteral("Path"));
-    paths->prp_setDrawingOnCanvasEnabled(true);
-
-    const int childCount = paths->ca_getNumberOfChildren();
-    if(childCount > 0) {
-        paths->ca_setGUIProperty(paths->ca_getChildAt<Property>(0));
-    }
-    for(int i = 0; i < childCount; ++i) {
-        auto* const path = paths->ca_getChildAt<SmartPathAnimator>(i);
-        if(!path) {
-            continue;
-        }
-        path->prp_setName(QStringLiteral("Path"));
-        path->prp_setDrawingOnCanvasEnabled(true);
-    }
-}
-
-static Property* firstAeMaskEditablePath(PathBox* const maskPath) {
-    const auto vectorMask = enve_cast<SmartVectorPath*>(maskPath);
-    if(!vectorMask) {
-        return nullptr;
-    }
-    auto* const paths = vectorMask->getPathAnimator();
-    if(!paths) {
-        return nullptr;
-    }
-    if(paths->ca_getNumberOfChildren() > 0) {
-        if(auto* const firstPath = paths->ca_getChildAt<Property>(0)) {
-            return firstPath;
-        }
-    }
-    return paths;
-}
-
-static void syncAeMaskSelection(Canvas* const scene,
-                                BoundingBox* const target) {
-    if(!scene || !target) {
-        return;
-    }
-    scene->clearSelectedProps();
-    bool addedAny = false;
-    target->ca_execOnDescendants([scene, &addedAny](Property* const prop) {
-        const auto layerMask = enve_cast<LayerMaskEffect*>(prop);
-        if(!layerMask) {
-            return;
-        }
-        const auto vectorMask =
-                enve_cast<SmartVectorPath*>(layerMask->maskPathSource());
-        if(!vectorMask) {
-            return;
-        }
-        auto* const paths = vectorMask->getPathAnimator();
-        if(!paths) {
-            return;
-        }
-        const int pathCount = paths->ca_getNumberOfChildren();
-        for(int i = 0; i < pathCount; ++i) {
-            if(auto* const path = paths->ca_getChildAt<Property>(i)) {
-                scene->addToSelectedProps(path);
-                addedAny = true;
-            }
-        }
-    });
-    if(!addedAny) {
-        target->ca_execOnDescendants([scene, &addedAny](Property* const prop) {
-            if(addedAny) {
-                return;
-            }
-            const auto layerMask = enve_cast<LayerMaskEffect*>(prop);
-            if(!layerMask) {
-                return;
-            }
-            if(auto* const editable = firstAeMaskEditablePath(layerMask->maskPathSource())) {
-                scene->addToSelectedProps(editable);
-                addedAny = true;
-            }
-        });
-    }
-}
-
-static void focusAeMaskEditablePath(Canvas* const scene,
-                                    BoundingBox* const target,
-                                    PathBox* const maskPath) {
-    if(!scene || !target || !maskPath) {
-        return;
-    }
-    scene->clearBoxesSelection();
-    scene->addBoxToSelection(target);
-    scene->clearPointsSelection();
-    scene->clearSelectedProps();
-    if(auto* const editable = firstAeMaskEditablePath(maskPath)) {
-        scene->addToSelectedProps(editable);
-    }
-    scene->requestUpdate();
-}
-
-static void prepareMaskSource(PathBox* const maskPath) {
-    if(!maskPath) {
-        return;
-    }
-    const bool prevFillFlat = eSettings::instance().fLastFillFlatEnabled;
-    const bool prevStrokeFlat = eSettings::instance().fLastStrokeFlatEnabled;
-    maskPath->setVisible(false);
-    maskPath->setVisibleForScene(false);
-    if(auto* fill = maskPath->getFillSettings()) {
-        const QSignalBlocker blocker(fill);
-        fill->setPaintType(PaintType::NOPAINT);
-    }
-    if(auto* stroke = maskPath->getStrokeSettings()) {
-        const QSignalBlocker blocker(stroke);
-        stroke->setPaintType(PaintType::NOPAINT);
-    }
-    eSettings::sInstance->fLastFillFlatEnabled = prevFillFlat;
-    eSettings::sInstance->fLastStrokeFlatEnabled = prevStrokeFlat;
-    maskPath->setBlendModeSk(SkBlendMode::kSrcOver);
-}
-
-static bool isValidAeMaskTarget(BoundingBox* const box) {
-    if(!box || !box->getFirstParentLayerOrSelf()) {
-        return false;
-    }
-    if(enve_cast<PathBox*>(box)) {
-        return false;
-    }
-    return true;
-}
 
 static bool isMaskStorageContainer(ContainerBox* const box) {
     if(!box) {
@@ -374,131 +165,24 @@ static ShapeT* addAeShapeToLayer(ContainerBox* const layer,
 
 bool Canvas::isAeMaskDrawableTarget(BoundingBox * const box)
 {
-    return isValidAeMaskTarget(box);
+    return AeMaskModule::isDrawableTarget(box);
 }
 
 QString Canvas::nextAeMaskName(BoundingBox * const target,
                               ContainerBox * const parent)
 {
-    if(!target) return QStringLiteral("Mask 1");
-    const QString prefix = target->prp_getName() + " Mask ";
-    int maxIndex = 0;
-    const auto layer = target->getFirstParentLayerOrSelf();
-    const auto scanContainer = [prefix, &maxIndex](ContainerBox* const container) {
-        if(!container) return;
-        for(const auto* child : container->getContainedBoxes()) {
-            if(!child) continue;
-            const QString name = child->prp_getName();
-            if(!name.startsWith(prefix)) continue;
-            bool ok = false;
-            const int index = name.mid(prefix.length()).toInt(&ok);
-            if(ok) maxIndex = qMax(maxIndex, index);
-        }
-    };
-    scanContainer(parent);
-    if(layer && layer != parent) {
-        for(const auto* child : layer->getContainedBoxes()) {
-            auto* group = enve_cast<ContainerBox*>(child);
-            if(!group || group->prp_getName() != kAeMaskStorageName) continue;
-            scanContainer(group);
-            break;
-        }
-    }
-    return prefix + QString::number(maxIndex + 1);
+    return AeMaskModule::nextMaskName(target, parent);
 }
 
 void Canvas::attachLayerMaskEffect(BoundingBox * const target,
                                   PathBox * const maskPath)
 {
-    if(!target || !maskPath) return;
-
-    ContainerBox* maskStorage = nullptr;
-    if(const auto layer = target->getFirstParentLayerOrSelf()) {
-        for(const auto* child : layer->getContainedBoxes()) {
-            auto* group = enve_cast<ContainerBox*>(child);
-            if(!group || group->prp_getName() != kAeMaskStorageName) continue;
-            maskStorage = group;
-            break;
-        }
-        if(!maskStorage) {
-            const auto storage = enve::make_shared<ContainerBox>(
-                        QString::fromLatin1(kAeMaskStorageName), eBoxType::group);
-            storage->SWT_hide();
-            storage->setVisibleForScene(false);
-            layer->addContained(storage);
-            maskStorage = storage.get();
-        }
-    }
-
-    if(maskStorage) {
-        const auto child = maskPath->ref<eBoxOrSound>();
-        auto* const oldParent = maskPath->getParentGroup();
-        if(oldParent && oldParent != maskStorage) {
-            oldParent->removeContained_k(child);
-        }
-        if(maskPath->getParentGroup() != maskStorage) {
-            maskStorage->addContained(child);
-        }
-    }
-
-    prepareMaskSource(maskPath);
-    maskPath->setParentTransformKeepTransform(target->getTransformAnimator());
-    if(enve_cast<SmartVectorPath*>(maskPath)) {
-        configureAeMaskVectorPath(maskPath, maskPath->prp_getName());
-        if(auto* const vectorMask = enve_cast<SmartVectorPath*>(maskPath)) {
-            if(auto* const pathAnimator = vectorMask->getPathAnimator()) {
-                pathAnimator->anim_setAbsFrame(target->anim_getCurrentAbsFrame());
-                pathAnimator->prp_afterChangedCurrent(UpdateReason::userChange);
-            }
-        }
-    }
-    maskPath->anim_setAbsFrame(target->anim_getCurrentAbsFrame());
-
-    const auto effect = enve::make_shared<LayerMaskEffect>();
-    effect->setClipPathSource(maskPath);
-    target->addBlendEffect(effect);
-    effect->syncMaskDisplayName();
-    target->ensureBlendEffectsVisible();
-    target->refreshCanvasControls();
-    target->prp_afterWholeInfluenceRangeChanged();
-    if(auto* const scene = target->getParentScene()) {
-        if(target->isSelected()) {
-            syncAeMaskSelection(scene, target);
-        }
-        scene->requestUpdate();
-    }
+    AeMaskModule::attachLayerMaskEffect(target, maskPath);
 }
 
 void Canvas::finalizeAeMaskShapePath(PathBox * const maskPath)
 {
-    if(!maskPath) return;
-    if(enve_cast<SmartVectorPath*>(maskPath)) return;
-
-    const auto storage = maskPath->getParentGroup();
-    if(!storage || storage->prp_getName() != QString::fromLatin1(kAeMaskStorageName)) {
-        return;
-    }
-    const auto target = storage->getFirstParentLayerOrSelf();
-    if(!target) return;
-
-    const auto layerMask = findLayerMaskEffectForPath(target, maskPath);
-    if(!layerMask) return;
-
-    auto* const maskParentTransform = maskPath->getParentTransform();
-    const auto vectorMask = maskPath->objectToVectorPathBox();
-    if(!vectorMask) return;
-
-    prepareMaskSource(vectorMask);
-    vectorMask->setParentTransform(maskParentTransform);
-    configureAeMaskVectorPath(vectorMask, maskPath->prp_getName());
-
-    layerMask->setClipPathSource(vectorMask);
-    maskPath->removeFromParent_k();
-    target->prp_afterWholeInfluenceRangeChanged();
-    if(auto* const scene = target->getParentScene()) {
-        focusAeMaskEditablePath(scene, target, vectorMask);
-    }
-    mDocument.actionFinished();
+    AeMaskModule::finalizeShapePath(this, maskPath);
 }
 
 void Canvas::handleMovePathMousePressEvent(const eMouseEvent& e)
@@ -508,27 +192,6 @@ void Canvas::handleMovePathMousePressEvent(const eMouseEvent& e)
     if (mPressedBox ? !mPressedBox->isSelected() : true) {
         clearBoxesSelection();
     }
-}
-
-static BoundingBox* resolveAeMaskTarget(
-        BoundingBox* const currentBox,
-        const ConnContextObjList<BoundingBox*>& selectedBoxes) {
-    const auto toMaskTarget = [](BoundingBox* const box) -> BoundingBox* {
-        if(!box) return nullptr;
-        if(box->prp_getName() == QString::fromLatin1(kAeMaskStorageName)) {
-            return nullptr;
-        }
-        return isValidAeMaskTarget(box) ? box : nullptr;
-    };
-    if(const auto target = toMaskTarget(currentBox)) {
-        return target;
-    }
-    for(const auto& box : selectedBoxes) {
-        if(const auto target = toMaskTarget(box)) {
-            return target;
-        }
-    }
-    return nullptr;
 }
 
 void Canvas::addActionsToMenu(QMenu *const menu)
@@ -634,6 +297,22 @@ void Canvas::clearHoveredEdge()
 
 void Canvas::handleMovePointMousePressEvent(const eMouseEvent& e)
 {
+    if ((e.fModifiers & Qt::AltModifier) &&
+        mPressedPoint &&
+        mPressedPoint->selectionEnabled()) {
+        if (const auto smartPoint = enve_cast<SmartNodePoint*>(mPressedPoint.data())) {
+            clearPointsSelection();
+            clearCurrentSmartEndPoint();
+            clearLastPressedPoint();
+            smartPoint->actionRemove(false);
+            mPressedPoint = nullptr;
+            mStartTransform = false;
+            clearHovered();
+            emit requestUpdate();
+            return;
+        }
+    }
+
     if (mHoveredNormalSegment.isValid()) {
         if (e.ctrlMod()) {
             clearPointsSelection();
@@ -707,23 +386,17 @@ void Canvas::handleLeftButtonMousePress(const eMouseEvent& e)
         if(mPressedPoint) {
             handleMovePointMousePressEvent(e);
         } else {
-            BoundingBox* const target = mCurrentBox ? mCurrentBox.data() :
-                                       (mSelectedBoxes.isEmpty() ? nullptr
-                                                                 : mSelectedBoxes.last());
+            BoundingBox* const target =
+                    PuppetToolModule::resolveTarget(mCurrentBox.data(),
+                                                    mSelectedBoxes);
             if(!target) {
                 DialogsInterface::instance().showStatusMessage(
                     QObject::tr("Select a layer or shape before adding a puppet pin."));
                 return;
             }
 
-            auto* const puppet = ensurePuppetEffect(target);
-            if(!puppet) {
-                return;
-            }
-
             const QPointF snappedPos = snapEventPos(e, false);
-            const QPointF normalizedPos = absoluteToPuppetNormalized(target, snappedPos);
-            if(!puppet->addPinAtNormalized(normalizedPos)) {
+            if(!PuppetToolModule::addPinAtCanvasPos(target, snappedPos)) {
                 return;
             }
 
@@ -754,7 +427,7 @@ void Canvas::handleLeftButtonMousePress(const eMouseEvent& e)
             mDrawPathFirst = getPointAtAbsPos(e.fPos, mCurrentMode, invScale);
             mDrawPathFit = 0;
             drawPathClear();
-            mDrawPathMaskTarget = resolveAeMaskTarget(
+            mDrawPathMaskTarget = AeMaskModule::resolveTarget(
                         mCurrentBox, mSelectedBoxes);
             mDrawPath.lineTo(e.fPos);
         }
@@ -764,7 +437,7 @@ void Canvas::handleLeftButtonMousePress(const eMouseEvent& e)
     } else if (mCurrentMode == CanvasMode::circleCreate) {
         ContainerBox* const shapeLayer = resolveAeShapeLayer(
                     mCurrentBox, mSelectedBoxes);
-        BoundingBox* maskTarget = resolveAeMaskTarget(
+        BoundingBox* maskTarget = AeMaskModule::resolveTarget(
                     mCurrentBox, mSelectedBoxes);
         Circle* newPath = nullptr;
 
@@ -817,7 +490,7 @@ void Canvas::handleLeftButtonMousePress(const eMouseEvent& e)
     } else if (mCurrentMode == CanvasMode::rectCreate) {
         ContainerBox* const shapeLayer = resolveAeShapeLayer(
                     mCurrentBox, mSelectedBoxes);
-        BoundingBox* maskTarget = resolveAeMaskTarget(
+        BoundingBox* maskTarget = AeMaskModule::resolveTarget(
                     mCurrentBox, mSelectedBoxes);
         RectangleBox* newPath = nullptr;
 
@@ -1205,10 +878,34 @@ void Canvas::handleLeftMouseRelease(const eMouseEvent &e)
 
 QPointF Canvas::getMoveByValueForEvent(const eMouseEvent &e)
 {
+    QPointF axisX;
+    QPointF axisYUp;
+    const bool localAxisMode = getSingleSelectionLocalGizmoAxes(axisX, axisYUp) &&
+            mGizmos.fState.axisHandleActive;
+    const QPointF moveByPoint = e.fPos - e.fLastPressPos;
+
+    if (localAxisMode &&
+        mGizmos.fState.axisConstraint == Gizmos::AxisConstraint::X) {
+        const qreal scalar = mValueInput.inputEnabled()
+                ? mValueInput.getValue()
+                : QPointF::dotProduct(moveByPoint, axisX);
+        mValueInput.setDisplayedValue(QPointF(scalar, 0.0));
+        return axisX * scalar;
+    }
+
+    if (localAxisMode &&
+        mGizmos.fState.axisConstraint == Gizmos::AxisConstraint::Y) {
+        const QPointF axisYDown = -axisYUp;
+        const qreal scalar = mValueInput.inputEnabled()
+                ? mValueInput.getValue()
+                : QPointF::dotProduct(moveByPoint, axisYDown);
+        mValueInput.setDisplayedValue(QPointF(0.0, scalar));
+        return axisYDown * scalar;
+    }
+
     if (mValueInput.inputEnabled()) {
         return mValueInput.getPtValue();
     }
-    const QPointF moveByPoint = e.fPos - e.fLastPressPos;
     mValueInput.setDisplayedValue(moveByPoint);
     if (mValueInput.yOnlyMode()) { return {0, moveByPoint.y()}; }
     else if (mValueInput.xOnlyMode()) { return {moveByPoint.x(), 0}; }
@@ -1339,11 +1036,23 @@ void Canvas::scaleSelected(const eMouseEvent& e)
 {
     const QPointF absPos = mRotPivot->getAbsolutePos();
     const QPointF distMoved = e.fPos - e.fLastPressPos;
+    QPointF axisX;
+    QPointF axisYUp;
+    const bool localScaleAxis = getSingleSelectionLocalGizmoAxes(axisX, axisYUp) &&
+            mGizmos.fState.scaleHandleActive;
 
     qreal scaleBy;
     if (mValueInput.inputEnabled()) { scaleBy = mValueInput.getValue(); }
     else {
-        scaleBy = 1 + distSign({distMoved.x(), -distMoved.y()})*0.003;
+        QPointF scaleDelta(distMoved.x(), -distMoved.y());
+        if (localScaleAxis) {
+            if (mGizmos.fState.scaleConstraint == Gizmos::ScaleHandle::X) {
+                scaleDelta = {QPointF::dotProduct(distMoved, axisX), 0.0};
+            } else if (mGizmos.fState.scaleConstraint == Gizmos::ScaleHandle::Y) {
+                scaleDelta = {0.0, QPointF::dotProduct(distMoved, axisYUp)};
+            }
+        }
+        scaleBy = 1 + distSign(scaleDelta)*0.003;
     }
 
     qreal scaleX;
@@ -1381,14 +1090,26 @@ void Canvas::shearSelected(const eMouseEvent& e)
 {
     const QPointF absPos = mRotPivot->getAbsolutePos();
     const QPointF distMoved = e.fPos - e.fLastPressPos;
+    QPointF axisX;
+    QPointF axisYUp;
+    const bool localShearAxis = getSingleSelectionLocalGizmoAxes(axisX, axisYUp) &&
+            mGizmos.fState.shearHandleActive;
 
     qreal shearBy;
     if (mValueInput.inputEnabled()) {
         shearBy = mValueInput.getValue();
     } else {
         qreal axisDelta;
-        if (mValueInput.xOnlyMode()) { axisDelta = -distMoved.x(); }
-        else { axisDelta = distMoved.y(); }
+        if (mValueInput.xOnlyMode()) {
+            axisDelta = localShearAxis
+                    ? -QPointF::dotProduct(distMoved, axisX)
+                    : -distMoved.x();
+        } else {
+            const QPointF axisYDown = -axisYUp;
+            axisDelta = localShearAxis
+                    ? QPointF::dotProduct(distMoved, axisYDown)
+                    : distMoved.y();
+        }
         shearBy = axisDelta * 0.01;
     }
 

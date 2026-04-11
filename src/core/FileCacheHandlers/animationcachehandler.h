@@ -45,6 +45,7 @@ public:
     virtual ImageCacheContainer* getFrameAtOrBeforeFrame(const int relFrame) = 0;
     virtual eTask* scheduleFrameLoad(const int frame) = 0;
     virtual int getFrameCount() const = 0;
+    virtual qreal getSourceFps() const { return 0.0; }
     virtual void reload() = 0;
 
     eTaskBase* saveAnimationSVG(SvgExporter& exp, QDomElement& parent,

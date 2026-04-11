@@ -407,9 +407,11 @@ void eBoxOrSound::selectionChangeTriggered(const bool shiftPressed) {
         if(mSelected) {
             pScene->removeBoxFromSelection(bb);
         } else {
+            pScene->clearSelectedProps();
             pScene->addBoxToSelection(bb);
         }
     } else {
+        pScene->clearSelectedProps();
         pScene->clearBoxesSelection();
         pScene->addBoxToSelection(bb);
     }

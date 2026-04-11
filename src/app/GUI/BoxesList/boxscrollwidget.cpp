@@ -45,6 +45,7 @@
 #include "Properties/property.h"
 #include "singlewidgettarget.h"
 #include "swt_abstraction.h"
+#include "GUI/BoxesList/boxsinglewidget.h"
 
 #include <QPointF>
 
@@ -70,10 +71,6 @@ BoxScroller *BoxScrollWidget::getBoxScroller() {
 void BoxScrollWidget::setCurrentScene(Canvas * const scene) {
     getBoxScroller()->setCurrentScene(scene);
     mRevealScene.assign(scene);
-    if (scene) {
-        mRevealScene << connect(scene, &Canvas::objectSelectionChanged,
-                                this, &BoxScrollWidget::reapplyAeRevealPreset);
-    }
     reapplyAeRevealPreset();
 }
 
@@ -133,11 +130,6 @@ void BoxScrollWidget::applyAeRevealPreset(const AeRevealPreset preset)
         return;
     }
 
-    if (mCurrentAeRevealPreset == preset) {
-        clearAeRevealPreset();
-        return;
-    }
-
     const auto scene = *mDocument.fActiveScene;
     if (!scene) {
         return;
@@ -150,6 +142,13 @@ void BoxScrollWidget::applyAeRevealPreset(const AeRevealPreset preset)
         }
     }
     if (selected.isEmpty()) {
+        return;
+    }
+
+    if (mCurrentAeRevealPreset == preset) {
+        for (const auto &box : selected) {
+            applyAeRevealPresetToBox(box);
+        }
         return;
     }
 
@@ -190,6 +189,17 @@ void BoxScrollWidget::clearAeRevealPreset()
     }
 }
 
+void BoxScrollWidget::dismissAeRevealPreset()
+{
+    mCurrentAeRevealPreset = AeRevealPreset::None;
+    mStoredVisibility.clear();
+    mStoredExpanded.clear();
+    if (mHasStoredRules) {
+        mStoredRules = getRulesCollection();
+        mHasStoredRules = false;
+    }
+}
+
 void BoxScrollWidget::revealSelectedFrameRemapping()
 {
     applyAeRevealPreset(AeRevealPreset::FrameRemapping);
@@ -198,6 +208,115 @@ void BoxScrollWidget::revealSelectedFrameRemapping()
 void BoxScrollWidget::revealSelectedMasks()
 {
     applyAeRevealPreset(AeRevealPreset::Masks);
+}
+
+void BoxScrollWidget::toggleSelectedTransformVisibility()
+{
+    BoxSingleWidget *selectedPointRow = nullptr;
+    for (auto *widget : visibleWidgets()) {
+        auto *singleWidget = dynamic_cast<BoxSingleWidget*>(widget);
+        if (!singleWidget) {
+            continue;
+        }
+
+        auto *prop = singleWidget->targetProperty();
+        auto *pointAnimator = prop ? enve_cast<QPointFAnimator*>(prop) : nullptr;
+        if (pointAnimator && singleWidget->isPropertyRowSelected()) {
+            selectedPointRow = singleWidget;
+        }
+    }
+
+    if (selectedPointRow) {
+        auto *abs = selectedPointRow->getTargetAbstraction();
+        if (!abs) {
+            abs = selectedPointRow->targetProperty()
+                      ? selectedPointRow->targetProperty()->SWT_getAbstractionForWidget(getId())
+                      : nullptr;
+        }
+        if (!abs) {
+            return;
+        }
+        abs->setContentVisible(!abs->contentVisible());
+        return;
+    }
+
+    const auto scene = *mDocument.fActiveScene;
+    if (!scene) { return; }
+
+    auto selected = scene->selectedBoxesList();
+    if (selected.isEmpty()) {
+        if (auto *current = scene->getCurrentBox()) {
+            scene->addBoxToSelection(current);
+            selected.append(current);
+        }
+    }
+    if (selected.isEmpty()) { return; }
+
+    bool shouldExpand = false;
+    for (auto *box : selected) {
+        if (!box) {
+            continue;
+        }
+        auto *boxAbs = box->SWT_getAbstractionForWidget(getId());
+        if (!boxAbs) {
+            shouldExpand = true;
+            break;
+        }
+        auto *transform = box->getTransformAnimator();
+        auto *transformProp = enve_cast<Property*>(transform);
+        auto *transformAbs = transformProp ? boxAbs->getChildAbsFor(transformProp) : nullptr;
+        if (!transformAbs && transformProp) {
+            transformAbs = transformProp->SWT_getAbstractionForWidget(getId());
+        }
+        if (!transformAbs || !transformAbs->contentVisible()) {
+            shouldExpand = true;
+            break;
+        }
+    }
+
+    for (auto *box : selected) {
+        if (!box) {
+            continue;
+        }
+
+        auto *boxAbs = box->SWT_getAbstractionForWidget(getId());
+        auto *transform = box->getTransformAnimator();
+        auto *transformProp = enve_cast<Property*>(transform);
+        if (!boxAbs || !transformProp) {
+            continue;
+        }
+
+        if (shouldExpand) {
+            boxAbs->setContentVisible(true);
+        }
+        transformProp->SWT_setVisible(true);
+
+        auto *transformAbs = boxAbs->getChildAbsFor(transformProp);
+        if (!transformAbs) {
+            transformAbs = transformProp->SWT_getAbstractionForWidget(getId());
+        }
+        if (!transformAbs) { continue; }
+        transformAbs->setContentVisible(shouldExpand);
+
+        const int childCount = transform->ca_getNumberOfChildren();
+        for (int i = 0; i < childCount; ++i) {
+            auto *childProp = transform->ca_getChildAt<Property>(i);
+            auto *pointAnimator = childProp ? enve_cast<QPointFAnimator*>(childProp) : nullptr;
+            if (!pointAnimator) {
+                continue;
+            }
+
+            childProp->SWT_setVisible(true);
+            auto *pointAbs = transformAbs->getChildAbsFor(childProp);
+            if (!pointAbs) {
+                pointAbs = childProp->SWT_getAbstractionForWidget(getId());
+            }
+            if (!pointAbs) {
+                continue;
+            }
+            pointAbs->setContentVisible(shouldExpand);
+        }
+    }
 }
 
 void BoxScrollWidget::restoreAeRevealState()
@@ -230,10 +349,29 @@ void BoxScrollWidget::reapplyAeRevealPreset()
         return;
     }
 
+    if (!mHasStoredRules) {
+        mStoredRules = getRulesCollection();
+        mHasStoredRules = true;
+    }
+
     const auto rules = getRulesCollection();
+    if (rules.fRule != SWT_BoxRule::all) {
+        setCurrentRule(SWT_BoxRule::all);
+    }
+    if (rules.fType != SWT_Type::all) {
+        setCurrentType(SWT_Type::all);
+    }
     if (!rules.fAlwaysShowChildren) {
         setAlwaysShowChildren(true);
     }
+
+    SingleWidgetTarget *target = scene;
+    SWT_Target scope = SWT_Target::canvas;
+    if (auto *group = scene->getCurrentGroup()) {
+        target = group;
+        scope = SWT_Target::group;
+    }
+    setCurrentTarget(target, scope);
 
     auto selected = scene->selectedBoxesList();
     if (selected.isEmpty()) {
@@ -246,21 +384,6 @@ void BoxScrollWidget::reapplyAeRevealPreset()
         return;
     }
 
-    if (mCurrentAeRevealPreset == AeRevealPreset::Masks) {
-        if (!mHasStoredRules) {
-            mStoredRules = getRulesCollection();
-            mHasStoredRules = true;
-        }
-        setCurrentRule(SWT_BoxRule::all);
-        setCurrentType(SWT_Type::all);
-        SingleWidgetTarget *target = scene;
-        SWT_Target scope = SWT_Target::canvas;
-        if (auto *group = scene->getCurrentGroup()) {
-            target = group;
-            scope = SWT_Target::group;
-        }
-        setCurrentTarget(target, scope);
-    }
     for (const auto &box : selected) {
         applyAeRevealPresetToBox(box);
     }
@@ -295,6 +418,27 @@ void BoxScrollWidget::applyAeRevealPresetToBox(BoundingBox *box)
     setTargetVisibleTracked(transformProp, true);
     setAbstractionExpandedTracked(transformAbs, true);
 
+    if (mCurrentAeRevealPreset == AeRevealPreset::AnchorPoint) {
+        if (const auto advanced = enve_cast<AdvancedTransformAnimator*>(transform)) {
+            revealPropertyTracked(advanced->getPivotAnimator());
+            return;
+        }
+    } else if (mCurrentAeRevealPreset == AeRevealPreset::Position) {
+        revealPropertyTracked(transform->getPosAnimator());
+        return;
+    } else if (mCurrentAeRevealPreset == AeRevealPreset::Scale) {
+        revealPropertyTracked(transform->getScaleAnimator());
+        return;
+    } else if (mCurrentAeRevealPreset == AeRevealPreset::Rotation) {
+        revealPropertyTracked(transform->getRotAnimator());
+        return;
+    } else if (mCurrentAeRevealPreset == AeRevealPreset::Opacity) {
+        if (const auto advanced = enve_cast<AdvancedTransformAnimator*>(transform)) {
+            revealPropertyTracked(advanced->getOpacityAnimator());
+            return;
+        }
+    }
+
     const int nChildren = transform->ca_getNumberOfChildren();
     for (int i = 0; i < nChildren; i++) {
         const auto child = transform->ca_getChildAt<Property>(i);
@@ -305,6 +449,26 @@ void BoxScrollWidget::applyAeRevealPresetToBox(BoundingBox *box)
         setTargetVisibleTracked(child, visible);
         if (visible) {
             setAbstractionExpandedTracked(child->SWT_getAbstractionForWidget(getId()), true);
+        }
+    }
+}
+
+void BoxScrollWidget::revealPropertyTracked(Property *property)
+{
+    if (!property) {
+        return;
+    }
+
+    setTargetVisibleTracked(property, true);
+    setAbstractionExpandedTracked(property->SWT_getAbstractionForWidget(getId()), true);
+
+    if (const auto complex = enve_cast<ComplexAnimator*>(property)) {
+        const int childCount = complex->ca_getNumberOfChildren();
+        for (int i = 0; i < childCount; ++i) {
+            if (auto *child = complex->ca_getChildAt<Property>(i)) {
+                setTargetVisibleTracked(child, true);
+                setAbstractionExpandedTracked(child->SWT_getAbstractionForWidget(getId()), true);
+            }
         }
     }
 }

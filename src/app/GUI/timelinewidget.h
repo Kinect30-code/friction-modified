@@ -81,6 +81,9 @@ public:
     void clearAeRevealPreset();
     void revealSelectedFrameRemapping();
     void revealSelectedMasks();
+    void toggleSelectedTransformVisibility();
+    void showSelectedKeyEaseMenu();
+    void showSelectedKeyStrengthMenu();
     bool enterGroup(ContainerBox *group);
     bool exitCurrentGroup();
     void showGroupFlowPopup();

@@ -201,6 +201,7 @@ set(
     GUI/window.cpp
     effectsloader.cpp
     eimporters.cpp
+    ../modules/ora/oramodule.cpp
     evfileio.cpp
     renderhandler.cpp
     GUI/BoxesList/boxsinglewidget.cpp
@@ -308,6 +309,15 @@ endif()
 
 if(WIN32)
     set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE TRUE)
+endif()
+
+if(UNIX AND NOT APPLE)
+    set_target_properties(
+        ${PROJECT_NAME}
+        PROPERTIES
+        BUILD_RPATH "$ORIGIN/../skia"
+        INSTALL_RPATH "$ORIGIN/../lib"
+    )
 endif()
 
 target_link_directories(

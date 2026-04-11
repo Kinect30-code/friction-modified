@@ -53,11 +53,6 @@ QrealAnimator::QrealAnimator(const QString &name) : GraphAnimator(name) {}
 bool QrealAnimator::SWT_shouldBeVisible(const SWT_RulesCollection &rules,
                                         const bool parentSatisfies,
                                         const bool parentMainTarget) const {
-    if (const auto pointParent = enve_cast<QPointFAnimator*>(getParent())) {
-        if (!pointParent->dimensionsSeparated()) {
-            return false;
-        }
-    }
     return GraphAnimator::SWT_shouldBeVisible(rules, parentSatisfies,
                                               parentMainTarget);
 }

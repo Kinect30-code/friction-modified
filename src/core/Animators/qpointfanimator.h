@@ -45,8 +45,10 @@ protected:
                     const QString& nameY,
                     const QString& name);
 public:
-    bool dimensionsSeparated() const { return mDimensionsSeparated; }
-    void setDimensionsSeparated(bool separated);
+    bool dimensionsSeparated() const { return true; }
+    void SWT_abstractionContentVisibilityChanged(
+            const int visiblePartWidgetId,
+            const bool visible) override;
 
     QJSValue prp_getBaseJSValue(QJSEngine& e) const;
     QJSValue prp_getBaseJSValue(QJSEngine& e, const qreal relFrame) const;
@@ -135,7 +137,6 @@ public:
 protected:
     qsptr<QrealAnimator> mXAnimator;
     qsptr<QrealAnimator> mYAnimator;
-    bool mDimensionsSeparated = false;
 };
 
 #endif // QPOINTFANIMATOR_H

@@ -203,8 +203,6 @@ int main(int argc, char *argv[])
     });
     ALPHA_MESH_PIX = &alphaMesh;
 
-    ThemeSupport::setupTheme(eSizesUI::widget);
-
     // check permissions
     AppSupport::checkPerms(isRenderer);
 
@@ -226,6 +224,11 @@ int main(int argc, char *argv[])
     // load settings
     try { settings.loadFromFile(); }
     catch(const std::exception& e) { gPrintExceptionCritical(e); }
+
+    ThemeSupport::setThemeVariant(settings.fUiTheme == eSettings::UiThemeLight
+                                      ? ThemeSupport::ThemeVariant::light
+                                      : ThemeSupport::ThemeVariant::dark);
+    ThemeSupport::setupTheme(eSizesUI::widget);
 
     // init handlers
     eFilterSettings filterSettings;

@@ -28,6 +28,8 @@
 #include "complexanimator.h"
 #include "key.h"
 #include "qrealpoint.h"
+#include "qrealanimator.h"
+#include "qpointfanimator.h"
 #include "simplemath.h"
 #include "svgexporthelpers.h"
 #include "Private/esettings.h"
@@ -261,7 +263,25 @@ void Animator::anim_appendKeyAction(const stdsptr<Key>& newKey)
 
 void Animator::anim_removeKeyAction(const stdsptr<Key> newKey)
 {
+    const bool removingLastKey = !toComplexAnimator() && anim_mKeys.count() == 1;
+    const int absKeyFrame = prp_relFrameToAbsFrame(newKey->getRelFrame());
+    qreal lastQrealValue = 0.;
+    QPointF lastQPointFValue;
+    if(removingLastKey) {
+        if(const auto qa = dynamic_cast<QrealAnimator*>(this)) {
+            lastQrealValue = qa->getEffectiveValue(qa->prp_absFrameToRelFrameF(absKeyFrame));
+        } else if(const auto pa = dynamic_cast<QPointFAnimator*>(this)) {
+            lastQPointFValue = pa->getEffectiveValue(pa->prp_absFrameToRelFrameF(absKeyFrame));
+        }
+    }
     anim_removeKey(newKey);
+    if(removingLastKey && !anim_hasKeys()) {
+        if(const auto qa = dynamic_cast<QrealAnimator*>(this)) {
+            qa->setCurrentBaseValue(lastQrealValue);
+        } else if(const auto pa = dynamic_cast<QPointFAnimator*>(this)) {
+            pa->setBaseValue(lastQPointFValue);
+        }
+    }
     {
         prp_pushUndoRedoName(tr("Remove Key"));
         UndoRedo ur;

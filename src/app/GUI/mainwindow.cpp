@@ -81,7 +81,6 @@
 #include "Settings/settingsdialog.h"
 #include "appsupport.h"
 #include "themesupport.h"
-#include "layerrelationswidget.h"
 #include "RasterEffects/rastereffectmenucreator.h"
 #include "BlendEffects/blendeffectmenucreator.h"
 #include "TransformEffects/transformeffectmenucreator.h"
@@ -334,7 +333,6 @@ MainWindow::MainWindow(Document& document,
     , mShutdown(false)
     , mWelcomeDialog(nullptr)
     , mStackWidget(nullptr)
-    , mTabProperties(nullptr)
     , mTimeline(nullptr)
     , mRenderWidget(nullptr)
     , mToolbar(nullptr)
@@ -375,14 +373,10 @@ MainWindow::MainWindow(Document& document,
     , mPropertiesPanel(nullptr)
     , mCenterTabs(nullptr)
     , mBottomTabs(nullptr)
-    , mRightTabs(nullptr)
     , mStackIndexScene(0)
     , mStackIndexWelcome(0)
     , mTabColorIndex(0)
-    , mTabTextIndex(0)
-    , mTabPropertiesIndex(0)
     , mTabAssetsIndex(0)
-    , mTabAlignIndex(0)
     , mTabQueueIndex(0)
     , mColorToolBar(nullptr)
     , mCanvasToolBar(nullptr)
@@ -978,57 +972,15 @@ void MainWindow::newFile()
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *e)
 {
-    auto isTimelineContext = [this]() -> bool {
-        if (!mTimeline) { return false; }
-        const QRect timelineGlobalRect(mTimeline->mapToGlobal(QPoint(0, 0)),
-                                       mTimeline->size());
-        const auto belongsToTimeline = [this](QWidget *widget) {
-            while (widget) {
-                if (widget == mTimeline) { return true; }
-                widget = widget->parentWidget();
-            }
-            return false;
-        };
-        if (belongsToTimeline(QApplication::focusWidget())) {
-            return true;
-        }
-        if (belongsToTimeline(QApplication::widgetAt(QCursor::pos()))) {
-            return true;
-        }
-        if (timelineGlobalRect.contains(QCursor::pos())) {
-            return true;
-        }
-        return mTimeline->underMouse();
-    };
-
     if (mLock) { if (dynamic_cast<QInputEvent*>(e)) { return true; } }
     if (mEventFilterDisabled) { return QMainWindow::eventFilter(obj, e); }
     const auto type = e->type();
     const auto focusWidget = QApplication::focusWidget();
     if (type == QEvent::KeyPress) {
         const auto keyEvent = static_cast<QKeyEvent*>(e);
-        const int key = keyEvent->key();
-        if (isTimelineContext() &&
-            !(keyEvent->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))) {
-            switch (key) {
-            case Qt::Key_A:
-            case Qt::Key_P:
-            case Qt::Key_S:
-            case Qt::Key_R:
-            case Qt::Key_T:
-            case Qt::Key_U:
-            case Qt::Key_B:
-            case Qt::Key_N:
-                if (mAeShortcutController && mAeShortcutController->process(keyEvent)) {
-                    return true;
-                }
-                if (mTimeline && mTimeline->processKeyPress(keyEvent)) {
-                    return true;
-                }
-                break;
-            default:
-                break;
-            }
+        if (isTimelineInputContext() && mTimeline &&
+            mTimeline->processKeyPress(keyEvent)) {
+            return true;
         }
         if (keyEvent->key() == Qt::Key_Delete && focusWidget) {
             mEventFilterDisabled = true;
@@ -1053,12 +1005,17 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *e)
             key == Qt::Key_D) {
             return processKeyEvent(keyEvent);
         }
-        if (!(keyEvent->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) &&
-            (key == Qt::Key_U || key == Qt::Key_P || key == Qt::Key_S ||
-             key == Qt::Key_R || key == Qt::Key_T || key == Qt::Key_A ||
-             key == Qt::Key_B || key == Qt::Key_N)) {
-            if (isTimelineContext()) { return true; }
-            return processKeyEvent(keyEvent);
+        if (isTimelineInputContext()) {
+            const bool plainTimelineKey =
+                    !(keyEvent->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) &&
+                    (key == Qt::Key_U || key == Qt::Key_T ||
+                     key == Qt::Key_B || key == Qt::Key_N);
+            const bool easeTimelineKey =
+                    keyEvent->modifiers() == Qt::ControlModifier &&
+                    key == Qt::Key_E;
+            if (plainTimelineKey || easeTimelineKey) {
+                return true;
+            }
         }
         if (keyEvent->modifiers() == Qt::ControlModifier &&
             (key == Qt::Key_C || key == Qt::Key_V ||
@@ -1088,11 +1045,21 @@ bool MainWindow::processKeyEvent(QKeyEvent *event)
 {
     if (isActiveWindow() || (mTimelineWindow && mTimelineWindow->isActiveWindow())) {
         bool returnBool = false;
-        if (event->type() == QEvent::KeyPress) {
-            if (mAeShortcutController &&
-                mAeShortcutController->process(event)) {
+        if (event->type() == QEvent::KeyPress ||
+            event->type() == QEvent::ShortcutOverride) {
+            const bool timelineContext = isTimelineInputContext();
+            const bool plainLetter =
+                    !(event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) &&
+                    event->key() >= Qt::Key_A && event->key() <= Qt::Key_Z;
+
+            if (timelineContext && mTimeline && mTimeline->processKeyPress(event)) {
                 returnBool = true;
-            } else if (mTimeline->processKeyPress(event)) {
+            } else if (timelineContext && plainLetter) {
+                // When the timeline is active, don't leak single-letter keys
+                // into the viewer/tool shortcut stack.
+                returnBool = true;
+            } else if (mAeShortcutController &&
+                       mAeShortcutController->process(event)) {
                 returnBool = true;
             } else {
                 returnBool = KeyFocusTarget::KFT_handleKeyEvent(event);
@@ -1104,6 +1071,34 @@ bool MainWindow::processKeyEvent(QKeyEvent *event)
         return returnBool;
     }
     return false;
+}
+
+bool MainWindow::isTimelineInputContext() const
+{
+    if (!mTimeline) { return false; }
+
+    const auto belongsToTimeline = [this](QWidget *widget) {
+        while (widget) {
+            if (widget == mTimeline) { return true; }
+            widget = widget->parentWidget();
+        }
+        return false;
+    };
+
+    if (belongsToTimeline(QApplication::focusWidget())) {
+        return true;
+    }
+    if (belongsToTimeline(QApplication::widgetAt(QCursor::pos()))) {
+        return true;
+    }
+
+    const QRect timelineGlobalRect(mTimeline->mapToGlobal(QPoint(0, 0)),
+                                   mTimeline->size());
+    if (timelineGlobalRect.contains(QCursor::pos())) {
+        return true;
+    }
+
+    return mTimeline->underMouse();
 }
 
 #ifdef Q_OS_MAC
@@ -1141,8 +1136,6 @@ void MainWindow::readSettings(const QString &openProject)
         mUI->applyAeDefaultWorkspace();
         if (mCenterTabs) { mCenterTabs->setCurrentIndex(0); }
         if (mBottomTabs) { mBottomTabs->setCurrentWidget(mTimeline); }
-        if (mTabProperties) { mTabProperties->setCurrentIndex(mTabPropertiesIndex); }
-        if (mRightTabs) { mRightTabs->setCurrentIndex(0); }
         AppSupport::setSettings("ui", "AeWorkspaceV3Applied", true);
     }
     restoreState(AppSupport::getSettings("ui",
@@ -1213,10 +1206,11 @@ void MainWindow::readSettings(const QString &openProject)
     mViewFillStrokeAct->setChecked(visibleFillStroke);
     mUI->setDockVisible("Project", true);
     mUI->setDockVisible("Effect Controls", visibleFillStroke);
+    mUI->setDockVisible("Effect Presets", true);
+    mUI->setDockVisible("Character", true);
+    mUI->setDockVisible("Align", true);
     mUI->setDockVisible("Composition", true);
     mUI->setDockVisible("Layers", true);
-    mUI->setDockVisible("Effects", true);
-    if (mTabProperties) { mTabProperties->setCurrentIndex(mTabPropertiesIndex); }
 
 #ifdef Q_OS_LINUX
     if (AppSupport::isWayland()) { // Disable fullscreen on wayland
@@ -1323,16 +1317,6 @@ void MainWindow::setupStackWidgets()
     mCenterTabs->setTabPosition(QTabWidget::North);
     mCenterTabs->addTab(mStackWidget, tr("Composition"));
 
-    const auto layerPlaceholder = new QWidget(this);
-    layerPlaceholder->setObjectName("AeLayerPanelPlaceholder");
-    const auto layerLayout = new QVBoxLayout(layerPlaceholder);
-    layerLayout->setContentsMargins(12, 12, 12, 12);
-    const auto layerLabel = new QLabel(tr("Layer viewer placeholder.\nUse the Composition tab as the primary viewer and select layers to inspect context."), layerPlaceholder);
-    layerLabel->setAlignment(Qt::AlignTop | Qt::AlignLeft);
-    layerLabel->setWordWrap(true);
-    layerLayout->addWidget(layerLabel);
-    layerLayout->addStretch();
-    mCenterTabs->addTab(layerPlaceholder, tr("Layer Viewer"));
 }
 
 void MainWindow::setupMemoryWidgets()
@@ -1376,72 +1360,29 @@ void MainWindow::setupPropertiesWidgets()
     mProjectWidget = new AssetsWidget(this);
     connect(mProjectWidget, &AssetsWidget::sceneOpenRequested,
             this, &MainWindow::activateSceneWorkspace);
-
-    mTabProperties = new QTabWidget(this);
-    mTabProperties->setObjectName("AePanelTabs");
-    mTabProperties->setDocumentMode(true);
-    mTabProperties->tabBar()->setFocusPolicy(Qt::NoFocus);
-    mTabProperties->tabBar()->setExpanding(false);
-    mTabProperties->setContentsMargins(0, 0, 0, 0);
-    mTabProperties->setTabPosition(QTabWidget::North);
-    eSizesUI::widget.add(mTabProperties, [this](const int size) {
-        mTabProperties->setIconSize(QSize(size, size));
-    });
-
-    const auto tabButtons = mTabProperties->findChildren<QToolButton*>();
-    for (const auto &button : tabButtons) {
-        button->setFocusPolicy(Qt::NoFocus); // don't allow buttons to take focus
-    }
-
-    mPropertiesPanel = new QWidget(this);
+    mPropertiesPanel = mObjectSettingsScrollArea;
     mPropertiesPanel->setObjectName("AeEffectControlsPanel");
-    const auto propertiesLayout = new QVBoxLayout(mPropertiesPanel);
-    propertiesLayout->setContentsMargins(0, 0, 0, 0);
-    propertiesLayout->setSpacing(0);
-
-    propertiesLayout->addWidget(mObjectSettingsScrollArea);
-
-    mTabPropertiesIndex = mTabProperties->addTab(mPropertiesPanel,
-                                                 QIcon::fromTheme("drawPathAutoChecked"),
-                                                 tr("Effect Controls"));
 
     mProjectWidget->setWindowTitle(tr("Project"));
     mProjectWidget->setObjectName(QStringLiteral("ProjectPanel"));
     mProjectWidget->setParent(this);
+    mEffectsPresetsPanel = createEffectsPresetsPanel();
 
-    mRightTabs = new QTabWidget(this);
-    mRightTabs->setObjectName("AePanelTabs");
-    mRightTabs->setDocumentMode(true);
-    mRightTabs->tabBar()->setFocusPolicy(Qt::NoFocus);
-    mRightTabs->tabBar()->setExpanding(false);
-    mRightTabs->setContentsMargins(0, 0, 0, 0);
-    mRightTabs->setTabPosition(QTabWidget::North);
-    eSizesUI::widget.add(mRightTabs, [this](const int size) {
-        mRightTabs->setIconSize(QSize(size, size));
-    });
-    mRightTabs->addTab(createEffectsPresetsPanel(),
-                       QIcon::fromTheme("filter"),
-                       tr("Effects & Presets"));
-
-    const auto characterPanel = new QWidget(this);
-    const auto characterLayout = new QVBoxLayout(characterPanel);
+    mCharacterPanel = new QWidget(this);
+    mCharacterPanel->setObjectName(QStringLiteral("CharacterPanel"));
+    const auto characterLayout = new QVBoxLayout(mCharacterPanel);
     characterLayout->setContentsMargins(4, 4, 4, 4);
     characterLayout->setSpacing(0);
     characterLayout->addWidget(mFontWidget, 0, Qt::AlignTop);
     characterLayout->addStretch();
-    mTabTextIndex = mRightTabs->addTab(characterPanel,
-                                       QIcon::fromTheme("textCreate"),
-                                       tr("Character"));
 
-    const auto alignPanel = new QWidget(this);
-    const auto alignLayout = new QVBoxLayout(alignPanel);
+    mAlignPanel = new QWidget(this);
+    mAlignPanel->setObjectName(QStringLiteral("AlignPanel"));
+    const auto alignLayout = new QVBoxLayout(mAlignPanel);
     alignLayout->setContentsMargins(4, 4, 4, 4);
     alignLayout->setSpacing(0);
     alignLayout->addWidget(mAlignWidget, 0, Qt::AlignTop);
     alignLayout->addStretch();
-    mTabAlignIndex = mRightTabs->addTab(alignPanel,
-                                        QIcon::fromTheme("alignCenter"),
-                                        tr("Align"));
 
     mBottomTabs = new QTabWidget(this);
     mBottomTabs->setObjectName("AePanelTabs");
@@ -1689,9 +1630,11 @@ void MainWindow::syncPanelsMenuState()
 
     setCheckedFromParent(mPanelCompositionAct, mCenterTabs);
     setCheckedFromParent(mPanelProjectAct, mProjectWidget);
-    setCheckedFromParent(mPanelEffectControlsAct, mTabProperties);
+    setCheckedFromParent(mPanelEffectControlsAct, mPropertiesPanel);
     setCheckedFromParent(mPanelLayersAct, mBottomTabs);
-    setCheckedFromParent(mPanelEffectsAct, mRightTabs);
+    setCheckedFromParent(mPanelEffectsAct, mEffectsPresetsPanel);
+    setCheckedFromParent(mPanelCharacterAct, mCharacterPanel);
+    setCheckedFromParent(mPanelAlignAct, mAlignPanel);
 }
 
 void MainWindow::updateWorkspaceTabTitles()
@@ -1877,7 +1820,7 @@ void MainWindow::setupLayout()
     docks.push_back({UIDock::Position::Left,
                      -1,
                      tr("Effect Controls"),
-                     mTabProperties,
+                     mPropertiesPanel,
                      true,
                      true,
                      false});
@@ -1890,8 +1833,22 @@ void MainWindow::setupLayout()
                      false});
     docks.push_back({UIDock::Position::Right,
                      -1,
-                     tr("Effects"),
-                     mRightTabs,
+                     tr("Effect Presets"),
+                     mEffectsPresetsPanel,
+                     true,
+                     true,
+                     false});
+    docks.push_back({UIDock::Position::Right,
+                     -1,
+                     tr("Character"),
+                     mCharacterPanel,
+                     true,
+                     true,
+                     false});
+    docks.push_back({UIDock::Position::Right,
+                     -1,
+                     tr("Align"),
+                     mAlignPanel,
                      true,
                      true,
                      false});
@@ -2260,19 +2217,13 @@ QList<Canvas*> MainWindow::sceneNavigationChain() const
 
 void MainWindow::focusFontWidget(const bool focus)
 {
-    if (mRightTabs) {
-        mRightTabs->setCurrentIndex(mTabTextIndex);
-        if (mUI) { mUI->setDockVisible("Effects", true); }
-    }
+    if (mUI) { mUI->setDockVisible("Character", true); }
     if (focus) { mFontWidget->setTextFocus(); }
 }
 
 void MainWindow::focusColorWidget()
 {
-    if (mTabProperties) {
-        mTabProperties->setCurrentIndex(mTabPropertiesIndex);
-        if (mUI) { mUI->setDockVisible("Effect Controls", true); }
-    }
+    if (mUI) { mUI->setDockVisible("Effect Controls", true); }
 }
 
 void MainWindow::openCurrentTextEditorPopup()

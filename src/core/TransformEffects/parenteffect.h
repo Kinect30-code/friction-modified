@@ -48,6 +48,12 @@ public:
                      BoundingBox* const parent) override;
 
 private:
+    void beforeTargetChanged(BoundingBox* const parent,
+                             BoundingBox* const oldTarget,
+                             BoundingBox* const newTarget) override;
+    bool applyTargetChangeCompensation(BoundingBox* const parent,
+                                       BoundingBox* const oldTarget,
+                                       BoundingBox* const newTarget) override;
     bool validateInfluenceValues(const qreal posXInfl,
                                  const qreal posYInfl,
                                  const qreal scaleXInfl,
@@ -60,6 +66,14 @@ private:
                                    const qreal posYInfl,
                                    const qreal scaleXInfl,
                                    const qreal scaleYInfl) const;
+
+    bool mTargetChangeCurrentFrameValid = false;
+    int mTargetChangeCurrentFrame = 0;
+    QMatrix mTargetChangeCurrentTotalTransform;
+    QPointF mTargetChangeCurrentAbsPivotPos;
+    QVector<int> mTargetChangeFrames;
+    QVector<QMatrix> mTargetChangeTotalTransforms;
+    QVector<QPointF> mTargetChangeAbsPivotPositions;
 };
 
 #endif // PARENTEFFECT_H

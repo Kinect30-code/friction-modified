@@ -54,6 +54,9 @@ public:
     explicit BoxSingleWidget(BoxScroller * const parent);
 
     void setTargetAbstraction(SWT_Abstraction *abs);
+    bool isPropertyRowSelected() const;
+    bool isLayerRowSelected() const;
+    Property *targetProperty() const;
 
     static QPixmap* VISIBLE_ICON;
     static QPixmap* INVISIBLE_ICON;
@@ -186,9 +189,6 @@ private:
     eComboBox *mBlendModeCombo;
     eComboBox *mPathBlendModeCombo;
     eComboBox *mFillTypeCombo;
-    QLabel *mParentLabel;
-    QLabel *mMatteLabel;
-    QLabel *mCollapseLabel;
     QPushButton *mParentPickWhipButton;
     QPushButton *mMattePickWhipButton;
     eComboBox *mParentLayerCombo;

@@ -62,17 +62,15 @@ public:
     */
     ~SkWeakRefCnt() override {
 #ifdef SK_DEBUG
-        SkASSERT(getWeakCnt() == 1);
+        SkASSERT(this->getWeakCnt() == 1);
         fWeakCnt.store(0, std::memory_order_relaxed);
 #endif
     }
 
-#ifdef SK_DEBUG
     /** Return the weak reference count. */
     int32_t getWeakCnt() const {
         return fWeakCnt.load(std::memory_order_relaxed);
     }
-#endif
 
 private:
     /** If fRefCnt is 0, returns 0.
@@ -110,8 +108,8 @@ public:
         weak_unref().
     */
     void weak_ref() const {
-        SkASSERT(getRefCnt() > 0);
-        SkASSERT(getWeakCnt() > 0);
+        SkASSERT(this->getRefCnt() > 0);
+        SkASSERT(this->getWeakCnt() > 0);
         // No barrier required.
         (void)fWeakCnt.fetch_add(+1, std::memory_order_relaxed);
     }
@@ -122,7 +120,7 @@ public:
         not on the stack.
     */
     void weak_unref() const {
-        SkASSERT(getWeakCnt() > 0);
+        SkASSERT(this->getWeakCnt() > 0);
         // A release here acts in place of all releases we "should" have been doing in ref().
         if (1 == fWeakCnt.fetch_add(-1, std::memory_order_acq_rel)) {
             // Like try_ref(), the acquire is only needed on success, to make sure

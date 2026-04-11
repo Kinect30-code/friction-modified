@@ -202,7 +202,6 @@ public:
     QrealAnimator *getOpacityAnimator() const {
         return mOpacityAnimator.get();
     }
-private:
     qsptr<QPointFAnimator> mPivotAnimator;
     qsptr<QPointFAnimator> mShearAnimator;
     qsptr<QrealAnimator> mOpacityAnimator;

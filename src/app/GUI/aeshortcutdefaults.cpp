@@ -7,8 +7,9 @@ QList<AeShortcutDefinition> aeShortcutDefinitions()
     return {
         {QStringLiteral("boxTransform"), QStringLiteral("Tools"), QObject::tr("Selection Tool"), QObject::tr("Primary layer selection / transform tool."), QStringLiteral("V")},
         {QStringLiteral("pointTransform"), QStringLiteral("Tools"), QObject::tr("Anchor / Point Tool"), QObject::tr("Anchor point editing / point transform tool."), QStringLiteral("Y")},
+        {QStringLiteral("pathCreate"), QStringLiteral("Tools"), QObject::tr("Pen Tool"), QObject::tr("AE-style pen tool. Click to create/extend a path, click a segment to add a vertex, Alt-click a point to delete a vertex."), QStringLiteral("G")},
+        {QStringLiteral("drawPath"), QStringLiteral("Tools"), QObject::tr("Freehand Path Tool"), QObject::tr("Freehand drawing / fitting tool. Kept as a secondary path creation mode."), QStringLiteral("Shift+G")},
         {QStringLiteral("rectMode"), QStringLiteral("Tools"), QObject::tr("Shape Tool Toggle"), QObject::tr("AE-style Q toggle for rectangle / ellipse."), QStringLiteral("Q")},
-        {QStringLiteral("drawPath"), QStringLiteral("Tools"), QObject::tr("Pen Tool"), QObject::tr("Bezier / pen tool."), QStringLiteral("G")},
         {QStringLiteral("textMode"), QStringLiteral("Tools"), QObject::tr("Text Tool"), QObject::tr("Text creation tool."), QStringLiteral("Ctrl+T")},
         {QStringLiteral("aeToolHand"), QStringLiteral("Tools"), QObject::tr("Hand Tool"), QObject::tr("Viewer pan shortcut hint."), QStringLiteral("H")},
         {QStringLiteral("aeToolZoom"), QStringLiteral("Tools"), QObject::tr("Zoom Tool"), QObject::tr("Viewer zoom shortcut hint."), QStringLiteral("Z")},

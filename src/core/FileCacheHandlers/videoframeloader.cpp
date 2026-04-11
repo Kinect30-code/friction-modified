@@ -27,6 +27,7 @@
 #include "videocachehandler.h"
 #include "Private/Tasks/taskscheduler.h"
 #include "Private/Tasks/taskexecutor.h"
+#include "../../modules/webm/webmalphapolicy.h"
 
 VideoFrameLoader::VideoFrameLoader(VideoFrameHandler * const cacheHandler,
                                    const stdsptr<VideoStreamsData> &openedVideo,
@@ -72,22 +73,11 @@ void VideoFrameLoader::convertFrame() {
     sws_scale(mSwsContext, mFrameToConvert->data, mFrameToConvert->linesize,
               0, mFrameToConvert->height, dstSk, linesizesSk);
 
-    // Skia target bitmap is premultiplied alpha; normalize converted frames
-    // so transparent WebM edges do not leave dark fringes.
-    if(srcHasAlpha) {
-        auto* rgbaPixels = static_cast<uint8_t*>(addr);
-        const int width = mFrameToConvert->width;
-        const int height = mFrameToConvert->height;
-        for(int y = 0; y < height; ++y) {
-            uint8_t* row = rgbaPixels + y*linesizesSk[0];
-            for(int x = 0; x < width; ++x) {
-                uint8_t* px = row + x*4;
-                const uint8_t a = px[3];
-                px[0] = static_cast<uint8_t>((px[0]*a + 127)/255);
-                px[1] = static_cast<uint8_t>((px[1]*a + 127)/255);
-                px[2] = static_cast<uint8_t>((px[2]*a + 127)/255);
-            }
-        }
+    if(WebmAlphaPolicy::shouldNormalizeTransparentEdges(*mOpenedVideo, srcHasAlpha)) {
+        WebmAlphaPolicy::premultiplyRgbaBuffer(static_cast<uint8_t*>(addr),
+                                               mFrameToConvert->width,
+                                               mFrameToConvert->height,
+                                               linesizesSk[0]);
     }
 
     mLoadedFrame = SkiaHelpers::transferDataToSkImage(bitmap);

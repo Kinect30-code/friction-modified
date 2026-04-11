@@ -46,8 +46,10 @@ private:
 
     QCheckBox *mDefaultInterfaceScaling;
     QSlider *mInterfaceScaling;
+    QComboBox *mTheme = nullptr;
 
     QComboBox *mImportFileDir;
+    QCheckBox *mViewerRgsShortcuts = nullptr;
 };
 
 #endif // GENERALSETTINGSWIDGET_H

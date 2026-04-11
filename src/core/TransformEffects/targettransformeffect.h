@@ -36,7 +36,15 @@ public:
                           const TransformEffectType type);
 
     FrameRange prp_getIdenticalRelRange(const int relFrame) const;
+    BoundingBox *target() const;
+    void setTargetAction(BoundingBox *target);
 protected:
+    virtual void beforeTargetChanged(BoundingBox* const parent,
+                                     BoundingBox* const oldTarget,
+                                     BoundingBox* const newTarget);
+    virtual bool applyTargetChangeCompensation(BoundingBox* const parent,
+                                               BoundingBox* const oldTarget,
+                                               BoundingBox* const newTarget);
     virtual void setRotScaleAfterTargetChange(
             BoundingBox* const oldTarget,
             BoundingBox* const newTarget);

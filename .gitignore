@@ -15,6 +15,7 @@ quazip
 snapshots
 .vscode
 build-*
+build_*
 *.patch
 ffmpeg
 *.7z
@@ -37,4 +38,12 @@ src/scripts/flatpak/repo
 src/scripts/flatpak/remote
 *.app
 .localdeps
-
+.cppcheck-cache/
+.codex
+*.AppImage
+*-squashfs-root/
+appimagetool-*
+linuxdeploy-*
+linuxdeploy-plugin-qt-*
+build_runfix_clang/
+编译

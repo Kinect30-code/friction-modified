@@ -413,8 +413,12 @@ void CanvasWindow::mousePressEvent(QMouseEvent *event)
     }
     if (mShowSnapshot) { exitSnapshotView(); }
     const auto button = event->button();
+    const auto currentMode = mDocument.fCanvasMode;
+    const bool allowAltToolInteraction = currentMode == CanvasMode::pointTransform ||
+                                         currentMode == CanvasMode::pathCreate;
     bool leftAndAltPressed = (button == Qt::LeftButton) &&
-                             QGuiApplication::keyboardModifiers().testFlag(Qt::AltModifier);
+                             QGuiApplication::keyboardModifiers().testFlag(Qt::AltModifier) &&
+                             !allowAltToolInteraction;
     if (button == Qt::MiddleButton ||
         button == Qt::RightButton ||
         leftAndAltPressed) {
@@ -464,8 +468,12 @@ void CanvasWindow::mouseReleaseEvent(QMouseEvent *event)
         return;
     }
     const auto button = event->button();
+    const auto currentMode = mDocument.fCanvasMode;
+    const bool allowAltToolInteraction = currentMode == CanvasMode::pointTransform ||
+                                         currentMode == CanvasMode::pathCreate;
     bool leftAndAltPressed = (button == Qt::LeftButton) &&
-                             QGuiApplication::keyboardModifiers().testFlag(Qt::AltModifier);
+                             QGuiApplication::keyboardModifiers().testFlag(Qt::AltModifier) &&
+                             !allowAltToolInteraction;
     if (button == Qt::MiddleButton || leftAndAltPressed) {
         QApplication::restoreOverrideCursor();
     } else if ((button == Qt::RightButton) &&
@@ -508,8 +516,12 @@ void CanvasWindow::mouseMoveEvent(QMouseEvent *event)
     if (mShowSnapshot) { exitSnapshotView(); }
     if (!mCurrentCanvas || mBlockInput) { return; }
     auto pos = mapToCanvasCoord(event->pos());
+    const auto currentMode = mDocument.fCanvasMode;
+    const bool allowAltToolInteraction = currentMode == CanvasMode::pointTransform ||
+                                         currentMode == CanvasMode::pathCreate;
     bool leftAndAltPressed = (event->buttons() & Qt::LeftButton) &&
-                             QGuiApplication::keyboardModifiers().testFlag(Qt::AltModifier);
+                             QGuiApplication::keyboardModifiers().testFlag(Qt::AltModifier) &&
+                             !allowAltToolInteraction;
     if (event->buttons() & Qt::MiddleButton ||
         event->buttons() & Qt::RightButton ||
         leftAndAltPressed) {
@@ -770,6 +782,12 @@ bool CanvasWindow::handleRevertPathKeyPress(QKeyEvent *event)
 
 bool CanvasWindow::handleStartTransformKeyPress(const eKeyEvent& e)
 {
+    const bool viewerRgsEnabled = AppSupport::getSettings(QStringLiteral("ui"),
+                                                          QStringLiteral("ViewerRgsShortcutsEnabled"),
+                                                          true).toBool();
+    if (!viewerRgsEnabled) {
+        return false;
+    }
     if (mMouseGrabber) { return false; }
     if (e.fKey == Qt::Key_R) {
         return mCurrentCanvas->startRotatingAction(e);

@@ -52,7 +52,10 @@ AeShortcutController::AeShortcutController(MainWindow &mainWindow,
 
 bool AeShortcutController::process(QKeyEvent *event)
 {
-    if (!event || event->type() != QEvent::KeyPress || event->isAutoRepeat()) {
+    if (!event ||
+        (event->type() != QEvent::KeyPress &&
+         event->type() != QEvent::ShortcutOverride) ||
+        (event->type() == QEvent::KeyPress && event->isAutoRepeat())) {
         return false;
     }
 
@@ -97,6 +100,18 @@ bool AeShortcutController::handleToolShortcut(QKeyEvent *event)
         return true;
     }
 
+    if (matches(event, QStringLiteral("pathCreate"), QStringLiteral("G"))) {
+        mActions.setAddPointMode();
+        showStatusMessage(tr("AE: Pen Tool"));
+        return true;
+    }
+
+    if (matches(event, QStringLiteral("drawPath"), QStringLiteral("Shift+G"))) {
+        mActions.setDrawPathMode();
+        showStatusMessage(tr("AE: Freehand Path Tool"));
+        return true;
+    }
+
     if (matches(event, QStringLiteral("rectMode"), QStringLiteral("Q"))) {
         if (mShapeMode == CanvasMode::rectCreate) {
             mActions.setRectangleMode();
@@ -107,12 +122,6 @@ bool AeShortcutController::handleToolShortcut(QKeyEvent *event)
             mShapeMode = CanvasMode::rectCreate;
             showStatusMessage(tr("AE: Ellipse Tool"));
         }
-        return true;
-    }
-
-    if (matches(event, QStringLiteral("drawPath"), QStringLiteral("G"))) {
-        mActions.setDrawPathMode();
-        showStatusMessage(tr("AE: Pen Tool"));
         return true;
     }
 
@@ -139,6 +148,9 @@ bool AeShortcutController::handleToolShortcut(QKeyEvent *event)
     }
 
     if (matches(event, QStringLiteral("textMode"), QStringLiteral("Ctrl+T"))) {
+        if (isTimelineContext()) {
+            return false;
+        }
         if (mDocument.fCanvasMode == CanvasMode::textCreate) {
             mDocument.fAeVerticalText = !mDocument.fAeVerticalText;
             showStatusMessage(mDocument.fAeVerticalText
@@ -223,60 +235,6 @@ bool AeShortcutController::handleGlobalShortcut(QKeyEvent *event)
 
 bool AeShortcutController::handleRevealShortcut(QKeyEvent *event)
 {
-    if (!isTimelineContext()) {
-        return false;
-    }
-
-    const bool plainKey = !(event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier));
-
-    if ((plainKey && event->key() == Qt::Key_A) ||
-        matches(event, QStringLiteral("aeRevealAnchor"), QStringLiteral("A"))) {
-        applyRevealPreset(BoxScrollWidget::AeRevealPreset::AnchorPoint);
-        return true;
-    }
-
-    if ((plainKey && event->key() == Qt::Key_P) ||
-        matches(event, QStringLiteral("aeRevealPosition"), QStringLiteral("P"))) {
-        applyRevealPreset(BoxScrollWidget::AeRevealPreset::Position);
-        return true;
-    }
-
-    if ((plainKey && event->key() == Qt::Key_S) ||
-        matches(event, QStringLiteral("aeRevealScale"), QStringLiteral("S"))) {
-        applyRevealPreset(BoxScrollWidget::AeRevealPreset::Scale);
-        return true;
-    }
-
-    if ((plainKey && event->key() == Qt::Key_R) ||
-        matches(event, QStringLiteral("aeRevealRotation"), QStringLiteral("R"))) {
-        applyRevealPreset(BoxScrollWidget::AeRevealPreset::Rotation);
-        return true;
-    }
-
-    if ((plainKey && event->key() == Qt::Key_T) ||
-        matches(event, QStringLiteral("aeRevealOpacity"), QStringLiteral("T"))) {
-        applyRevealPreset(BoxScrollWidget::AeRevealPreset::Opacity);
-        return true;
-    }
-
-    if ((plainKey && event->key() == Qt::Key_M) ||
-        matches(event, QStringLiteral("aeRevealMasks"), QStringLiteral("M"))) {
-        applyRevealPreset(BoxScrollWidget::AeRevealPreset::Masks);
-        return true;
-    }
-
-    if ((plainKey && event->key() == Qt::Key_U) ||
-        matches(event, QStringLiteral("aeRevealAnimated"), QStringLiteral("U"))) {
-        if (mPendingUTimer.isActive()) {
-            mPendingUTimer.stop();
-            applyRevealPreset(BoxScrollWidget::AeRevealPreset::Modified);
-        } else {
-            applyRevealPreset(BoxScrollWidget::AeRevealPreset::Keyframed);
-            mPendingUTimer.start();
-        }
-        return true;
-    }
-
     return false;
 }
 

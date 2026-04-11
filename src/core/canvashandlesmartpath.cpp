@@ -30,6 +30,7 @@
 #include "Private/document.h"
 #include "BlendEffects/layermaskeffect.h"
 #include "GUI/dialogsinterface.h"
+#include "../modules/ae_masks/aemaskmodule.h"
 
 void Canvas::clearCurrentSmartEndPoint() {
     setCurrentSmartEndPoint(nullptr);
@@ -71,32 +72,8 @@ void configureMaskPathAnimatorForCanvas(SmartVectorPath* const maskPath) {
 }
 
 void syncAeMaskSelection(Canvas* const scene, BoundingBox* const target) {
-    if(!scene || !target) {
-        return;
-    }
-    scene->clearSelectedProps();
-    target->ca_execOnDescendants([scene](Property* const prop) {
-        const auto layerMask = enve_cast<LayerMaskEffect*>(prop);
-        if(!layerMask) {
-            return;
-        }
-        const auto vectorMask =
-                enve_cast<SmartVectorPath*>(layerMask->maskPathSource());
-        if(!vectorMask) {
-            return;
-        }
-        auto* const paths = vectorMask->getPathAnimator();
-        if(!paths) {
-            return;
-        }
-        const int pathCount = paths->ca_getNumberOfChildren();
-        for(int i = 0; i < pathCount; ++i) {
-            if(auto* const path = paths->ca_getChildAt<Property>(i)) {
-                scene->addToSelectedProps(path);
-            }
-        }
-    });
-    scene->requestUpdate();
+    AeMaskModule::syncSelection(scene, target);
+    if(scene) scene->requestUpdate();
 }
 }
 
@@ -104,7 +81,38 @@ void Canvas::handleAddSmartPointMousePress(const eMouseEvent &e) {
     if(mLastEndPoint ? mLastEndPoint->isHidden(mCurrentMode) : false) {
         clearCurrentSmartEndPoint();
     }
+    const qreal invScale = 1/e.fScale;
     qptr<BoundingBox> test;
+
+    if (e.fModifiers & Qt::AltModifier) {
+        if (const auto deletePoint =
+                enve_cast<SmartNodePoint*>(getPointAtAbsPos(e.fPos,
+                                                            CanvasMode::pointTransform,
+                                                            invScale))) {
+            clearPointsSelection();
+            clearCurrentSmartEndPoint();
+            clearLastPressedPoint();
+            deletePoint->actionRemove(false);
+            mPressedPoint = nullptr;
+            mStartTransform = false;
+            clearHovered();
+            emit requestUpdate();
+            return;
+        }
+    }
+
+    if (mHoveredNormalSegment.isValid()) {
+        clearPointsSelection();
+        clearCurrentSmartEndPoint();
+        mPressedPoint = mHoveredNormalSegment.divideAtAbsPos(snapEventPos(e, false));
+        if (mPressedPoint && !mPressedPoint->isSelected()) {
+            addPointToSelection(mPressedPoint);
+        }
+        mStartTransform = false;
+        clearHovered();
+        emit requestUpdate();
+        return;
+    }
 
     auto nodePointUnderMouse = static_cast<SmartNodePoint*>(mPressedPoint.data());
     if(nodePointUnderMouse ? !nodePointUnderMouse->isEndPoint() : false) {

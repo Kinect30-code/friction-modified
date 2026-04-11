@@ -36,7 +36,6 @@ QPointFAnimator::QPointFAnimator(const QString &name) :
     mYAnimator = enve::make_shared<QrealAnimator>("y");
     ca_addChild(mXAnimator);
     ca_addChild(mYAnimator);
-    setDimensionsSeparated(false);
 }
 
 QPointFAnimator::QPointFAnimator(const QPointF &iniValue,
@@ -87,8 +86,11 @@ QJSValue QPointFAnimator::prp_getEffectiveJSValue(QJSEngine& e, const qreal relF
     return toArray(e, getEffectiveValue(relFrame));
 }
 
-void QPointFAnimator::setDimensionsSeparated(const bool separated) {
-    mDimensionsSeparated = separated;
+void QPointFAnimator::SWT_abstractionContentVisibilityChanged(
+        const int visiblePartWidgetId,
+        const bool visible) {
+    Q_UNUSED(visiblePartWidgetId)
+    Q_UNUSED(visible)
 }
 
 QPointF QPointFAnimator::getBaseValue() const {

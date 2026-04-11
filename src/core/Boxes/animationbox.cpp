@@ -80,7 +80,15 @@ void AnimationBox::updateAnimationRange() {
         int frameCount;
         if(mSrcFramesCache) frameCount = mSrcFramesCache->getFrameCount();
         else frameCount = 0;
-        const int nFrames = qRound(frameCount*qAbs(mStretch));
+        qreal durationScale = 1.0;
+        if(mSrcFramesCache) {
+            const qreal sourceFps = mSrcFramesCache->getSourceFps();
+            const qreal sceneFps = prp_getSceneFPS();
+            if(sourceFps > 0.0 && sceneFps > 0.0) {
+                durationScale = sceneFps/sourceFps;
+            }
+        }
+        const int nFrames = qRound(frameCount*durationScale*qAbs(mStretch));
         durRect->setAnimationFrameDuration(nFrames);
     }
 }
@@ -128,7 +136,13 @@ int AnimationBox::getAnimationFrameForRelFrame(const qreal relFrame) {
         if(isZero6Dec(mStretch)) {
             pixId = lastFrameId;
         } else {
-            pixId = qRound((relFrame - animStartRelFrame)/qAbs(mStretch));
+            qreal sourceFrame = (relFrame - animStartRelFrame)/qAbs(mStretch);
+            const qreal sourceFps = mSrcFramesCache->getSourceFps();
+            const qreal sceneFps = prp_getSceneFPS();
+            if(sourceFps > 0.0 && sceneFps > 0.0) {
+                sourceFrame *= sourceFps/sceneFps;
+            }
+            pixId = qRound(sourceFrame);
             if(mStretch < 0) pixId = lastFrameId - pixId;
         }
     }

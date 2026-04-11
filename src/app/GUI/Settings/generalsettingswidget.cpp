@@ -121,7 +121,34 @@ GeneralSettingsWidget::GeneralSettingsWidget(QWidget *parent)
     infoLabel->setText(tr("Changes here will require a restart of Friction."));
     mScaleLayout->addWidget(infoLabel);
 
+    const auto mThemeWidget = new QWidget(this);
+    mThemeWidget->setContentsMargins(0, 0, 0, 0);
+    const auto mThemeLayout = new QHBoxLayout(mThemeWidget);
+    mThemeLayout->setContentsMargins(0, 0, 0, 0);
+    mThemeLayout->setMargin(0);
+    const auto mThemeLabel = new QLabel(tr("Theme"), this);
+    mTheme = new QComboBox(this);
+    mTheme->addItem(tr("Dark"), eSettings::UiThemeDark);
+    mTheme->addItem(tr("Light"), eSettings::UiThemeLight);
+    mThemeLayout->addWidget(mThemeLabel);
+    mThemeLayout->addStretch();
+    mThemeLayout->addWidget(mTheme);
+    mScaleLayout->addWidget(mThemeWidget);
+
     mGeneralLayout->addWidget(mScaleWidget);
+
+    const auto mInteractionWidget = new QGroupBox(this);
+    mInteractionWidget->setObjectName("BlueBox");
+    mInteractionWidget->setTitle(tr("Viewer Interaction"));
+    mInteractionWidget->setContentsMargins(0, 0, 0, 0);
+    const auto mInteractionLayout = new QVBoxLayout(mInteractionWidget);
+
+    mViewerRgsShortcuts = new QCheckBox(tr("Enable R/G/S transform shortcuts in the composition viewer"), this);
+    mViewerRgsShortcuts->setCheckable(true);
+    mViewerRgsShortcuts->setToolTip(tr("When enabled, pressing R, G or S over the composition viewer starts rotate, move or scale, and X/Y/Z can lock the axis during the transform.\n\nWhen disabled, these viewer shortcuts are ignored."));
+    mInteractionLayout->addWidget(mViewerRgsShortcuts);
+
+    mGeneralLayout->addWidget(mInteractionWidget);
 
     const auto mImportFileWidget = new QWidget(this);
     mImportFileWidget->setContentsMargins(0, 0, 0, 0);
@@ -161,10 +188,14 @@ void GeneralSettingsWidget::applySettings()
     AppSupport::setSettings("files",
                             "AutoSaveTimeout",
                             (mAutoSaveTimer->value() * 60) * 1000);
+    AppSupport::setSettings("ui",
+                            "ViewerRgsShortcutsEnabled",
+                            mViewerRgsShortcuts->isChecked());
     MainWindow::sGetInstance()->updateAutoSaveBackupState();
 
     mSett.fDefaultInterfaceScaling = mDefaultInterfaceScaling->isChecked();
     mSett.fInterfaceScaling = mInterfaceScaling->value() * 0.01;
+    mSett.fUiTheme = mTheme ? mTheme->currentData().toInt() : eSettings::UiThemeDark;
     mSett.fImportFileDirOpt = mImportFileDir->currentData().toInt();
 
     //eSizesUI::font.updateSize();
@@ -188,6 +219,17 @@ void GeneralSettingsWidget::updateSettings(bool restore)
     mDefaultInterfaceScaling->setChecked(mSett.fDefaultInterfaceScaling);
     mInterfaceScaling->setEnabled(!mDefaultInterfaceScaling->isChecked());
     mInterfaceScaling->setValue(mDefaultInterfaceScaling->isChecked() ? 100 : 100 * mSett.fInterfaceScaling);
+    if (mTheme) {
+        for (int i = 0; i < mTheme->count(); ++i) {
+            if (mTheme->itemData(i).toInt() == mSett.fUiTheme) {
+                mTheme->setCurrentIndex(i);
+                break;
+            }
+        }
+    }
+    mViewerRgsShortcuts->setChecked(restore ? true : AppSupport::getSettings("ui",
+                                                                              "ViewerRgsShortcutsEnabled",
+                                                                              true).toBool());
 
     for (int i = 0; i < mImportFileDir->count(); i++) {
         if (mImportFileDir->itemData(i).toInt() == mSett.fImportFileDirOpt) {

@@ -198,6 +198,9 @@ eSettings::eSettings(const int cpuThreads,
     gSettings << std::make_shared<eBoolSetting>(
                      fDefaultInterfaceScaling,
                      "defaultInterfaceScaling", true);
+    gSettings << std::make_shared<eIntSetting>(
+                     fUiTheme,
+                     "uiTheme", UiThemeDark);
 
     gSettings << std::make_shared<eIntSetting>(fImportFileDirOpt,
                                                "ImportFileDirOpt",

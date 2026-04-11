@@ -37,6 +37,7 @@ public:
 
     void setTarget(BoolProperty *property);
     void setTarget(BoolPropertyContainer *property);
+    void setPlaceholderCrossVisible(bool visible);
 protected:
     void mousePressEvent(QMouseEvent *);
     void paintEvent(QPaintEvent *);
@@ -44,6 +45,7 @@ protected:
     void leaveEvent(QEvent *);
 private:
     bool mHovered = false;
+    bool mPlaceholderCross = false;
     qptr<BoolProperty> mTarget;
     qptr<BoolPropertyContainer> mTargetContainer;
 };

@@ -92,6 +92,9 @@ set(
     BlendEffects/trackmatteeffect.cpp
     BlendEffects/blendeffectmenucreator.cpp
     BlendEffects/layermaskeffect.cpp
+    ../modules/ae_masks/aemaskmodule.cpp
+    ../modules/puppet/puppettoolmodule.cpp
+    ../modules/webm/webmalphapolicy.cpp
     Boxes/animationbox.cpp
     Boxes/boundingbox.cpp
     Boxes/boxrendercontainer.cpp

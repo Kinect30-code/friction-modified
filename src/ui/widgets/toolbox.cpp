@@ -23,6 +23,7 @@
 #include "toolbox.h"
 #include "themesupport.h"
 
+#include <QMenu>
 #include <QToolButton>
 
 using namespace Friction::Ui;
@@ -187,6 +188,59 @@ void ToolBox::setupMainAction(const QIcon &icon,
 
 void ToolBox::setupMainActions()
 {
+    auto lastMainAction = [this]() -> QAction* {
+        const auto acts = mGroupMain->actions();
+        return acts.isEmpty() ? nullptr : acts.constLast();
+    };
+
+    auto addMainToolbarAction = [this](QAction *act) {
+        if (!act) { return; }
+        mMain->addAction(act);
+        ThemeSupport::setToolbarButtonStyle("ToolBoxButton", mMain, act);
+    };
+
+    auto addMainToolGroupButton =
+            [this](const QList<QAction*> &actions,
+                   const QList<QPair<CanvasMode, QAction*>> &modeActions,
+                   QAction *fallbackAction) {
+        if (actions.isEmpty() || !fallbackAction) { return; }
+
+        const auto button = new QToolButton(mMain);
+        const auto menu = new QMenu(button);
+        button->setObjectName("ToolBoxButton");
+        button->setPopupMode(QToolButton::MenuButtonPopup);
+        button->setFocusPolicy(Qt::NoFocus);
+        button->setMenu(menu);
+        button->setDefaultAction(fallbackAction);
+
+        for (auto *act : actions) {
+            if (act) { menu->addAction(act); }
+        }
+
+        auto syncDefaultAction = [button, modeActions, fallbackAction](const CanvasMode mode) {
+            for (const auto &entry : modeActions) {
+                if (entry.first == mode && entry.second) {
+                    button->setDefaultAction(entry.second);
+                    return;
+                }
+            }
+            button->setDefaultAction(fallbackAction);
+        };
+
+        connect(&mDocument, &Document::canvasModeSet,
+                button, syncDefaultAction);
+        for (auto *act : actions) {
+            if (!act) { continue; }
+            connect(act, &QAction::triggered,
+                    button, [button, act]() {
+                button->setDefaultAction(act);
+            });
+        }
+
+        syncDefaultAction(mDocument.fCanvasMode);
+        mMain->addWidget(button);
+    };
+
     setupMainAction(QIcon::fromTheme("boxTransform"),
                     tr("Selection Tool"),
                     QKeySequence(AppSupport::getSettings("shortcuts",
@@ -194,6 +248,7 @@ void ToolBox::setupMainActions()
                                                          "V").toString()),
                     {CanvasMode::boxTransform},
                     true);
+    const auto selectionAction = lastMainAction();
     setupMainAction(QIcon::fromTheme("pointTransform"),
                     tr("Anchor / Point Tool"),
                     QKeySequence(AppSupport::getSettings("shortcuts",
@@ -201,6 +256,23 @@ void ToolBox::setupMainActions()
                                                          "Y").toString()),
                     {CanvasMode::pointTransform},
                     false);
+    const auto anchorAction = lastMainAction();
+    setupMainAction(QIcon::fromTheme("pathCreate"),
+                    tr("Pen Tool"),
+                    QKeySequence(AppSupport::getSettings("shortcuts",
+                                                         "pathCreate",
+                                                         "G").toString()),
+                    {CanvasMode::pathCreate},
+                    false);
+    const auto penAction = lastMainAction();
+    setupMainAction(QIcon::fromTheme("drawPath"),
+                    tr("Freehand Path Tool"),
+                    QKeySequence(AppSupport::getSettings("shortcuts",
+                                                         "drawPath",
+                                                         "Shift+G").toString()),
+                    {CanvasMode::drawPath},
+                    false);
+    const auto freehandAction = lastMainAction();
     setupMainAction(QIcon::fromTheme("puppetPin",
                                      QIcon::fromTheme("markers-add",
                                                       QIcon::fromTheme("pointTransform"))),
@@ -210,20 +282,7 @@ void ToolBox::setupMainActions()
                                                          "").toString()),
                     {CanvasMode::puppetPinCreate},
                     false);
-    setupMainAction(QIcon::fromTheme("pathCreate"),
-                    tr("Add Path"),
-                    QKeySequence(AppSupport::getSettings("shortcuts",
-                                                         "pathCreate",
-                                                         "F3").toString()),
-                    {CanvasMode::pathCreate},
-                    false);
-    setupMainAction(QIcon::fromTheme("drawPath"),
-                    tr("Pen Tool"),
-                    QKeySequence(AppSupport::getSettings("shortcuts",
-                                                         "drawPath",
-                                                         "G").toString()),
-                    {CanvasMode::drawPath},
-                    false);
+    const auto puppetPinAction = lastMainAction();
     setupMainAction(QIcon::fromTheme("circleCreate"),
                     tr("Ellipse Tool"),
                     QKeySequence(AppSupport::getSettings("shortcuts",
@@ -231,6 +290,7 @@ void ToolBox::setupMainActions()
                                                          "").toString()),
                     {CanvasMode::circleCreate},
                     false);
+    const auto ellipseAction = lastMainAction();
     setupMainAction(QIcon::fromTheme("rectCreate"),
                     tr("Shape Tool"),
                     QKeySequence(AppSupport::getSettings("shortcuts",
@@ -238,6 +298,7 @@ void ToolBox::setupMainActions()
                                                          "Q").toString()),
                     {CanvasMode::rectCreate},
                     false);
+    const auto rectAction = lastMainAction();
     setupMainAction(QIcon::fromTheme("textCreate"),
                     tr("Text Tool"),
                     QKeySequence(AppSupport::getSettings("shortcuts",
@@ -245,6 +306,7 @@ void ToolBox::setupMainActions()
                                                          "Ctrl+T").toString()),
                     {CanvasMode::textCreate},
                     false);
+    const auto textAction = lastMainAction();
     setupMainAction(QIcon::fromTheme("nullCreate"),
                     tr("Add Null Object"),
                     QKeySequence(AppSupport::getSettings("shortcuts",
@@ -252,6 +314,7 @@ void ToolBox::setupMainActions()
                                                          "F8").toString()),
                     {CanvasMode::nullCreate},
                     false);
+    const auto nullAction = lastMainAction();
     setupMainAction(QIcon::fromTheme("pick"),
                     tr("Color Pick Mode"),
                     QKeySequence(AppSupport::getSettings("shortcuts",
@@ -260,28 +323,54 @@ void ToolBox::setupMainActions()
                     {CanvasMode::pickFillStroke,
                      CanvasMode::pickFillStrokeEvent},
                     false);
+    const auto pickAction = lastMainAction();
 
-    // local pivot
-    mLocalPivot = new QAction(mDocument.fLocalPivot ?
-                                  QIcon::fromTheme("pivotLocal") :
-                                  QIcon::fromTheme("pivotGlobal"),
-                              tr("Pivot Global / Local"),
-                              mMain);
+    auto syncPivotModeAction = [this]() {
+        const bool localAxes = mDocument.fLocalPivot;
+        mLocalPivot->setIcon(QIcon::fromTheme(localAxes ?
+                                                 "pivotLocal" :
+                                                 "pivotGlobal"));
+        mLocalPivot->setText(localAxes ?
+                                 tr("Transform Axes: Local") :
+                                 tr("Transform Axes: Global"));
+        const QString tooltip = localAxes ?
+                    tr("Local axes: when a single layer is selected, move/scale/shear gizmos follow that layer's orientation. Multiple selection stays scene-aligned.") :
+                    tr("Global axes: transform gizmos stay scene-aligned.");
+        mLocalPivot->setToolTip(tooltip);
+        mLocalPivot->setStatusTip(tooltip);
+    };
+
+    // local pivot / transform axes
+    mLocalPivot = new QAction(mMain);
+    syncPivotModeAction();
     mLocalPivot->setShortcut(QKeySequence(AppSupport::getSettings("shortcuts",
                                                                   "localPivot",
                                                                   "Shift+Y").toString()));
     connect(mLocalPivot, &QAction::triggered,
-            this, [this]() {
+            this, [this, syncPivotModeAction]() {
         mDocument.fLocalPivot = !mDocument.fLocalPivot;
         for (const auto& scene : mDocument.fScenes) { scene->updatePivot(); }
         Document::sInstance->actionFinished();
-        mLocalPivot->setIcon(mDocument.fLocalPivot ?
-                         QIcon::fromTheme("pivotLocal") :
-                         QIcon::fromTheme("pivotGlobal"));
+        syncPivotModeAction();
     });
     mGroupMain->addAction(mLocalPivot);
+    const auto pivotAction = mLocalPivot;
 
-    mMain->addActions(mGroupMain->actions());
+    addMainToolbarAction(selectionAction);
+    addMainToolbarAction(anchorAction);
+    addMainToolGroupButton({penAction, freehandAction},
+                           {{CanvasMode::pathCreate, penAction},
+                            {CanvasMode::drawPath, freehandAction}},
+                           penAction);
+    addMainToolbarAction(puppetPinAction);
+    addMainToolGroupButton({rectAction, ellipseAction},
+                           {{CanvasMode::rectCreate, rectAction},
+                            {CanvasMode::circleCreate, ellipseAction}},
+                           rectAction);
+    addMainToolbarAction(textAction);
+    addMainToolbarAction(nullAction);
+    addMainToolbarAction(pickAction);
+    addMainToolbarAction(pivotAction);
 }
 
 void ToolBox::setupNodesAction(const QIcon &icon,

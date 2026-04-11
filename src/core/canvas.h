@@ -788,6 +788,8 @@ private:
     bool shouldShowXLineGizmo() const;
     bool shouldShowYLineGizmo() const;
     bool updateLineGizmoVisibility();
+    bool getSingleSelectionLocalGizmoAxes(QPointF &axisX,
+                                          QPointF &axisYUp) const;
 
     void updateRotateHandleGeometry(qreal invScale);
 

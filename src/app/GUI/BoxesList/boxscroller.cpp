@@ -279,7 +279,7 @@ bool BoxScroller::handlePickWhipTarget(BoundingBox *target) {
             }
             return true;
         }
-        source->setParentTransformKeepTransform(target->getTransformAnimator());
+        source->setParentEffectTarget(target);
         if (auto *win = MainWindow::sGetInstance()) {
             if (win->statusBar()) {
                 win->statusBar()->showMessage(
@@ -591,7 +591,8 @@ BoxScroller::DropTarget BoxScroller::getClosestDropTarget(const int yPos) {
             }
             for(const bool iDropOn : {dropOn, !dropOn}) {
                 if(iDropOn) {
-                    if(abs->getTarget()->SWT_dropSupport(mCurrentMimeData)) {
+                    if(abs->contentVisible() &&
+                       abs->getTarget()->SWT_dropSupport(mCurrentMimeData)) {
                         mCurrentDragRect = bsw->rect().translated(bsw->pos());
                         return {abs, 0, DropType::on};
                     }
@@ -613,7 +614,8 @@ BoxScroller::DropTarget BoxScroller::getClosestDropTarget(const int yPos) {
         const auto bsw = static_cast<BoxSingleWidget*>(wids.at(i));
         if(!bsw->isHidden() && bsw->getTargetAbstraction()) {
             const auto abs = bsw->getTargetAbstraction();
-            if(abs->getTarget()->SWT_dropSupport(mCurrentMimeData)) {
+            if(abs->contentVisible() &&
+               abs->getTarget()->SWT_dropSupport(mCurrentMimeData)) {
                 mCurrentDragRect = bsw->rect().translated(bsw->pos());
                 return {abs, 0, DropType::on};
             }
@@ -633,7 +635,7 @@ BoxScroller::DropTarget BoxScroller::getClosestDropTarget(const int yPos) {
         const auto bsw = static_cast<BoxSingleWidget*>(wids.at(i));
         if(!bsw->isHidden() && bsw->getTargetAbstraction()) {
             const auto abs = bsw->getTargetAbstraction();
-            if(tryDropIntoAbs(abs, 0, target)) {
+            if(abs->contentVisible() && tryDropIntoAbs(abs, 0, target)) {
                 mCurrentDragRect = QRect(bsw->x() + eSizesUI::widget,
                                          bsw->y() + eSizesUI::widget,
                                          width(), 1);

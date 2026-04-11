@@ -716,9 +716,6 @@ void MainWindow::setupMenuBar()
     connect(mViewFillStrokeAct, &QAction::triggered,
             this, [this](bool triggered) {
                 mUI->setDockVisible("Effect Controls", triggered);
-                if (triggered && mTabProperties) {
-                    mTabProperties->setCurrentIndex(mTabPropertiesIndex);
-                }
                 AppSupport::setSettings("ui", "FillStrokeVisible", triggered);
             });
 
@@ -795,9 +792,6 @@ void MainWindow::setupMenuBar()
     connect(mPanelEffectControlsAct, &QAction::triggered,
             this, [this](bool triggered) {
                 mUI->setDockVisible(tr("Effect Controls"), triggered);
-                if (triggered && mTabProperties) {
-                    mTabProperties->setCurrentIndex(mTabPropertiesIndex);
-                }
                 syncPanelsMenuState();
             });
 
@@ -821,24 +815,27 @@ void MainWindow::setupMenuBar()
                                syncPanelsMenuState();
                            });
 
-    mPanelEffectsAct = mPanelsMenu->addAction(tr("Effects / Presets"));
+    mPanelEffectsAct = mPanelsMenu->addAction(tr("Effect Presets"));
     mPanelEffectsAct->setCheckable(true);
     connect(mPanelEffectsAct, &QAction::triggered,
             this, [this](bool triggered) {
-                mUI->setDockVisible(tr("Effects"), triggered);
-                if (triggered && mRightTabs) {
-                    mRightTabs->setCurrentIndex(0);
-                }
+                mUI->setDockVisible(tr("Effect Presets"), triggered);
+                syncPanelsMenuState();
+            });
+
+    mPanelCharacterAct = mPanelsMenu->addAction(tr("Character"));
+    mPanelCharacterAct->setCheckable(true);
+    connect(mPanelCharacterAct, &QAction::triggered,
+            this, [this](bool triggered) {
+                mUI->setDockVisible(tr("Character"), triggered);
                 syncPanelsMenuState();
             });
 
     mPanelAlignAct = mPanelsMenu->addAction(tr("Align"));
+    mPanelAlignAct->setCheckable(true);
     connect(mPanelAlignAct, &QAction::triggered,
-            this, [this]() {
-                mUI->setDockVisible(tr("Effects"), true);
-                if (mRightTabs) {
-                    mRightTabs->setCurrentIndex(mTabAlignIndex);
-                }
+            this, [this](bool triggered) {
+                mUI->setDockVisible(tr("Align"), triggered);
                 syncPanelsMenuState();
             });
 
@@ -863,10 +860,20 @@ void MainWindow::setupMenuBar()
                                mUI->setDockFloating(tr("Layers"),
                                                     !mUI->isDockFloating(tr("Layers")));
                            });
-    mPanelsMenu->addAction(tr("Float/Dock Effects"),
+    mPanelsMenu->addAction(tr("Float/Dock Effect Presets"),
                            this, [this]() {
-                               mUI->setDockFloating(tr("Effects"),
-                                                    !mUI->isDockFloating(tr("Effects")));
+                               mUI->setDockFloating(tr("Effect Presets"),
+                                                    !mUI->isDockFloating(tr("Effect Presets")));
+                           });
+    mPanelsMenu->addAction(tr("Float/Dock Character"),
+                           this, [this]() {
+                               mUI->setDockFloating(tr("Character"),
+                                                    !mUI->isDockFloating(tr("Character")));
+                           });
+    mPanelsMenu->addAction(tr("Float/Dock Align"),
+                           this, [this]() {
+                               mUI->setDockFloating(tr("Align"),
+                                                    !mUI->isDockFloating(tr("Align")));
                            });
     mPanelsMenu->addSeparator();
     mPanelsMenu->addAction(tr("Save Layout"),
@@ -884,11 +891,11 @@ void MainWindow::setupMenuBar()
                                mUI->setDockVisible(tr("Project"), true);
                                mUI->setDockVisible(tr("Effect Controls"), true);
                                mUI->setDockVisible(tr("Layers"), true);
-                               mUI->setDockVisible(tr("Effects"), true);
+                               mUI->setDockVisible(tr("Effect Presets"), true);
+                               mUI->setDockVisible(tr("Character"), true);
+                               mUI->setDockVisible(tr("Align"), true);
                                if (mCenterTabs) { mCenterTabs->setCurrentIndex(0); }
                                if (mBottomTabs) { mBottomTabs->setCurrentWidget(mTimeline); }
-                               if (mTabProperties) { mTabProperties->setCurrentIndex(mTabPropertiesIndex); }
-                               if (mRightTabs) { mRightTabs->setCurrentIndex(0); }
                                syncPanelsMenuState();
                                statusBar()->showMessage(tr("AE panel layout restored"), 2500);
                            });

@@ -116,6 +116,13 @@ public:
         return false;
     }
 
+    virtual void SWT_abstractionContentVisibilityChanged(
+            const int visiblePartWidgetId,
+            const bool visible) {
+        Q_UNUSED(visiblePartWidgetId)
+        Q_UNUSED(visible)
+    }
+
     // Properties
     e_DECLARE_TYPE_FUNCTION(Property)
     // Animators

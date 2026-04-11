@@ -76,6 +76,13 @@ public:
     }
 
     template <class T = Cont>
+    stdsptr<T> sharedAtFrame(const int relFrame) const {
+        const auto it = mConts.atFrame(relFrame);
+        if(it == mConts.end()) return nullptr;
+        return std::static_pointer_cast<T>(it->second);
+    }
+
+    template <class T = Cont>
     T * atOrBeforeFrame(const int relFrame) const {
         const auto it = mConts.atOrBeforeFrame(relFrame);
         if(it == mConts.end()) return nullptr;

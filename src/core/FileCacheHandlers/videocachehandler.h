@@ -82,6 +82,7 @@ public:
     ImageCacheContainer* getFrameAtOrBeforeFrame(const int relFrame);
     eTask *scheduleFrameLoad(const int frame);
     int getFrameCount() const;
+    qreal getSourceFps() const override;
     void reload();
 
     void afterSourceChanged();

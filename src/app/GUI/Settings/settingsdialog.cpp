@@ -13,9 +13,11 @@
 #include "pluginssettingswidget.h"
 #include "widgets/presetsettingswidget.h"
 #include "shortcutsettingswidget.h"
+#include "themesupport.h"
 
 #include <QVBoxLayout>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QStatusBar>
 
 SettingsDialog::SettingsDialog(QWidget * const parent)
@@ -28,6 +30,7 @@ SettingsDialog::SettingsDialog(QWidget * const parent)
     setLayout(mainLayout);
 
     mTabWidget = new QTabWidget(this);
+    mTabWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
     const auto general = new GeneralSettingsWidget(this);
     addSettingsWidget(general, tr("General"));
@@ -100,6 +103,10 @@ SettingsDialog::SettingsDialog(QWidget * const parent)
         for (const auto widget : mSettingWidgets) {
             widget->applySettings();
         }
+        ThemeSupport::setThemeVariant(eSettings::sInstance->fUiTheme == eSettings::UiThemeLight
+                                          ? ThemeSupport::ThemeVariant::light
+                                          : ThemeSupport::ThemeVariant::dark);
+        ThemeSupport::setupTheme(eSizesUI::widget);
         emit eSettings::sInstance->settingsChanged();
         try {
             eSettings& sett = *eSettings::sInstance;
@@ -107,12 +114,13 @@ SettingsDialog::SettingsDialog(QWidget * const parent)
         } catch(const std::exception& e) {
             gPrintExceptionCritical(e);
         }
-        statusBar->showMessage(tr("Settings saved, you might have to restart"), 1500);
+        statusBar->showMessage(tr("Settings saved"), 1500);
     });
 
     updateSettings();
     restoreGeometry(AppSupport::getSettings("ui",
                                             "SettingsDialogGeometry").toByteArray());
+    setMinimumSize(420, 320);
 }
 
 SettingsDialog::~SettingsDialog()
@@ -125,7 +133,13 @@ SettingsDialog::~SettingsDialog()
 void SettingsDialog::addSettingsWidget(SettingsWidget * const widget,
                                        const QString &name)
 {
-    mTabWidget->addTab(widget, name);
+    const auto scrollArea = new QScrollArea(this);
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setFrameShape(QFrame::NoFrame);
+    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scrollArea->setWidget(widget);
+    mTabWidget->addTab(scrollArea, name);
+    mScrollAreas << scrollArea;
     mSettingWidgets << widget;
 }
 

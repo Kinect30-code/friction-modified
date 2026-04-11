@@ -67,6 +67,10 @@ public:
         ImportFileDirRecent,
         ImportFileDirProject
     };
+    enum UiTheme {
+        UiThemeDark,
+        UiThemeLight
+    };
     eSettings(const int cpuThreads,
               const intKB ramKB);
 
@@ -125,6 +129,7 @@ public:
 
     // restore ui on quit
     bool fRestoreDefaultUi = false;
+    int fUiTheme = UiThemeDark;
 
     // canvas settings
     bool fCanvasRtlSupport;

@@ -27,6 +27,7 @@
 
 #include <QKeyEvent>
 #include <QLabel>
+#include <QDebug>
 #include <QScrollBar>
 #include <QStatusBar>
 
@@ -172,7 +173,7 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     mStepPreviewTimer = new QTimer(this);
     mIdleCacheTimer = new QTimer(this);
     mIdleCacheTimer->setSingleShot(true);
-    mIdleCacheTimer->setInterval(350);
+    mIdleCacheTimer->setInterval(150);
 
     mFrameStartSpin = new FrameSpinBox(this);
     mFrameStartSpin->setKeyboardTracking(false);
@@ -370,6 +371,10 @@ void TimelineDockWidget::handleCurrentFrameChanged(int frame)
 {
     mCurrentFrameSpin->setValue(frame);
     if (mRenderProgress->isVisible()) { mRenderProgress->setValue(frame); }
+    if (eSettings::instance().fPreviewCache &&
+        RenderHandler::sInstance->currentPreviewState() == PreviewState::paused) {
+        RenderHandler::sInstance->setPreviewFrame(frame);
+    }
     scheduleIdlePreviewCache();
 }
 
@@ -396,36 +401,7 @@ void TimelineDockWidget::processIdlePreviewCache()
     const auto scene = *mDocument.fActiveScene;
     if (!scene) { return; }
 
-    const int currentFrame = scene->anim_getCurrentAbsFrame();
-    const int cacheSpan = qMax(12, qRound(scene->getFps()));
-    int minFrame = qMax(scene->getMinFrame(), currentFrame - cacheSpan/2);
-    int maxFrame = qMin(scene->getMaxFrame(), minFrame + cacheSpan);
-    if (scene->getFrameOut().enabled) {
-        maxFrame = qMin(maxFrame, scene->getFrameOut().frame);
-    }
-    if (scene->getFrameIn().enabled) {
-        minFrame = qMax(minFrame, scene->getFrameIn().frame);
-    }
-    if (maxFrame < currentFrame) {
-        maxFrame = currentFrame;
-    }
-    if (minFrame > currentFrame) {
-        minFrame = currentFrame;
-    }
-    if (maxFrame < minFrame) { return; }
-
-    auto &cacheHandler = scene->getSceneFramesHandler();
-    const int firstMissing = cacheHandler.firstEmptyFrameAtOrAfter(minFrame);
-    if (firstMissing > maxFrame) { return; }
-
-    scene->setMinFrameUseRange(minFrame);
-    scene->setMaxFrameUseRange(maxFrame);
-    if (const auto sound = scene->getSoundComposition()) {
-        sound->setMinFrameUseRange(minFrame);
-        sound->setMaxFrameUseRange(maxFrame);
-        sound->scheduleFrameRange({minFrame, maxFrame});
-    }
-    mDocument.updateScenes();
+    RenderHandler::sInstance->cacheAroundFrame(scene->anim_getCurrentAbsFrame());
 }
 
 void TimelineDockWidget::showRenderStatus(bool show)
@@ -463,15 +439,26 @@ bool TimelineDockWidget::processKeyPress(QKeyEvent *event)
     const bool alt = mods & Qt::AltModifier;
     const auto state = RenderHandler::sInstance->currentPreviewState();
     const bool jumpFrame = (mods & (Qt::ShiftModifier | Qt::AltModifier)) == (Qt::ShiftModifier | Qt::AltModifier);
+    if (ctrl && !alt && !(mods & Qt::MetaModifier) && key == Qt::Key_E) {
+        const auto widget = currentTimelineWidget();
+        if (!widget) { return false; }
+        widget->showSelectedKeyEaseMenu();
+        return true;
+    }
     if (!ctrl && !alt && !(mods & Qt::MetaModifier)) {
         switch (key) {
-        case Qt::Key_A: return applyAeRevealPreset(BoxScrollWidget::AeRevealPreset::AnchorPoint);
-        case Qt::Key_P: return applyAeRevealPreset(BoxScrollWidget::AeRevealPreset::Position);
-        case Qt::Key_S: return applyAeRevealPreset(BoxScrollWidget::AeRevealPreset::Scale);
-        case Qt::Key_R: return applyAeRevealPreset(BoxScrollWidget::AeRevealPreset::Rotation);
-        case Qt::Key_T: return applyAeRevealPreset(BoxScrollWidget::AeRevealPreset::Opacity);
-        case Qt::Key_M: return applyAeRevealPreset(BoxScrollWidget::AeRevealPreset::Masks);
-        case Qt::Key_U: return applyAeRevealPreset(BoxScrollWidget::AeRevealPreset::Keyframed);
+        case Qt::Key_T: {
+            const auto widget = currentTimelineWidget();
+            if (!widget) { return false; }
+            widget->showSelectedKeyStrengthMenu();
+            return true;
+        }
+        case Qt::Key_U: {
+            const auto widget = currentTimelineWidget();
+            if (!widget) { return false; }
+            widget->toggleSelectedTransformVisibility();
+            return true;
+        }
         default:
             break;
         }
@@ -486,13 +473,13 @@ bool TimelineDockWidget::processKeyPress(QKeyEvent *event)
     } else if (key == Qt::Key_Space ||
                (key == Qt::Key_0 && (mods & Qt::KeypadModifier))) { // start/resume playback
         if (!eSettings::instance().fPreviewCache) {
-            if (mStepPreviewTimer->isActive()) { pausePreview(); }
+            if (mStepPreviewTimer->isActive()) { stopPreview(); }
             else { playPreview(); }
         } else {
             switch (state) {
                 case PreviewState::stopped: renderPreview(); break;
                 case PreviewState::rendering: playPreview(); break;
-                case PreviewState::playing: pausePreview(); break;
+                case PreviewState::playing: stopPreview(); break;
                 case PreviewState::paused: resumePreview(); break;
             }
         }
@@ -600,11 +587,11 @@ void TimelineDockWidget::previewBeingPlayed()
     showRenderStatus(false);
     mPlayFromBeginningButton->setDisabled(true);
     mStopButton->setDisabled(false);
-    mPlayButton->setIcon(QIcon::fromTheme("pause"));
-    mPlayButton->setText(tr("Pause Preview"));
+    mPlayButton->setIcon(QIcon::fromTheme("stop"));
+    mPlayButton->setText(tr("Stop Preview"));
     disconnect(mPlayButton, nullptr, this, nullptr);
     connect(mPlayButton, &QAction::triggered,
-            this, &TimelineDockWidget::pausePreview);
+            this, &TimelineDockWidget::stopPreview);
 }
 
 void TimelineDockWidget::previewBeingRendered()
@@ -753,7 +740,7 @@ void TimelineDockWidget::playPreview()
 void TimelineDockWidget::renderPreview()
 {
     if (eSettings::instance().fPreviewCache) {
-        RenderHandler::sInstance->renderPreview();
+        RenderHandler::sInstance->playPreview();
     } else { setStepPreviewStart(); }
 }
 
@@ -814,15 +801,11 @@ void TimelineDockWidget::updateSettingsForCurrentCanvas(Canvas* const canvas)
 
 void TimelineDockWidget::stopPreview()
 {
-    const auto state = RenderHandler::sInstance->currentPreviewState();
-    switch (state) {
+    switch (RenderHandler::sInstance->currentPreviewState()) {
     case PreviewState::paused:
-        interruptPreview();
-        break;
     case PreviewState::playing:
     case PreviewState::rendering:
         interruptPreview();
-        renderPreview();
         break;
     default:;
     }
@@ -908,7 +891,16 @@ bool TimelineDockWidget::shiftCurrentFrameBy(int delta)
 
 TimelineWidget *TimelineDockWidget::currentTimelineWidget() const
 {
-    return qobject_cast<TimelineWidget*>(mTimelineLayout->currentWidget());
+    if (!mTimelineLayout) { return nullptr; }
+
+    if (auto *widget = qobject_cast<TimelineWidget*>(mTimelineLayout->currentWidget())) {
+        return widget;
+    }
+
+    const auto currentPage = mTimelineLayout->currentWidget();
+    if (!currentPage) { return nullptr; }
+
+    return currentPage->findChild<TimelineWidget*>(QStringLiteral("AeTimelineWidget"));
 }
 
 bool TimelineDockWidget::applyAeRevealPreset(BoxScrollWidget::AeRevealPreset preset)

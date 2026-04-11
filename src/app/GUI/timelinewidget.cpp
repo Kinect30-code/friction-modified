@@ -361,36 +361,21 @@ TimelineWidget::TimelineWidget(Document &document,
             fn();
         });
     };
-    addTimelineShortcut(QKeySequence(Qt::Key_A), [this]() { applyAeRevealPreset(BoxScrollWidget::AeRevealPreset::AnchorPoint); });
-    addTimelineShortcut(QKeySequence(Qt::Key_P), [this]() { applyAeRevealPreset(BoxScrollWidget::AeRevealPreset::Position); });
-    addTimelineShortcut(QKeySequence(Qt::Key_S), [this]() { applyAeRevealPreset(BoxScrollWidget::AeRevealPreset::Scale); });
-    addTimelineShortcut(QKeySequence(Qt::Key_R), [this]() { applyAeRevealPreset(BoxScrollWidget::AeRevealPreset::Rotation); });
-    addTimelineShortcut(QKeySequence(Qt::Key_T), [this]() { applyAeRevealPreset(BoxScrollWidget::AeRevealPreset::Opacity); });
-    addTimelineShortcut(QKeySequence(Qt::Key_U), [this]() { applyAeRevealPreset(BoxScrollWidget::AeRevealPreset::Keyframed); });
-    addTimelineShortcut(QKeySequence(Qt::Key_M), [this]() { revealSelectedMasks(); });
+    addTimelineShortcut(QKeySequence(Qt::CTRL + Qt::Key_Tab), [this]() {
+        if (mGraphAct) {
+            mGraphAct->trigger();
+        }
+    });
+    addTimelineShortcut(QKeySequence(Qt::CTRL + Qt::SHIFT + Qt::Key_Tab), [this]() {
+        if (mGraphAct) {
+            mGraphAct->trigger();
+        }
+    });
     addTimelineShortcut(QKeySequence(Qt::Key_Tab), [this]() {
         showGroupFlowPopup();
     });
     addTimelineShortcut(QKeySequence(Qt::SHIFT + Qt::Key_Tab), [this]() {
         showGroupFlowPopup();
-    });
-    addTimelineShortcut(QKeySequence(Qt::Key_B), [this]() {
-        if (!mCurrentScene) { return; }
-        if (mCurrentScene->getFrameOut().enabled &&
-            mCurrentScene->getCurrentFrame() >= mCurrentScene->getFrameOut().frame) {
-            return;
-        }
-        const int frame = mCurrentScene->getCurrentFrame();
-        mCurrentScene->setFrameIn(frame == 0 || (mCurrentScene->getFrameIn().frame != frame), frame);
-    });
-    addTimelineShortcut(QKeySequence(Qt::Key_N), [this]() {
-        if (!mCurrentScene) { return; }
-        if (mCurrentScene->getFrameIn().enabled &&
-            mCurrentScene->getCurrentFrame() <= mCurrentScene->getFrameIn().frame) {
-            return;
-        }
-        const int frame = mCurrentScene->getCurrentFrame();
-        mCurrentScene->setFrameOut(mCurrentScene->getFrameOut().frame != frame, frame);
     });
 }
 
@@ -407,48 +392,8 @@ bool TimelineWidget::handleAeShortcutEvent(QKeyEvent *event)
     }
 
     switch (event->key()) {
-    case Qt::Key_A:
-        applyAeRevealPreset(BoxScrollWidget::AeRevealPreset::AnchorPoint);
-        return true;
-    case Qt::Key_P:
-        applyAeRevealPreset(BoxScrollWidget::AeRevealPreset::Position);
-        return true;
-    case Qt::Key_S:
-        applyAeRevealPreset(BoxScrollWidget::AeRevealPreset::Scale);
-        return true;
-    case Qt::Key_R:
-        applyAeRevealPreset(BoxScrollWidget::AeRevealPreset::Rotation);
-        return true;
-    case Qt::Key_T:
-        applyAeRevealPreset(BoxScrollWidget::AeRevealPreset::Opacity);
-        return true;
-    case Qt::Key_U:
-        applyAeRevealPreset(BoxScrollWidget::AeRevealPreset::Keyframed);
-        return true;
-    case Qt::Key_M:
-        revealSelectedMasks();
-        return true;
     case Qt::Key_Tab:
         showGroupFlowPopup();
-        return true;
-    case Qt::Key_B:
-        if (!mCurrentScene) { return false; }
-        if (mCurrentScene->getFrameOut().enabled &&
-            mCurrentScene->getCurrentFrame() >= mCurrentScene->getFrameOut().frame) {
-            return true;
-        }
-        mCurrentScene->setFrameIn(mCurrentScene->getCurrentFrame() == 0 ||
-                                      (mCurrentScene->getFrameIn().frame != mCurrentScene->getCurrentFrame()),
-                                  mCurrentScene->getCurrentFrame());
-        return true;
-    case Qt::Key_N:
-        if (!mCurrentScene) { return false; }
-        if (mCurrentScene->getFrameIn().enabled &&
-            mCurrentScene->getCurrentFrame() <= mCurrentScene->getFrameIn().frame) {
-            return true;
-        }
-        mCurrentScene->setFrameOut(mCurrentScene->getFrameOut().frame != mCurrentScene->getCurrentFrame(),
-                                   mCurrentScene->getCurrentFrame());
         return true;
     default:
         return false;
@@ -495,9 +440,11 @@ bool TimelineWidget::handleTimelineLayerSelection(BoundingBox *box,
             if (box->isSelected()) {
                 mCurrentScene->removeBoxFromSelection(box);
             } else {
+                mCurrentScene->clearSelectedProps();
                 mCurrentScene->addBoxToSelection(box);
             }
         } else {
+            mCurrentScene->clearSelectedProps();
             mCurrentScene->clearBoxesSelection();
             mCurrentScene->addBoxToSelection(box);
         }
@@ -513,6 +460,7 @@ bool TimelineWidget::handleTimelineLayerSelection(BoundingBox *box,
         }
     }
     if (!anchor) {
+        mCurrentScene->clearSelectedProps();
         mCurrentScene->addBoxToSelection(box);
         mTimelineSelectionAnchor = box;
         return true;
@@ -522,12 +470,14 @@ bool TimelineWidget::handleTimelineLayerSelection(BoundingBox *box,
     const int anchorIndex = boxes.indexOf(anchor);
     const int boxIndex = boxes.indexOf(box);
     if (anchorIndex < 0 || boxIndex < 0) {
+        mCurrentScene->clearSelectedProps();
         mCurrentScene->addBoxToSelection(box);
         mTimelineSelectionAnchor = box;
         return true;
     }
 
     if (!ctrl) {
+        mCurrentScene->clearSelectedProps();
         mCurrentScene->clearBoxesSelection();
     }
     const int minIndex = qMin(anchorIndex, boxIndex);
@@ -724,6 +674,27 @@ void TimelineWidget::clearAeRevealPreset()
     }
 }
 
+void TimelineWidget::showSelectedKeyEaseMenu()
+{
+    if (mKeysView) {
+        mKeysView->showQuickEaseMenu();
+    }
+}
+
+void TimelineWidget::showSelectedKeyStrengthMenu()
+{
+    if (mKeysView) {
+        mKeysView->showQuickStrengthMenu();
+    }
+}
+
+void TimelineWidget::toggleSelectedTransformVisibility()
+{
+    if (mBoxesListWidget) {
+        mBoxesListWidget->toggleSelectedTransformVisibility();
+    }
+}
+
 void TimelineWidget::revealSelectedFrameRemapping()
 {
     if (mBoxesListWidget) {
@@ -894,9 +865,7 @@ void TimelineWidget::setCurrentScene(Canvas * const scene) {
         setCanvasFrameRange(range);
         mFrameScrollBar->setFirstViewedFrame(scene->getCurrentFrame());
         mFrameRangeScrollBar->setFirstViewedFrame(scene->getCurrentFrame());
-        const int padding = 2;
-        const FrameRange newRange = {range.fMin - padding, range.fMax + padding};
-        setViewedFrameRange(newRange);
+        setViewedFrameRange(range);
 
         connect(scene, &Canvas::currentFrameChanged,
                 mFrameScrollBar, &FrameScrollBar::setFirstViewedFrame);
@@ -1143,26 +1112,41 @@ void TimelineWidget::setSearchText(const QString &text) {
 }
 
 void TimelineWidget::setViewedFrameRange(const FrameRange& range) {
-    mFrameRangeScrollBar->setViewedFrameRange(range);
-    mFrameScrollBar->setDisplayedFrameRange(range);
-    mKeysView->setFramesRange(range);
+    FrameRange clampedRange = range;
+    const FrameRange canvasRange = {mFrameRangeScrollBar->getMinFrame(),
+                                    mFrameRangeScrollBar->getMaxFrame()};
+    const int canvasSpan = qMax(0, canvasRange.fMax - canvasRange.fMin);
+    const int requestedSpan = qMax(0, range.fMax - range.fMin);
+    const int targetSpan = qMin(requestedSpan, canvasSpan);
+
+    clampedRange.fMin = qMax(range.fMin, canvasRange.fMin);
+    clampedRange.fMax = clampedRange.fMin + targetSpan;
+    if (clampedRange.fMax > canvasRange.fMax) {
+        clampedRange.fMax = canvasRange.fMax;
+        clampedRange.fMin = qMax(canvasRange.fMin, clampedRange.fMax - targetSpan);
+    }
+    if (clampedRange.fMin > clampedRange.fMax) {
+        clampedRange = canvasRange;
+    }
+
+    mFrameRangeScrollBar->setViewedFrameRange(clampedRange);
+    mFrameScrollBar->setDisplayedFrameRange(clampedRange);
+    mKeysView->setFramesRange(clampedRange);
 }
 
 void TimelineWidget::setCanvasFrameRange(const FrameRange& range) {
-    const int padding = qMax(60, (range.fMax - range.fMin + 1) / 2);
-    const FrameRange expandedRange = {qMin(range.fMin - padding, -padding),
-                                      range.fMax + padding};
-    mFrameRangeScrollBar->setDisplayedFrameRange(expandedRange);
+    const FrameRange clampedRange = range;
+    mFrameRangeScrollBar->setDisplayedFrameRange(clampedRange);
+    mFrameRangeScrollBar->setCanvasFrameRange(clampedRange);
+    mFrameScrollBar->setCanvasFrameRange(clampedRange);
     setViewedFrameRange(mFrameRangeScrollBar->getViewedRange());
-    mFrameRangeScrollBar->setCanvasFrameRange(expandedRange);
-    mFrameScrollBar->setCanvasFrameRange(expandedRange);
 }
 
 void TimelineWidget::ensureCurrentFrameVisible(const int frame)
 {
     const FrameRange viewed = mFrameRangeScrollBar->getViewedRange();
     const int span = qMax(1, viewed.fMax - viewed.fMin);
-    const int margin = qMax(3, span/6);
+    const int margin = qMax(3, span/24);
     if (frame >= viewed.fMin + margin && frame <= viewed.fMax - margin) {
         return;
     }

@@ -64,10 +64,12 @@ TargetTransformEffect::TargetTransformEffect(
     });
 
     connect(mTarget.get(), &BoxTargetProperty::setActionStarted,
-            this, [this]() {
+            this, [this](BoundingBox* const oldTarget,
+                         BoundingBox* const newTarget) {
         const auto parent = getFirstAncestor<BoundingBox>();
         if(!parent) return;
         mPosBeforeTargetChange = parent->getPivotAbsPos();
+        beforeTargetChanged(parent, oldTarget, newTarget);
     });
 
     connect(mTarget.get(), &BoxTargetProperty::setActionFinished,
@@ -75,6 +77,9 @@ TargetTransformEffect::TargetTransformEffect(
                          BoundingBox* const newTarget) {
         const auto parent = getFirstAncestor<BoundingBox>();
         if(!parent) return;
+        if(applyTargetChangeCompensation(parent, oldTarget, newTarget)) {
+            return;
+        }
         const auto posAfter = parent->getPivotAbsPos();
 
         parent->startPosTransform();
@@ -99,6 +104,32 @@ FrameRange TargetTransformEffect::prp_getIdenticalRelRange(
     const auto parentIdent = targetTransform->prp_getIdenticalRelRange(tRelFrame);
     const auto absParentIdent = targetTransform->prp_relRangeToAbsRange(parentIdent);
     return thisIdent*prp_absRangeToRelRange(absParentIdent);
+}
+
+BoundingBox *TargetTransformEffect::target() const {
+    return mTarget->getTarget();
+}
+
+void TargetTransformEffect::setTargetAction(BoundingBox *target) {
+    mTarget->setTargetAction(target);
+}
+
+void TargetTransformEffect::beforeTargetChanged(BoundingBox* const parent,
+                                                BoundingBox* const oldTarget,
+                                                BoundingBox* const newTarget) {
+    Q_UNUSED(parent)
+    Q_UNUSED(oldTarget)
+    Q_UNUSED(newTarget)
+}
+
+bool TargetTransformEffect::applyTargetChangeCompensation(
+        BoundingBox* const parent,
+        BoundingBox* const oldTarget,
+        BoundingBox* const newTarget) {
+    Q_UNUSED(parent)
+    Q_UNUSED(oldTarget)
+    Q_UNUSED(newTarget)
+    return false;
 }
 
 void TargetTransformEffect::setRotScaleAfterTargetChange(

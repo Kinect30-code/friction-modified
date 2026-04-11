@@ -110,13 +110,13 @@ LayerRelationsWidget::LayerRelationsWidget(Document &document,
 
         const auto data = mParentCombo->itemData(index).value<quintptr>();
         if (data == kNoneItemData) {
-            mCurrentBox->clearParentKeepTransform();
+            mCurrentBox->clearParentEffectTarget();
         } else {
             const auto parentBox = reinterpret_cast<BoundingBox*>(data);
             if (!parentBox || parentBox == mCurrentBox) {
                 return;
             }
-            mCurrentBox->setParentTransformKeepTransform(parentBox->getTransformAnimator());
+            mCurrentBox->setParentEffectTarget(parentBox);
         }
 
         mDocument.actionFinished();
@@ -212,20 +212,15 @@ void LayerRelationsWidget::syncControls()
         return;
     }
 
-    const auto currentParent = mCurrentBox->getParentTransform();
-    const auto defaultParent = mCurrentBox->getParentGroup()
-            ? mCurrentBox->getParentGroup()->getTransformAnimator()
-            : nullptr;
-
     {
         QSignalBlocker blocker(mParentCombo);
         mUpdatingControls = true;
         int parentIndex = 0;
-        if (currentParent && currentParent != defaultParent) {
+        if (const auto currentParent = mCurrentBox->getParentEffectTarget()) {
             for (int i = 1; i < mParentCombo->count(); ++i) {
                 const auto data = mParentCombo->itemData(i).value<quintptr>();
                 const auto *box = reinterpret_cast<BoundingBox*>(data);
-                if (box && box->getTransformAnimator() == currentParent) {
+                if (box == currentParent) {
                     parentIndex = i;
                     break;
                 }

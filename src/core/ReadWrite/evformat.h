@@ -49,7 +49,7 @@ namespace EvFormat {
         grid = 34,
         timelineColor = 35,
 
-        nextVersion
+        nextVersion = timelineColor
     };
 
     const int version = nextVersion - 1;

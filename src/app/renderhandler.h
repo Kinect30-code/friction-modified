@@ -63,6 +63,7 @@ public:
     void renderFromSettings(RenderInstanceSettings * const settings);
 
     void setPreviewFrame(const int &frame);
+    void cacheAroundFrame(const int frame);
 
     void setLoop(const bool loop);
 
@@ -86,6 +87,9 @@ private:
     void nextPreviewRenderFrame();
     void nextPreviewFrame();
     void nextCurrentRenderFrame();
+    void ensurePreviewWindowQueued(int anchorFrame);
+    void stopBackgroundCaching();
+    void restoreVisiblePreviewFrame();
 
     void setPreviewState(const PreviewState state);
     void setRenderingPreview(const bool rendering);
@@ -131,6 +135,13 @@ private:
 
     int mSavedCurrentFrame = 0;
     qreal mSavedResolutionFraction = 100;
+    int mPreviewNominalIntervalMs = 0;
+    bool mPreviewWaitingForCache = false;
+    bool mPreviewAudioPausedForCache = false;
+    bool mPreviewAudioNeedsRestart = false;
+    bool mPreviewRenderCursorRetargeted = false;
+    bool mBackgroundCaching = false;
+    int mBackgroundCacheVisibleFrame = 0;
 };
 
 #endif // RENDERHANDLER_H

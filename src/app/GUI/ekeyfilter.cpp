@@ -100,7 +100,8 @@ eKeyFilter *eKeyFilter::sCreateNumberFilter(MainWindow * const window) {
 
 bool eKeyFilter::eventFilter(QObject *watched, QEvent *event) {
     if(event->type() == QEvent::KeyPress ||
-       event->type() == QEvent::KeyRelease) {
+       event->type() == QEvent::KeyRelease ||
+       event->type() == QEvent::ShortcutOverride) {
         const auto kEvent = static_cast<QKeyEvent*>(event);
         if (belongsToTimelineWidget(watched) && isAeTimelineShortcut(kEvent)) {
             if (mMainWindow->processKeyEvent(kEvent)) { return true; }

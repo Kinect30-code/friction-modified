@@ -63,6 +63,13 @@ enum class CtrlsMode : short;
 class KeysView : public QWidget, public KeyFocusTarget {
     Q_OBJECT
 public:
+    enum class QuickEaseMode : short {
+        Auto,
+        EaseIn,
+        EaseOut,
+        EaseInOut
+    };
+
     explicit KeysView(BoxScrollWidget *boxesListVisible,
                       QWidget *parent = nullptr);
 
@@ -186,6 +193,8 @@ public:
     bool graphEasingApplyExpression(QrealAnimator *anim,
                                     const FrameRange &range,
                                     const QString &easing);
+    void showQuickEaseMenu();
+    void showQuickStrengthMenu();
 
     TimelineHighlightWidget *requestHighlighter();
 private:
@@ -221,6 +230,13 @@ private:
     void graphConstrainAnimatorCtrlsFrameValues();
     void graphGetAnimatorsMinMaxValue(qreal &minVal, qreal &maxVal);
     void graphMakeSegmentsSmoothAction(const bool smooth);
+    QList<GraphAnimator*> selectedGraphAnimators() const;
+    bool applyQuickInterpolation(const bool smooth);
+    bool applyQuickEasingPreset(const QString &presetId);
+    bool applyQuickEasingFamily(const QString &family);
+    QString resolveQuickEasingPresetId(const QString &presetId) const;
+    QPoint quickMenuAnchorPos() const;
+    QString quickEaseModeLabel() const;
     void clearHoveredKey();
     SelectedKeySpan getSelectedKeySpan() const;
     bool prepareEdgeScaleFromPressedKey();
@@ -311,6 +327,7 @@ private:
     qreal mSavedMinShownValue = 0;
     qreal mValueInc = 0;
     int mValuePrec = 2;
+    QuickEaseMode mQuickEaseMode = QuickEaseMode::EaseInOut;
 };
 
 #endif // KEYSVIEW_H

@@ -89,8 +89,10 @@ signals:
 protected:
     void closeEvent(QCloseEvent *event) override
     {
-        emit requestDockBack(mLabel);
-        event->ignore();
+        if (isVisible()) {
+            mSnapTimer.stop();
+        }
+        event->accept();
     }
 
     void moveEvent(QMoveEvent *event) override

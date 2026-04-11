@@ -5,6 +5,7 @@
 #include <QTabWidget>
 
 class SettingsWidget;
+class QScrollArea;
 
 class SettingsDialog : public QDialog
 {
@@ -20,6 +21,7 @@ private:
     void updateSettings(bool restore = false);
 
     QTabWidget* mTabWidget = nullptr;
+    QList<QScrollArea*> mScrollAreas;
     QList<SettingsWidget*> mSettingWidgets;
 };
 

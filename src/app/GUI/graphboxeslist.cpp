@@ -25,6 +25,7 @@
 
 #include <QPainter>
 #include <QMouseEvent>
+#include <QDebug>
 #include "Animators/SmartPath/smartpathanimator.h"
 #include "Animators/transformanimator.h"
 #include "Expressions/expression.h"
@@ -37,6 +38,208 @@
 #include "Animators/qrealkey.h"
 #include "GUI/BoxesList/boxscrollwidget.h"
 #include "themesupport.h"
+
+namespace {
+enum class QuickBezierMode {
+    EaseIn,
+    EaseOut,
+    EaseInOut
+};
+
+struct QuickBezierPreset {
+    QuickBezierMode mode;
+    qreal x1;
+    qreal y1;
+    qreal x2;
+    qreal y2;
+};
+
+bool resolveQuickBezierPreset(const QString &easingId, QuickBezierPreset &preset)
+{
+    const QString id = easingId.section('.', -1);
+    if (id == QStringLiteral("easeInSine")) {
+        preset = {QuickBezierMode::EaseIn, 0.12, 0.0, 0.39, 0.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeOutSine")) {
+        preset = {QuickBezierMode::EaseOut, 0.61, 1.0, 0.88, 1.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeInOutSine")) {
+        preset = {QuickBezierMode::EaseInOut, 0.37, 0.0, 0.63, 1.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeInQuad")) {
+        preset = {QuickBezierMode::EaseIn, 0.11, 0.0, 0.50, 0.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeOutQuad")) {
+        preset = {QuickBezierMode::EaseOut, 0.50, 1.0, 0.89, 1.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeInOutQuad")) {
+        preset = {QuickBezierMode::EaseInOut, 0.45, 0.0, 0.55, 1.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeInCubic")) {
+        preset = {QuickBezierMode::EaseIn, 0.32, 0.0, 0.67, 0.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeOutCubic")) {
+        preset = {QuickBezierMode::EaseOut, 0.33, 1.0, 0.68, 1.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeInOutCubic")) {
+        preset = {QuickBezierMode::EaseInOut, 0.65, 0.0, 0.35, 1.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeInQuart")) {
+        preset = {QuickBezierMode::EaseIn, 0.50, 0.0, 0.75, 0.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeOutQuart")) {
+        preset = {QuickBezierMode::EaseOut, 0.25, 1.0, 0.50, 1.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeInOutQuart")) {
+        preset = {QuickBezierMode::EaseInOut, 0.76, 0.0, 0.24, 1.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeInQuint")) {
+        preset = {QuickBezierMode::EaseIn, 0.64, 0.0, 0.78, 0.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeOutQuint")) {
+        preset = {QuickBezierMode::EaseOut, 0.22, 1.0, 0.36, 1.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeInOutQuint")) {
+        preset = {QuickBezierMode::EaseInOut, 0.83, 0.0, 0.17, 1.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeInExpo")) {
+        preset = {QuickBezierMode::EaseIn, 0.70, 0.0, 0.84, 0.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeOutExpo")) {
+        preset = {QuickBezierMode::EaseOut, 0.16, 1.0, 0.30, 1.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeInOutExpo")) {
+        preset = {QuickBezierMode::EaseInOut, 0.87, 0.0, 0.13, 1.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeInCirc")) {
+        preset = {QuickBezierMode::EaseIn, 0.55, 0.0, 1.00, 0.45};
+        return true;
+    }
+    if (id == QStringLiteral("easeOutCirc")) {
+        preset = {QuickBezierMode::EaseOut, 0.00, 0.55, 0.45, 1.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeInOutCirc")) {
+        preset = {QuickBezierMode::EaseInOut, 0.85, 0.0, 0.15, 1.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeInBack")) {
+        preset = {QuickBezierMode::EaseIn, 0.36, 0.0, 0.66, -0.56};
+        return true;
+    }
+    if (id == QStringLiteral("easeOutBack")) {
+        preset = {QuickBezierMode::EaseOut, 0.34, 1.56, 0.64, 1.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeInOutBack")) {
+        preset = {QuickBezierMode::EaseInOut, 0.68, -0.6, 0.32, 1.6};
+        return true;
+    }
+    if (id == QStringLiteral("easeInBounce")) {
+        preset = {QuickBezierMode::EaseIn, 0.60, 0.0, 0.95, 0.25};
+        return true;
+    }
+    if (id == QStringLiteral("easeOutBounce")) {
+        preset = {QuickBezierMode::EaseOut, 0.05, 0.75, 0.40, 1.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeInOutBounce")) {
+        preset = {QuickBezierMode::EaseInOut, 0.68, 0.0, 0.32, 1.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeInElastic")) {
+        preset = {QuickBezierMode::EaseIn, 0.70, -0.75, 0.90, 0.0};
+        return true;
+    }
+    if (id == QStringLiteral("easeOutElastic")) {
+        preset = {QuickBezierMode::EaseOut, 0.10, 1.0, 0.30, 1.75};
+        return true;
+    }
+    if (id == QStringLiteral("easeInOutElastic")) {
+        preset = {QuickBezierMode::EaseInOut, 0.80, -0.8, 0.20, 1.8};
+        return true;
+    }
+    return false;
+}
+
+bool applyQuickBezierPreset(GraphKey *firstKey,
+                            GraphKey *lastKey,
+                            const QuickBezierPreset &preset)
+{
+    if (!firstKey || !lastKey || firstKey == lastKey) {
+        return false;
+    }
+
+    const qreal startFrame = firstKey->getRelFrame();
+    const qreal endFrame = lastKey->getRelFrame();
+    const qreal dFrame = endFrame - startFrame;
+    if (qFuzzyIsNull(dFrame)) {
+        return false;
+    }
+
+    const qreal startValue = firstKey->getValueForGraph();
+    const qreal endValue = lastKey->getValueForGraph();
+    const qreal dValue = endValue - startValue;
+
+    firstKey->setCtrlsModeAction(CtrlsMode::corner);
+    lastKey->setCtrlsModeAction(CtrlsMode::corner);
+    firstKey->setC1EnabledAction(true);
+    lastKey->setC0EnabledAction(true);
+
+    firstKey->setC1Frame(startFrame + dFrame * preset.x1);
+    firstKey->setC1Value(startValue + dValue * preset.y1);
+    lastKey->setC0Frame(startFrame + dFrame * preset.x2);
+    lastKey->setC0Value(startValue + dValue * preset.y2);
+    lastKey->afterKeyChanged();
+    return true;
+}
+
+QList<QList<GraphKey*>> selectedOrForwardSegmentsForGraph(GraphAnimator *anim)
+{
+    QList<QList<GraphKey*>> segments;
+    if (!anim) {
+        return segments;
+    }
+
+    anim->graph_getSelectedSegments(segments);
+    if (!segments.isEmpty()) {
+        return segments;
+    }
+
+    const auto &selectedKeys = anim->anim_getSelectedKeys();
+    for (const auto &key : selectedKeys) {
+        auto *graphKey = dynamic_cast<GraphKey*>(key);
+        if (!graphKey) {
+            continue;
+        }
+        auto *nextGraphKey = dynamic_cast<GraphKey*>(graphKey->getNextKey());
+        if (!nextGraphKey) {
+            continue;
+        }
+        segments << (QList<GraphKey*>() << graphKey << nextGraphKey);
+    }
+
+    return segments;
+}
+}
 
 QColor KeysView::sGetAnimatorColor(const int i) {
     return ANIMATOR_COLORS.at(i % ANIMATOR_COLORS.length());
@@ -56,25 +259,30 @@ void KeysView::graphEasingAction(const QString &easing)
     if (mSelectedKeysAnimators.isEmpty()) { return; }
     if (mGraphViewed) {
         for (const auto& anim : mGraphAnimators) {
-            const auto segments = anim->anim_getSelectedKeys();
-            if (segments.count() < 2) { continue; }
-            auto firstKey = segments.first();
-            auto lastKey = segments.last();
-            graphEasingApply(static_cast<QrealAnimator*>(anim),
-                             {firstKey->getRelFrame(),
-                              lastKey->getRelFrame()},
-                             easing);
-        }
-    } else {
-        for (const auto& anim : mSelectedKeysAnimators) {
-            const auto &segments = anim->anim_getSelectedKeys();
-            if (segments.count() < 2) { continue; }
-            auto firstKey = segments.first();
-            auto lastKey = segments.last();
+            const auto segments = selectedOrForwardSegmentsForGraph(anim);
+            for (const auto &segment : segments) {
+                if (segment.count() < 2) { continue; }
+                auto *firstKey = segment.first();
+                auto *lastKey = segment.last();
                 graphEasingApply(static_cast<QrealAnimator*>(anim),
                                  {firstKey->getRelFrame(),
                                   lastKey->getRelFrame()},
                                  easing);
+            }
+        }
+    } else {
+        for (const auto& anim : mSelectedKeysAnimators) {
+            const auto graphAnim = enve_cast<GraphAnimator*>(anim);
+            const auto segments = selectedOrForwardSegmentsForGraph(graphAnim);
+            for (const auto &segment : segments) {
+                if (segment.count() < 2) { continue; }
+                auto *firstKey = segment.first();
+                auto *lastKey = segment.last();
+                graphEasingApply(static_cast<QrealAnimator*>(anim),
+                                 {firstKey->getRelFrame(),
+                                  lastKey->getRelFrame()},
+                                 easing);
+            }
         }
     }
 }
@@ -87,6 +295,14 @@ void KeysView::graphEasingApply(QrealAnimator *anim,
     if (const auto spa = enve_cast<SmartPathAnimator*>(anim)) {
         emit statusMessage(tr("Smart paths does not support easing"));
         return;
+    }
+    QuickBezierPreset quickPreset;
+    if (resolveQuickBezierPreset(easing, quickPreset)) {
+        auto *firstKey = dynamic_cast<GraphKey*>(anim->anim_getKeyAtRelFrame(range.fMin));
+        auto *lastKey = dynamic_cast<GraphKey*>(anim->anim_getKeyAtRelFrame(range.fMax));
+        if (applyQuickBezierPreset(firstKey, lastKey, quickPreset)) {
+            return;
+        }
     }
     if (!graphEasingApplyExpression(anim, range, easing)) {
         emit statusMessage(tr("Failed to apply easing on %1").arg(anim->prp_getName()));
@@ -160,34 +376,7 @@ void KeysView::graphSetCornerCtrlAction() {
 }
 
 void KeysView::graphMakeSegmentsSmoothAction(const bool smooth) {
-    if(mSelectedKeysAnimators.isEmpty()) return;
-    QList<QList<GraphKey*>> segments;
-    for(const auto& anim : mGraphAnimators) {
-        //if(!mAnimators.contains(anim)) continue;
-        anim->graph_getSelectedSegments(segments);
-    }
-
-    for(const auto& segment : segments) {
-        Q_ASSERT(segment.length() > 1);
-        auto firstKey = segment.first();
-        auto lastKey = segment.last();
-        firstKey->setC1EnabledAction(smooth);
-        if(smooth) firstKey->makeC0C1Smooth();
-        //firstKey->keyChanged();
-        for(int i = 1; i < segment.length() - 1; i++) {
-            auto innerKey = segment.at(i);
-            innerKey->setC1EnabledAction(smooth);
-            innerKey->setC0EnabledAction(smooth);
-            if(smooth) innerKey->makeC0C1Smooth();
-            //innerKey->keyChanged();
-        }
-        lastKey->setC0EnabledAction(smooth);
-        if(smooth) lastKey->makeC0C1Smooth();
-        lastKey->afterKeyChanged();
-    }
-
-    graphConstrainAnimatorCtrlsFrameValues();
-    Document::sInstance->actionFinished();
+    applyQuickInterpolation(smooth);
 }
 
 void KeysView::graphMakeSegmentsLinearAction() {

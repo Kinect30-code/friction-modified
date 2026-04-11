@@ -38,14 +38,30 @@ BoolPropertyWidget::BoolPropertyWidget(QWidget *parent) :
 void BoolPropertyWidget::setTarget(BoolProperty *property) {
     mTarget = property;
     mTargetContainer = nullptr;
+    mPlaceholderCross = false;
+    update();
 }
 
 void BoolPropertyWidget::setTarget(BoolPropertyContainer *property) {
     mTargetContainer = property;
     mTarget = nullptr;
+    mPlaceholderCross = false;
+    update();
+}
+
+void BoolPropertyWidget::setPlaceholderCrossVisible(const bool visible) {
+    mPlaceholderCross = visible;
+    if (visible) {
+        mTarget = nullptr;
+        mTargetContainer = nullptr;
+    }
+    update();
 }
 
 void BoolPropertyWidget::mousePressEvent(QMouseEvent *) {
+    if (mPlaceholderCross) {
+        return;
+    }
     if(mTargetContainer) {
         mTargetContainer->setValue(!mTargetContainer->getValue());
     }
@@ -56,9 +72,11 @@ void BoolPropertyWidget::mousePressEvent(QMouseEvent *) {
 }
 
 void BoolPropertyWidget::paintEvent(QPaintEvent *) {
-    if(!mTarget && !mTargetContainer) return;
+    if(!mTarget && !mTargetContainer && !mPlaceholderCross) return;
     QPainter p(this);
-    if(mTarget) {
+    if(mPlaceholderCross) {
+        p.setOpacity(.45);
+    } else if(mTarget) {
         if(mTarget->SWT_isDisabled()) p.setOpacity(.5);
     } else if(mTargetContainer) {
         if(mTargetContainer->SWT_isDisabled()) p.setOpacity(.5);
@@ -74,10 +92,14 @@ void BoolPropertyWidget::paintEvent(QPaintEvent *) {
 
     p.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 5., 5.);
 
-    bool value;
-    if(mTargetContainer) {
+    bool value = false;
+    if(mPlaceholderCross) {
+        p.setPen(QPen(ThemeSupport::getThemeColorRed(), 1.8));
+        p.drawLine(QPoint(6, 6), QPoint(width() - 6, height() - 6));
+        p.drawLine(QPoint(width() - 6, 6), QPoint(6, height() - 6));
+    } else if(mTargetContainer) {
         value = mTargetContainer->getValue();
-    } else {
+    } else if(mTarget) {
         value = mTarget->getValue();
     }
     if(value) {
@@ -98,4 +120,3 @@ void BoolPropertyWidget::leaveEvent(QEvent *) {
     mHovered = false;
     update();
 }
-

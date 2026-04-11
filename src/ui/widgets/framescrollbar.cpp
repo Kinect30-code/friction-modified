@@ -91,15 +91,9 @@ void FrameScrollBar::paintEvent(QPaintEvent *) {
         const qreal fps = mCurrentCanvas->getFps();
         mFps = fps;
         if (!mRange) {
-            const int soundHeight = eSizesUI::widget / 1.5;
-            const int rasterHeight = eSizesUI::widget - soundHeight;
-            const QRectF rasterRect(x0, 0, w1, rasterHeight);
+            const QRectF rasterRect(x0, 0, w1, eSizesUI::widget);
             const auto& rasterCache = mCurrentCanvas->getSceneFramesHandler();
             rasterCache.drawCacheOnTimeline(&p, rasterRect, minFrame, maxFrame);
-
-            const QRectF soundRect(x0, rasterHeight, w1, soundHeight);
-            const auto& soundCache = mCurrentCanvas->getSoundCacheHandler();
-            soundCache.drawCacheOnTimeline(&p, soundRect, minFrame, maxFrame, fps);
         }
     }
 
@@ -471,6 +465,23 @@ void FrameScrollBar::mouseMoveEvent(QMouseEvent *event)
         }
         mGrabbedMarker.frame = newFrame;
         return;
+    }
+    if (!mRange && mCurrentCanvas &&
+        (event->modifiers() & Qt::ShiftModifier)) {
+        const int roundedFrame = qRound(newFrame);
+        int prevFrame = roundedFrame;
+        int nextFrame = roundedFrame;
+        const bool hasPrev = mCurrentCanvas->anim_prevRelFrameWithKey(roundedFrame, prevFrame);
+        const bool hasNext = mCurrentCanvas->anim_nextRelFrameWithKey(roundedFrame, nextFrame);
+        if (hasPrev && hasNext) {
+            newFrame = (qAbs(prevFrame - newFrame) <= qAbs(nextFrame - newFrame))
+                    ? prevFrame
+                    : nextFrame;
+        } else if (hasPrev) {
+            newFrame = prevFrame;
+        } else if (hasNext) {
+            newFrame = nextFrame;
+        }
     }
     int moveFrame = qRound(newFrame - mLastMousePressFrame);
     if (setFirstViewedFrame(mSavedFirstFrame + moveFrame)) {

@@ -199,7 +199,9 @@ void Canvas::updateHoveredPoint(const eMouseEvent &e)
 
 void Canvas::updateHoveredEdge(const eMouseEvent &e)
 {
-    if (mCurrentMode != CanvasMode::pointTransform || mHoveredPoint_d) {
+    if ((mCurrentMode != CanvasMode::pointTransform &&
+         mCurrentMode != CanvasMode::pathCreate) ||
+        mHoveredPoint_d) {
         return mHoveredNormalSegment.clear();
     }
     mHoveredNormalSegment = getSegment(e);
@@ -1278,7 +1280,7 @@ void Canvas::finishedAction()
 void Canvas::clearParentForSelected()
 {
     for (int i = 0; i < mSelectedBoxes.count(); i++) {
-        mSelectedBoxes.at(i)->clearParent();
+        mSelectedBoxes.at(i)->clearParentEffectTarget();
     }
 }
 
@@ -1286,9 +1288,8 @@ void Canvas::setParentToLastSelected()
 {
     if (mSelectedBoxes.count() > 1) {
         const auto& lastBox = mSelectedBoxes.last();
-        const auto trans = lastBox->getTransformAnimator();
         for (int i = 0; i < mSelectedBoxes.count() - 1; i++) {
-            mSelectedBoxes.at(i)->setParentTransformKeepTransform(trans);
+            mSelectedBoxes.at(i)->setParentEffectTarget(lastBox);
         }
     }
 }

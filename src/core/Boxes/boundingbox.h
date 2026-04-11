@@ -58,6 +58,7 @@ class BasicTransformAnimator;
 class CustomProperties;
 class BlendEffectCollection;
 class TransformEffectCollection;
+class ParentEffect;
 
 class ContainerBox;
 class SmartVectorPath;
@@ -397,6 +398,10 @@ public:
     void addBlendEffect(const qsptr<BlendEffect> &blendEffect);
     void ensureBlendEffectsVisible();
     void addTransformEffect(const qsptr<TransformEffect> &transformEffect);
+    ParentEffect *getParentEffect() const;
+    BoundingBox *getParentEffectTarget() const;
+    void setParentEffectTarget(BoundingBox *target);
+    void clearParentEffectTarget();
 
     void setBlendModeSk(const SkBlendMode blendMode);
     void setTimelineColor(const QColor &color);

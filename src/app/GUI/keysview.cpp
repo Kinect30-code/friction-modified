@@ -28,6 +28,7 @@
 #include "clipboardcontainer.h"
 #include <QPainter>
 #include <QMenu>
+#include <QActionGroup>
 #include "mainwindow.h"
 #include "GUI/BoxesList/boxscrollwidget.h"
 #include "GUI/BoxesList/boxscroller.h"
@@ -45,6 +46,36 @@
 #include "GUI/dialogsinterface.h"
 #include "timelinewidget.h"
 #include "themesupport.h"
+
+namespace {
+QList<QList<GraphKey*>> selectedOrForwardSegments(GraphAnimator *anim)
+{
+    QList<QList<GraphKey*>> segments;
+    if (!anim) {
+        return segments;
+    }
+
+    anim->graph_getSelectedSegments(segments);
+    if (!segments.isEmpty()) {
+        return segments;
+    }
+
+    const auto &selectedKeys = anim->anim_getSelectedKeys();
+    for (const auto &key : selectedKeys) {
+        auto *graphKey = dynamic_cast<GraphKey*>(key);
+        if (!graphKey) {
+            continue;
+        }
+        auto *nextGraphKey = dynamic_cast<GraphKey*>(graphKey->getNextKey());
+        if (!nextGraphKey) {
+            continue;
+        }
+        segments << (QList<GraphKey*>() << graphKey << nextGraphKey);
+    }
+
+    return segments;
+}
+}
 
 KeysView::KeysView(BoxScrollWidget *boxesListVisible,
                    QWidget *parent) :
@@ -517,6 +548,11 @@ bool KeysView::KFT_keyPressEvent(QKeyEvent *event)
               event->key() == Qt::Key_Enter) {
         finishTransform();
     } else if(graphProcessFilteredKeyEvent(event)) {
+    } else if ((event->modifiers() & Qt::ControlModifier) &&
+               !(event->modifiers() & (Qt::AltModifier | Qt::MetaModifier)) &&
+               event->key() == Qt::Key_E) {
+        if (event->isAutoRepeat()) return false;
+        showQuickEaseMenu();
     } else if(event->modifiers() & Qt::ControlModifier &&
               event->key() == Qt::Key_V) {
         if(event->isAutoRepeat()) return false;
@@ -548,6 +584,10 @@ bool KeysView::KFT_keyPressEvent(QKeyEvent *event)
                 mLastPressPos = posU;
                 grabMouseAndTrack();
             }
+        } else if(event->modifiers() == Qt::ControlModifier &&
+                  event->key() == Qt::Key_T) {
+            if(event->isAutoRepeat()) return false;
+            showQuickStrengthMenu();
         } else if(event->modifiers() == Qt::ShiftModifier &&
                   event->key() == Qt::Key_D) {
             auto container = getSelectedKeysClipboardContainer();
@@ -593,6 +633,219 @@ bool KeysView::KFT_keyPressEvent(QKeyEvent *event)
         } else return false;
     } else return false;
     return true;
+}
+
+QList<GraphAnimator*> KeysView::selectedGraphAnimators() const {
+    QList<GraphAnimator*> result;
+    if (mGraphViewed) {
+        for (const auto& anim : mGraphAnimators) {
+            if (anim) {
+                result.append(anim);
+            }
+        }
+        return result;
+    }
+
+    for (const auto& anim : mSelectedKeysAnimators) {
+        if (const auto graphAnim = enve_cast<GraphAnimator*>(anim)) {
+            if (!result.contains(graphAnim)) {
+                result.append(graphAnim);
+            }
+        }
+    }
+    return result;
+}
+
+bool KeysView::applyQuickInterpolation(const bool smooth) {
+    const auto graphAnimators = selectedGraphAnimators();
+    if (graphAnimators.isEmpty()) { return false; }
+
+    QList<QList<GraphKey*>> segments;
+    for (const auto& anim : graphAnimators) {
+        const auto animSegments = selectedOrForwardSegments(anim);
+        for (const auto &segment : animSegments) {
+            segments << segment;
+        }
+    }
+    if (segments.isEmpty()) { return false; }
+
+    for(const auto& segment : segments) {
+        Q_ASSERT(segment.length() > 1);
+        auto firstKey = segment.first();
+        auto lastKey = segment.last();
+        firstKey->setC1EnabledAction(smooth);
+        if(smooth) firstKey->makeC0C1Smooth();
+        for(int i = 1; i < segment.length() - 1; i++) {
+            auto innerKey = segment.at(i);
+            innerKey->setC1EnabledAction(smooth);
+            innerKey->setC0EnabledAction(smooth);
+            if(smooth) innerKey->makeC0C1Smooth();
+        }
+        lastKey->setC0EnabledAction(smooth);
+        if(smooth) lastKey->makeC0C1Smooth();
+        lastKey->afterKeyChanged();
+    }
+
+    graphConstrainAnimatorCtrlsFrameValues();
+    Document::sInstance->actionFinished();
+    return true;
+}
+
+bool KeysView::applyQuickEasingPreset(const QString &presetId) {
+    if (presetId.isEmpty()) { return false; }
+    const QString resolvedPresetId = resolveQuickEasingPresetId(presetId);
+    auto preset = eSettings::sInstance->fExpressions.getExpr(resolvedPresetId);
+    if (preset.valid && !preset.enabled) {
+        eSettings::sInstance->fExpressions.setExprEnabled(resolvedPresetId, true);
+        preset = eSettings::sInstance->fExpressions.getExpr(resolvedPresetId);
+    }
+    if (!preset.valid || !preset.enabled) {
+        emit statusMessage(tr("Easing preset %1 is unavailable").arg(presetId));
+        return false;
+    }
+    graphEasingAction(resolvedPresetId);
+    return true;
+}
+
+bool KeysView::applyQuickEasingFamily(const QString &family) {
+    QString prefix;
+    switch (mQuickEaseMode) {
+    case QuickEaseMode::Auto:
+        prefix = QStringLiteral("easeInOut");
+        break;
+    case QuickEaseMode::EaseIn:
+        prefix = QStringLiteral("easeIn");
+        break;
+    case QuickEaseMode::EaseOut:
+        prefix = QStringLiteral("easeOut");
+        break;
+    case QuickEaseMode::EaseInOut:
+    default:
+        prefix = QStringLiteral("easeInOut");
+        break;
+    }
+    return applyQuickEasingPreset(prefix + family);
+}
+
+QString KeysView::resolveQuickEasingPresetId(const QString &presetId) const {
+    if (presetId.isEmpty()) {
+        return presetId;
+    }
+
+    const auto exact = eSettings::sInstance->fExpressions.getExpr(presetId);
+    if (exact.valid) {
+        return presetId;
+    }
+
+    const QString suffix = QStringLiteral(".") + presetId;
+    const auto presets = eSettings::sInstance->fExpressions.getCore(QStringLiteral("Easing"));
+    for (const auto &preset : presets) {
+        if (!preset.valid) {
+            continue;
+        }
+        if (preset.id == presetId || preset.id.endsWith(suffix)) {
+            return preset.id;
+        }
+    }
+
+    return presetId;
+}
+
+QPoint KeysView::quickMenuAnchorPos() const {
+    const QPoint globalCursor = QCursor::pos();
+    const QRect globalRect(mapToGlobal(QPoint(0, 0)), size());
+    if (globalRect.contains(globalCursor)) {
+        return globalCursor;
+    }
+    return mapToGlobal(rect().center());
+}
+
+QString KeysView::quickEaseModeLabel() const {
+    switch (mQuickEaseMode) {
+    case QuickEaseMode::Auto:
+        return tr("Auto");
+    case QuickEaseMode::EaseIn:
+        return tr("Ease In");
+    case QuickEaseMode::EaseOut:
+        return tr("Ease Out");
+    case QuickEaseMode::EaseInOut:
+    default:
+        return tr("Ease In/Out");
+    }
+}
+
+void KeysView::showQuickEaseMenu() {
+    if (mSelectedKeysAnimators.isEmpty()) { return; }
+
+    QMenu menu(this);
+    menu.setTitle(tr("Set Easing Type"));
+    auto *group = new QActionGroup(&menu);
+    group->setExclusive(true);
+
+    const auto addModeAction = [this, &menu, group](const QString &label,
+                                                    const QuickEaseMode mode,
+                                                    const std::function<void()> &applyNow) {
+        auto *action = menu.addAction(label);
+        action->setCheckable(true);
+        action->setChecked(mQuickEaseMode == mode);
+        group->addAction(action);
+        connect(action, &QAction::triggered, this, [this, mode, applyNow]() {
+            mQuickEaseMode = mode;
+            applyNow();
+        });
+    };
+
+    addModeAction(tr("Auto Ease"), QuickEaseMode::Auto, [this]() {
+        applyQuickInterpolation(true);
+    });
+    addModeAction(tr("Ease In"), QuickEaseMode::EaseIn, [this]() {
+        applyQuickEasingPreset(QStringLiteral("easeInSine"));
+    });
+    addModeAction(tr("Ease Out"), QuickEaseMode::EaseOut, [this]() {
+        applyQuickEasingPreset(QStringLiteral("easeOutSine"));
+    });
+    addModeAction(tr("Ease In/Out"), QuickEaseMode::EaseInOut, [this]() {
+        applyQuickEasingPreset(QStringLiteral("easeInOutSine"));
+    });
+
+    menu.exec(quickMenuAnchorPos());
+}
+
+void KeysView::showQuickStrengthMenu() {
+    if (mSelectedKeysAnimators.isEmpty()) { return; }
+
+    QMenu menu(this);
+    menu.setTitle(tr("Set Easing Strength"));
+
+    auto *strengthMenu = menu.addMenu(tr("Easing (%1)").arg(quickEaseModeLabel()));
+    const QList<QPair<QString, QString>> strengthFamilies = {
+        {tr("Sine"), QStringLiteral("Sine")},
+        {tr("Quad"), QStringLiteral("Quad")},
+        {tr("Cubic"), QStringLiteral("Cubic")},
+        {tr("Quart"), QStringLiteral("Quart")},
+        {tr("Quint"), QStringLiteral("Quint")},
+        {tr("Expo"), QStringLiteral("Expo")},
+        {tr("Circ"), QStringLiteral("Circ")}
+    };
+    for (const auto &family : strengthFamilies) {
+        strengthMenu->addAction(family.first, this, [this, family]() {
+            applyQuickEasingFamily(family.second);
+        });
+    }
+
+    auto *dynamicMenu = menu.addMenu(tr("Dynamic (%1)").arg(quickEaseModeLabel()));
+    const QList<QPair<QString, QString>> dynamicFamilies = {
+        {tr("Back"), QStringLiteral("Back")},
+        {tr("Bounce"), QStringLiteral("Bounce")},
+        {tr("Elastic"), QStringLiteral("Elastic")}
+    };
+    for (const auto &family : dynamicFamilies) {
+        dynamicMenu->addAction(family.first, this, [this, family]() {
+            applyQuickEasingFamily(family.second);
+        });
+    }
+
+    menu.exec(quickMenuAnchorPos());
 }
 
 #ifdef Q_OS_MAC

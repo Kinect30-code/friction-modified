@@ -127,6 +127,10 @@ int VideoFrameHandler::getFrameCount() const {
     return mDataHandler->getFrameCount();
 }
 
+qreal VideoFrameHandler::getSourceFps() const {
+    return mDataHandler->getFps();
+}
+
 void VideoFrameHandler::reload() {
     mDataHandler->clearCache();
     openVideoStream();

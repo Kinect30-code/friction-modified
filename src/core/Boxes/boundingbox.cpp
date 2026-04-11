@@ -51,6 +51,7 @@
 #include "GUI/propertynamedialog.h"
 #include "BlendEffects/blendeffectcollection.h"
 #include "BlendEffects/layermaskeffect.h"
+#include "TransformEffects/parenteffect.h"
 #include "TransformEffects/transformeffectcollection.h"
 #include "GUI/dialogsinterface.h"
 #include "svgexporter.h"
@@ -117,7 +118,9 @@ void BoundingBox::writeBoundingBox(eWriteStream& dst) const {
     eBoxOrSound::prp_writeProperty_impl(dst);
     dst << mWriteId;
     dst.write(&mBlendMode, sizeof(SkBlendMode));
-    dst << mTimelineColor;
+    // Keep EV output compatible with upstream v34 projects.
+    // Timeline color remains a local/runtime feature until a dedicated
+    // compatibility strategy is introduced.
 }
 
 void BoundingBox::readBoundingBox(eReadStream& src) {
@@ -588,19 +591,33 @@ void BoundingBox::setParentTransformKeepTransform(BasicTransformAnimator *parent
     if(parent == mParentTransform) return;
 
     const auto oldTotalTransform = mTransformAnimator->getTotalTransform();
+    const auto oldAbsOrigin = oldTotalTransform.map(QPointF(0, 0));
     const auto pivot = mTransformAnimator->getPivot();
     QMatrix newRelativeTransform = oldTotalTransform;
     if(parent) {
+        bool ok = false;
         const auto parentTotalTransform = parent->getTotalTransform();
-        newRelativeTransform = oldTotalTransform*parentTotalTransform.inverted();
+        const auto parentInverse = parentTotalTransform.inverted(&ok);
+        if(ok) {
+            newRelativeTransform = oldTotalTransform*parentInverse;
+        }
     }
     const auto dec = MatrixDecomposition::decomposePivoted(newRelativeTransform, pivot);
 
-    mTransformAnimator->startTransformSkipOpacity();
     mParentTransform = parent;
     mTransformAnimator->setParentTransformAnimator(mParentTransform);
     mTransformAnimator->setValues(dec);
-    mTransformAnimator->prp_finishTransform();
+
+    const auto newAbsOrigin = mTransformAnimator->getTotalTransform().map(QPointF(0, 0));
+    const auto absDelta = oldAbsOrigin - newAbsOrigin;
+    if(!isZero4Dec(absDelta.x()) || !isZero4Dec(absDelta.y())) {
+        const auto relDelta = mParentTransform ?
+                    mParentTransform->mapAbsPosToRel(newAbsOrigin + absDelta) -
+                    mParentTransform->mapAbsPosToRel(newAbsOrigin) :
+                    absDelta;
+        const auto currentPos = mTransformAnimator->pos();
+        mTransformAnimator->setRelativePos(currentPos + relDelta);
+    }
 }
 
 void BoundingBox::afterTotalTransformChanged(const UpdateReason reason) {
@@ -1187,7 +1204,8 @@ void BoundingBox::moveByRel(const QPointF &trans) {
 }
 
 void BoundingBox::setAbsolutePos(const QPointF &pos) {
-    setRelativePos(mParentTransform->mapAbsPosToRel(pos));
+    if(mParentTransform) setRelativePos(mParentTransform->mapAbsPosToRel(pos));
+    else setRelativePos(pos);
 }
 
 void BoundingBox::setRelativePos(const QPointF &relPos) {
@@ -1199,8 +1217,10 @@ void BoundingBox::setOpacity(const qreal opacity) {
 }
 
 void BoundingBox::saveTransformPivotAbsPos(const QPointF &absPivot) {
-    mSavedTransformPivot = mParentTransform->mapAbsPosToRel(absPivot) -
-                           mTransformAnimator->getPivot();
+    const auto parentSpacePivot = mParentTransform ?
+                mParentTransform->mapAbsPosToRel(absPivot) :
+                absPivot;
+    mSavedTransformPivot = parentSpacePivot - mTransformAnimator->getPivot();
 }
 
 void BoundingBox::startPosTransform() {
@@ -1380,6 +1400,50 @@ void BoundingBox::ensureBlendEffectsVisible()
 void BoundingBox::addTransformEffect(const qsptr<TransformEffect> &transformEffect)
 {
     mTransformEffectCollection->addChild(transformEffect);
+}
+
+ParentEffect *BoundingBox::getParentEffect() const
+{
+    const int totalEffects = mTransformEffectCollection->ca_getNumberOfChildren();
+    for(int i = 0; i < totalEffects; ++i) {
+        if(auto *effect = enve_cast<ParentEffect*>(mTransformEffectCollection->getChild(i))) {
+            return effect;
+        }
+    }
+    return nullptr;
+}
+
+BoundingBox *BoundingBox::getParentEffectTarget() const
+{
+    if(auto *effect = getParentEffect()) {
+        return effect->target();
+    }
+    return nullptr;
+}
+
+void BoundingBox::setParentEffectTarget(BoundingBox *target)
+{
+    auto *effect = getParentEffect();
+    if(!target) {
+        if(effect) {
+            // Clear through the target property so parent-change compensation
+            // preserves the box's current world transform when unparenting.
+            effect->setTargetAction(nullptr);
+        }
+        return;
+    }
+
+    if(!effect) {
+        const auto parentEffect = enve::make_shared<ParentEffect>();
+        effect = parentEffect.get();
+        addTransformEffect(parentEffect);
+    }
+    effect->setTargetAction(target);
+}
+
+void BoundingBox::clearParentEffectTarget()
+{
+    setParentEffectTarget(nullptr);
 }
 
 //int BoundingBox::prp_getParentFrameShift() const {

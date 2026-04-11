@@ -79,7 +79,6 @@ class QTreeWidget;
 class ObjectSettingsWidget;
 class BoxScrollWidget;
 class ScrollArea;
-class LayerRelationsWidget;
 namespace Friction { namespace Ui { class AlignWidget; } }
 
 class MainWindow : public QMainWindow
@@ -202,8 +201,6 @@ private:
     QWidget *mWelcomeDialog;
     QStackedWidget *mStackWidget;
 
-    QTabWidget *mTabProperties;
-
     void openWelcomeDialog();
     void closeWelcomeDialog();
 
@@ -312,12 +309,13 @@ private:
 
     BoxScrollWidget *mObjectSettingsWidget;
     ScrollArea *mObjectSettingsScrollArea;
-    LayerRelationsWidget *mLayerRelationsWidget = nullptr;
     AssetsWidget *mProjectWidget;
     QWidget *mPropertiesPanel;
+    QWidget *mEffectsPresetsPanel = nullptr;
+    QWidget *mCharacterPanel = nullptr;
+    QWidget *mAlignPanel = nullptr;
     QTabWidget *mCenterTabs;
     QTabWidget *mBottomTabs;
-    QTabWidget *mRightTabs;
     QHash<Canvas*, QWidget*> mBottomSceneTabs;
     QList<QPointer<Canvas>> mSceneNavigationChain;
     bool mSyncingBottomTabs = false;
@@ -360,10 +358,7 @@ private:
     int mStackIndexWelcome;
 
     int mTabColorIndex;
-    int mTabTextIndex;
-    int mTabPropertiesIndex;
     int mTabAssetsIndex;
-    int mTabAlignIndex;
     int mTabQueueIndex;
 
     Friction::Ui::ColorToolBar *mColorToolBar;
@@ -398,6 +393,7 @@ private:
     void askInstallExpressionsPresets();
     void askRestoreFillStrokeDefault();
     void askRestoreDefaultUi();
+    bool isTimelineInputContext() const;
 
     QAction *mToolBarMainAct;
     QAction *mToolBarColorAct;
@@ -406,6 +402,7 @@ private:
     QAction *mPanelEffectControlsAct = nullptr;
     QAction *mPanelLayersAct = nullptr;
     QAction *mPanelEffectsAct = nullptr;
+    QAction *mPanelCharacterAct = nullptr;
     QAction *mPanelAlignAct = nullptr;
 
     intMB mMemoryUsed;

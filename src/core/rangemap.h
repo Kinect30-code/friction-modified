@@ -82,7 +82,8 @@ public:
 
     iterator atFrame(const int frame) {
         const auto it = atOrAfterFrame(frame);
-        if(it.first.inRange(frame)) return it;
+        if(it == this->end()) return this->end();
+        if(it->first.inRange(frame)) return it;
         else return this->end();
     }
 

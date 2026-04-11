@@ -218,6 +218,10 @@ void SWT_Abstraction::scheduleSearchContentUpdate() {
 void SWT_Abstraction::setContentVisible(const bool visible) {
     //if(bT == mContentVisible) return;
     mContentVisible = visible;
+    if(mTarget_k) {
+        mTarget_k->SWT_abstractionContentVisibilityChanged(
+                    mVisiblePartWidgetId, visible);
+    }
     afterContentVisibilityChanged();
 }
 
