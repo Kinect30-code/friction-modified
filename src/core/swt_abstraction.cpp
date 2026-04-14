@@ -40,7 +40,18 @@ bool swtIsEffectCollectionTarget(const SingleWidgetTarget * const target) {
     return enve_cast<const BlendEffectCollection*>(target) ||
            enve_cast<const RasterEffectCollection*>(target) ||
            enve_cast<const TransformEffectCollection*>(target) ||
-           enve_cast<const PathEffectCollection*>(target);
+           enve_cast<const PathEffectCollection*>(target) ||
+           enve_cast<const CustomProperties*>(target);
+}
+
+bool swtShouldFlattenHierarchy(const SWT_Abstraction * const abstraction,
+                               const SWT_RulesCollection &rules) {
+    const auto target = abstraction->getTarget();
+    if(target->SWT_shouldFlattenHierarchy()) {
+        return true;
+    }
+    return rules.fViewMode == SWT_ViewMode::effectsOnly &&
+           enve_cast<const CustomProperties*>(target);
 }
 
 bool swtHasEffectAncestor(const SWT_Abstraction * const abstraction) {
@@ -85,7 +96,9 @@ bool swtShouldDisplayOwnRow(const SWT_Abstraction * const abstraction,
         return true;
     }
     const auto target = abstraction->getTarget();
-    return enve_cast<eEffect*>(target) || swtHasEffectAncestor(abstraction);
+    return enve_cast<eEffect*>(target) ||
+           enve_cast<CustomProperties*>(target) ||
+           swtHasEffectAncestor(abstraction);
 }
 
 }
@@ -111,7 +124,7 @@ bool SWT_Abstraction::setAbstractions(
                 rules, parentSatisfiesRule, parentMainTarget);
     const bool satisfiesRule = swtShouldParticipateInViewMode(
                 this, rules, baseSatisfiesRule);
-    const bool flattenHierarchy = mTarget_k->SWT_shouldFlattenHierarchy();
+    const bool flattenHierarchy = swtShouldFlattenHierarchy(this, rules);
     const bool displayOwnRow = swtShouldDisplayOwnRow(
                 this, rules, satisfiesRule, flattenHierarchy);
     if(currY > minY && displayOwnRow) {
@@ -145,7 +158,7 @@ int SWT_Abstraction::updateHeight(const SWT_RulesCollection &rules,
                     rules, parentSatisfiesRule, parentMainTarget);
         const bool satisfiesRule = swtShouldParticipateInViewMode(
                     this, rules, baseSatisfiesRule);
-        const bool flattenHierarchy = mTarget_k->SWT_shouldFlattenHierarchy();
+        const bool flattenHierarchy = swtShouldFlattenHierarchy(this, rules);
         if(swtShouldDisplayOwnRow(this, rules, satisfiesRule, flattenHierarchy))
             mHeight += swtHeight;
         const bool childrenVisible = (satisfiesRule &&

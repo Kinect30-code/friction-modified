@@ -35,9 +35,16 @@
 
 class VideoFrameLoader;
 class VideoFrameHandler;
+class VideoSourceInfoTask;
+
+enum class VideoFrameAccessMode {
+    sequential,
+    seek
+};
 
 class CORE_EXPORT VideoDataHandler : public FileDataCacheHandler {
     Q_OBJECT
+    friend class VideoSourceInfoTask;
 public:
     VideoDataHandler() {}
 
@@ -59,16 +66,34 @@ public:
     void setFps(const qreal fps);
     const QSize getDim();
     void setDim(const QSize dim);
+    bool hasAudio() const;
+    void setHasAudio(const bool hasAudio);
+    bool sourceInfoPending() const;
+    void registerFrameHandler(VideoFrameHandler* const handler);
+    void unregisterFrameHandler(VideoFrameHandler* const handler);
+    int pendingFrameLoadCount() const;
 signals:
     void frameCountUpdated(int);
+    void sourceInfoUpdated();
+    void sourceInfoLoadingChanged(bool pending);
 private:
+    void queueSourceInfoRefresh();
+    void setSourceInfoPending(bool pending);
+    void applySourceInfo(const VideoStreamsData::SourceInfo &info,
+                         const QString &filePath,
+                         int requestId);
+
     int mFrameCount = 0;
     qreal mFrameFps = 0;
     int mFrameWidth = 0;
     int mFrameHeight = 0;
+    bool mHasAudio = false;
+    bool mSourceInfoPending = false;
+    int mSourceInfoRequestId = 0;
     QList<VideoFrameHandler*> mFrameHandlers;
     QList<int> mFramesBeingLoaded;
     QList<stdsptr<VideoFrameLoader>> mFrameLoaders;
+    stdsptr<VideoSourceInfoTask> mSourceInfoTask;
     HddCachableCacheHandler mFramesCache;
 };
 
@@ -78,12 +103,13 @@ class CORE_EXPORT VideoFrameHandler : public AnimationFrameHandler {
 protected:
     VideoFrameHandler(VideoDataHandler* const cacheHandler);
 public:
-    ImageCacheContainer* getFrameAtFrame(const int relFrame);
-    ImageCacheContainer* getFrameAtOrBeforeFrame(const int relFrame);
-    eTask *scheduleFrameLoad(const int frame);
-    int getFrameCount() const;
+    ~VideoFrameHandler();
+    ImageCacheContainer* getFrameAtFrame(const int relFrame) override;
+    ImageCacheContainer* getFrameAtOrBeforeFrame(const int relFrame) override;
+    eTask *scheduleFrameLoad(const int frame) override;
+    int getFrameCount() const override;
     qreal getSourceFps() const override;
-    void reload();
+    void reload() override;
 
     void afterSourceChanged();
 
@@ -95,13 +121,21 @@ public:
     const HddCachableCacheHandler& getCacheHandler() const;
 protected:
     VideoFrameLoader * getFrameLoader(const int frame);
-    VideoFrameLoader * addFrameLoader(const int frameId);
+    VideoFrameLoader * addFrameLoader(
+            const int frameId,
+            VideoFrameAccessMode accessMode = VideoFrameAccessMode::sequential);
     VideoFrameLoader * addFrameConverter(const int frameId, AVFrame * const frame);
     void removeFrameLoader(const int frame);
 
     void openVideoStream();
+    eTask *scheduleFrameLoadInternal(int frame,
+                                     bool throwOnOutOfRange,
+                                     VideoFrameAccessMode accessMode);
+    void scheduleSequentialPrefetch(int frame);
 private:
     std::set<int> mNeededFrames;
+    int mLastRequestedFrame = -1;
+    int mLastPrefetchAnchorFrame = -1;
 
     VideoDataHandler* const mDataHandler;
     stdsptr<VideoStreamsData> mVideoStreamsData;
@@ -112,9 +146,9 @@ class CORE_EXPORT VideoFileHandler : public FileCacheHandler {
 protected:
     VideoFileHandler() {}
 
-    void reload();
+    void reload() override;
 public:
-    void replace();
+    void replace() override;
 
     VideoDataHandler* getFrameHandler() const {
         return mDataHandler.get();
@@ -126,6 +160,7 @@ public:
 private:
     qsptr<VideoDataHandler> mDataHandler;
     qsptr<SoundDataHandler> mSoundHandler;
+    QMetaObject::Connection mSourceInfoConn;
 };
 
 #endif // VIDEOCACHEHANDLER_H

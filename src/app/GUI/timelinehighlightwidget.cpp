@@ -56,13 +56,6 @@ void TimelineHighlightWidget::leaveEvent(QEvent *) {
 
 void TimelineHighlightWidget::paintEvent(QPaintEvent *) {
     QPainter p(this);
-    if (mSettings.fTimelineAlternateRow && mAlt) {
-        const int height = this->height();
-        const QColor color = mSettings.fTimelineAlternateRowColor;
-        for (int i = 0; i < height; i += 2*eSizesUI::widget) {
-            p.fillRect(0, i, width(), eSizesUI::widget, color);
-        }
-    }
     if (mSettings.fTimelineHighlightRow && mHoverRow >= 0) {
         p.fillRect(0, mHoverRow*eSizesUI::widget,
                    width(), eSizesUI::widget,

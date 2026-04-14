@@ -38,12 +38,22 @@ BoolPropertyWidget::BoolPropertyWidget(QWidget *parent) :
 void BoolPropertyWidget::setTarget(BoolProperty *property) {
     mTarget = property;
     mTargetContainer = nullptr;
+    mAnimatorTarget = nullptr;
     mPlaceholderCross = false;
     update();
 }
 
 void BoolPropertyWidget::setTarget(BoolPropertyContainer *property) {
     mTargetContainer = property;
+    mTarget = nullptr;
+    mAnimatorTarget = nullptr;
+    mPlaceholderCross = false;
+    update();
+}
+
+void BoolPropertyWidget::setTarget(BoolAnimator *property) {
+    mAnimatorTarget = property;
+    mTargetContainer = nullptr;
     mTarget = nullptr;
     mPlaceholderCross = false;
     update();
@@ -54,6 +64,7 @@ void BoolPropertyWidget::setPlaceholderCrossVisible(const bool visible) {
     if (visible) {
         mTarget = nullptr;
         mTargetContainer = nullptr;
+        mAnimatorTarget = nullptr;
     }
     update();
 }
@@ -68,16 +79,23 @@ void BoolPropertyWidget::mousePressEvent(QMouseEvent *) {
     if(mTarget) {
         mTarget->setValue(!mTarget->getValue());
     }
+    if(mAnimatorTarget) {
+        mAnimatorTarget->prp_startTransform();
+        mAnimatorTarget->setCurrentBoolValue(!mAnimatorTarget->getBoolValue());
+        mAnimatorTarget->prp_finishTransform();
+    }
     Document::sInstance->actionFinished();
 }
 
 void BoolPropertyWidget::paintEvent(QPaintEvent *) {
-    if(!mTarget && !mTargetContainer && !mPlaceholderCross) return;
+    if(!mTarget && !mTargetContainer && !mAnimatorTarget && !mPlaceholderCross) return;
     QPainter p(this);
     if(mPlaceholderCross) {
         p.setOpacity(.45);
     } else if(mTarget) {
         if(mTarget->SWT_isDisabled()) p.setOpacity(.5);
+    } else if(mAnimatorTarget) {
+        if(mAnimatorTarget->SWT_isDisabled()) p.setOpacity(.5);
     } else if(mTargetContainer) {
         if(mTargetContainer->SWT_isDisabled()) p.setOpacity(.5);
     }
@@ -99,6 +117,8 @@ void BoolPropertyWidget::paintEvent(QPaintEvent *) {
         p.drawLine(QPoint(width() - 6, 6), QPoint(6, height() - 6));
     } else if(mTargetContainer) {
         value = mTargetContainer->getValue();
+    } else if(mAnimatorTarget) {
+        value = mAnimatorTarget->getBoolValue();
     } else if(mTarget) {
         value = mTarget->getValue();
     }

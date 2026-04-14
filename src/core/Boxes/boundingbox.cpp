@@ -51,6 +51,8 @@
 #include "GUI/propertynamedialog.h"
 #include "BlendEffects/blendeffectcollection.h"
 #include "BlendEffects/layermaskeffect.h"
+#include "BlendEffects/trackmatteeffect.h"
+#include "actions.h"
 #include "TransformEffects/parenteffect.h"
 #include "TransformEffects/transformeffectcollection.h"
 #include "GUI/dialogsinterface.h"
@@ -65,6 +67,7 @@
 
 int BoundingBox::sNextDocumentId = 0;
 QList<BoundingBox*> BoundingBox::sDocumentBoxes;
+QHash<int, BoundingBox*> BoundingBox::sDocumentBoxesById;
 int BoundingBox::sNextWriteId;
 QList<const BoundingBox*> BoundingBox::sBoxesWithWriteIds;
 
@@ -77,6 +80,7 @@ BoundingBox::BoundingBox(const QString& name, const eBoxType type) :
     mTransformAnimator(enve::make_shared<BoxTransformAnimator>()),
     mRasterEffectsAnimators(enve::make_shared<RasterEffectCollection>()) {
     sDocumentBoxes << this;
+    sDocumentBoxesById.insert(mDocumentId, this);
 
     ca_addChild(mCustomProperties);
     mCustomProperties->SWT_setVisible(false);
@@ -111,6 +115,7 @@ BoundingBox::BoundingBox(const QString& name, const eBoxType type) :
 
 BoundingBox::~BoundingBox() {
     sDocumentBoxes.removeOne(this);
+    sDocumentBoxesById.remove(mDocumentId);
 }
 
 void BoundingBox::writeBoundingBox(eWriteStream& dst) const {
@@ -162,10 +167,7 @@ QDomElement BoundingBox::prp_writePropertyXEV_impl(const XevExporter& exp) const
 }
 
 BoundingBox *BoundingBox::sGetBoxByDocumentId(const int documentId) {
-    for(const auto& box : sDocumentBoxes) {
-        if(box->getDocumentId() == documentId) return box;
-    }
-    return nullptr;
+    return sDocumentBoxesById.value(documentId, nullptr);
 }
 
 void BoundingBox::prp_afterChangedAbsRange(const FrameRange &range, const bool clip) {
@@ -304,12 +306,14 @@ void BoundingBox::updateAllBoxes(const UpdateReason reason) {
 
 void BoundingBox::refreshCanvasControls() {
     prp_updateCanvasProps();
+    ensureCanvasPropsUpdated();
 }
 
 void BoundingBox::drawAllCanvasControls(SkCanvas * const canvas,
                                         const CanvasMode mode,
                                         const float invScale,
                                         const bool ctrlPressed) {
+    ensureCanvasPropsUpdated();
     for(const auto& prop : mCanvasProps)
         prop->prp_drawCanvasControls(canvas, mode, invScale, ctrlPressed);
 }
@@ -317,6 +321,7 @@ void BoundingBox::drawAllCanvasControls(SkCanvas * const canvas,
 MovablePoint *BoundingBox::getPointAtAbsPos(const QPointF &absPos,
                                             const CanvasMode mode,
                                             const qreal invScale) const {
+    ensureCanvasPropsUpdated();
     for(int i = mCanvasProps.count() - 1; i >= 0; i--) {
         const auto& prop = mCanvasProps.at(i);
         const auto handler = prop->getPointsHandler();
@@ -329,6 +334,7 @@ MovablePoint *BoundingBox::getPointAtAbsPos(const QPointF &absPos,
 
 NormalSegment BoundingBox::getNormalSegment(const QPointF &absPos,
                                             const qreal invScale) const {
+    ensureCanvasPropsUpdated();
     for(int i = mCanvasProps.count() - 1; i >= 0; i--) {
         const auto& prop = mCanvasProps.at(i);
         const auto handler = prop->getPointsHandler();
@@ -347,6 +353,7 @@ void BoundingBox::drawPixmapSk(SkCanvas * const canvas,
                                const SkFilterQuality filter) const {
     const qreal opacity = getOpacity(anim_getCurrentRelFrame());
     if(isZero4Dec(opacity) || !mVisibleInScene) return;
+    if(isUsedAsTrackMatteSource()) return;
     mDrawRenderContainer.drawSk(canvas, filter);
 }
 
@@ -483,11 +490,13 @@ QColor BoundingBox::defaultTimelineColor() const
     case eBoxType::vectorPath:
     case eBoxType::rectangle:
     case eBoxType::circle:
+    case eBoxType::polygon:
     case eBoxType::paint:
         return QColor(70, 118, 185);
     case eBoxType::image:
     case eBoxType::video:
     case eBoxType::imageSequence:
+    case eBoxType::glb:
         return QColor(90, 136, 100);
     case eBoxType::layer:
     case eBoxType::group:
@@ -679,7 +688,7 @@ void BoundingBox::setRelBoundingRect(const QRectF& relRect) {
     }
 }
 
-void BoundingBox::prp_updateCanvasProps() {
+void BoundingBox::rebuildCanvasProps() {
     mCanvasProps.clear();
     QSet<Property*> uniqueProps;
     const auto appendCanvasProp = [this, &uniqueProps](Property* const prop) {
@@ -712,8 +721,24 @@ void BoundingBox::prp_updateCanvasProps() {
     if(prp_drawsOnCanvas() && !uniqueProps.contains(this)) {
         mCanvasProps.append(this);
     }
+    mCanvasPropsNeedUpdate = false;
+}
+
+void BoundingBox::ensureCanvasPropsUpdated() const {
+    if(!mCanvasPropsNeedUpdate) {
+        return;
+    }
+    const_cast<BoundingBox*>(this)->rebuildCanvasProps();
+}
+
+void BoundingBox::prp_updateCanvasProps() {
+    const bool wasDirty = mCanvasPropsNeedUpdate;
+    mCanvasPropsNeedUpdate = true;
+    if(wasDirty) {
+        return;
+    }
     const auto parentScene = getParentScene();
-    if(parentScene) parentScene->requestUpdate();
+    if(parentScene) parentScene->scheduleUpdate();
 }
 
 void BoundingBox::updateCurrentPreviewDataFromRenderData(
@@ -722,14 +747,21 @@ void BoundingBox::updateCurrentPreviewDataFromRenderData(
 }
 
 void BoundingBox::planUpdate(const UpdateReason reason) {
+    planUpdate(reason, false);
+}
+
+void BoundingBox::planUpdate(const UpdateReason reason,
+                             const bool causedByDescendant) {
     if(mUpdatePlanned && mPlannedReason == UpdateReason::userChange) return;
     if(!isVisibleAndInVisibleDurationRect()) return;
     const auto parent = getParentGroup();
-    if(parent) parent->planUpdate(reason);
+    if(parent) parent->planUpdate(reason, true);
     else if(!enve_cast<Canvas*>(this)) return;
     if(reason == UpdateReason::userChange) {
         mStateId++;
-        mRenderDataHandler.clear();
+        if(!causedByDescendant) {
+            mRenderDataHandler.clear();
+        }
     }
 
     mDrawRenderContainer.setExpired(true);
@@ -739,6 +771,35 @@ void BoundingBox::planUpdate(const UpdateReason reason) {
         mUpdatePlanned = true;
         mPlannedReason = reason;
     }
+}
+
+bool BoundingBox::isCurrentRenderData(const BoxRenderData *renderData) const {
+    return renderData && renderData->fBoxStateId == mStateId;
+}
+
+BoxRenderData *BoundingBox::currentRenderDataAtRelFrame(const qreal relFrame) const {
+    const auto renderData = mRenderDataHandler.getItemAtRelFrame(relFrame);
+    return isCurrentRenderData(renderData) ? renderData : nullptr;
+}
+
+BoxRenderData *BoundingBox::reusableDisplayRenderData(
+        const qreal relFrame,
+        const qreal targetResolution) const {
+    if(mDrawRenderContainer.isExpired()) {
+        return nullptr;
+    }
+    const auto drawData = mDrawRenderContainer.getSrcRenderData();
+    if(!isCurrentRenderData(drawData)) {
+        return nullptr;
+    }
+    if(diffsIncludingInherited(drawData->fRelFrame, relFrame)) {
+        return nullptr;
+    }
+    if(targetResolution > 0 &&
+       !isZero6Dec(drawData->fResolution - targetResolution)) {
+        return nullptr;
+    }
+    return drawData;
 }
 
 
@@ -755,10 +816,28 @@ stdsptr<BoxRenderData> BoundingBox::queExternalRender(
 }
 
 stdsptr<BoxRenderData> BoundingBox::queRender(
-        const qreal relFrame, const QMatrix& parentM) {
+        const qreal relFrame,
+        const QMatrix& parentM,
+        const qreal resolutionOverride) {
+    const auto parentScene = getParentScene();
+    const bool usesResolutionOverride =
+            parentScene &&
+            resolutionOverride > 0 &&
+            !isZero6Dec(resolutionOverride - parentScene->getResolution());
+
+    if(usesResolutionOverride) {
+        const auto renderData = createRenderData(relFrame);
+        if(!renderData) return nullptr;
+        renderData->fResolutionOverride = resolutionOverride;
+        setupRenderData(relFrame, parentM, renderData.get(), parentScene);
+        renderData->queTask();
+        return renderData;
+    }
+
     const auto renderData = updateCurrentRenderData(relFrame);
     if(!renderData) return nullptr;
-    setupRenderData(relFrame, parentM, renderData, getParentScene());
+    renderData->fResolutionOverride = 0;
+    setupRenderData(relFrame, parentM, renderData, parentScene);
     const auto renderDataSPtr = enve::shared(renderData);
     renderDataSPtr->queTask();
     return renderDataSPtr;
@@ -789,27 +868,99 @@ BoxRenderData *BoundingBox::updateCurrentRenderData(const qreal relFrame) {
 }
 
 bool BoundingBox::hasCurrentRenderData(const qreal relFrame) const {
-    const auto currentRenderData = mRenderDataHandler.getItemAtRelFrame(relFrame);
-    if(currentRenderData) return true;
-    if(mDrawRenderContainer.isExpired()) return false;
-    const auto drawData = mDrawRenderContainer.getSrcRenderData();
-    if(!drawData) return false;
-    return !diffsIncludingInherited(drawData->fRelFrame, relFrame);
+    return currentRenderDataAtRelFrame(relFrame) ||
+           reusableDisplayRenderData(relFrame, 0);
 }
 
-stdsptr<BoxRenderData> BoundingBox::getCurrentRenderData(const qreal relFrame) const {
-    const auto currentRenderData =
-            mRenderDataHandler.getItemAtRelFrame(relFrame);
-    if(currentRenderData) return currentRenderData->ref<BoxRenderData>();
-    if(mDrawRenderContainer.isExpired()) return nullptr;
-    const auto drawData = mDrawRenderContainer.getSrcRenderData();
-    if(!drawData) return nullptr;
-    if(!diffsIncludingInherited(drawData->fRelFrame, relFrame)) {
+stdsptr<BoxRenderData> BoundingBox::getCurrentRenderData(
+        const qreal relFrame,
+        const qreal resolutionOverride) const {
+    const auto parentScene = getParentScene();
+    const qreal targetResolution =
+            parentScene && resolutionOverride > 0 ?
+                resolutionOverride :
+                (parentScene ? parentScene->getResolution() : 0);
+    const auto currentRenderData = currentRenderDataAtRelFrame(relFrame);
+    if(currentRenderData &&
+       (targetResolution <= 0 ||
+        isZero6Dec(currentRenderData->fResolution - targetResolution))) {
+        return currentRenderData->ref<BoxRenderData>();
+    }
+    if(const auto drawData = reusableDisplayRenderData(relFrame,
+                                                       targetResolution)) {
         const auto copy = drawData->makeCopy();
         copy->fRelFrame = relFrame;
         return copy;
     }
     return nullptr;
+}
+
+stdsptr<BoxRenderData> BoundingBox::getLatestFinishedRenderData(
+        const qreal relFrame) const {
+    const auto currentRenderData = currentRenderDataAtRelFrame(relFrame);
+    if(currentRenderData && currentRenderData->finished()) {
+        return currentRenderData->ref<BoxRenderData>();
+    }
+
+    const auto drawData = mDrawRenderContainer.getSrcRenderData();
+    if(isCurrentRenderData(drawData) && drawData->finished()) {
+        return drawData->ref<BoxRenderData>();
+    }
+
+    return nullptr;
+}
+
+bool BoundingBox::hasLatestFinishedDisplayData(const qreal relFrame) const {
+    return static_cast<bool>(getLatestFinishedRenderData(relFrame));
+}
+
+QRectF BoundingBox::getLatestFinishedDisplayRect(const qreal relFrame) const {
+    const auto drawData = mDrawRenderContainer.getSrcRenderData();
+    const bool preferDisplayContainer =
+            Actions::sInstance && Actions::sInstance->smoothChange();
+    if(preferDisplayContainer &&
+       isCurrentRenderData(drawData) &&
+       drawData->finished()) {
+        return mDrawRenderContainer.mappedGlobalRect();
+    }
+
+    const auto currentRenderData = currentRenderDataAtRelFrame(relFrame);
+    if(currentRenderData && currentRenderData->finished()) {
+        return QRectF(currentRenderData->fGlobalRect);
+    }
+
+    if(isCurrentRenderData(drawData) && drawData->finished()) {
+        return mDrawRenderContainer.mappedGlobalRect();
+    }
+
+    return QRectF();
+}
+
+bool BoundingBox::drawLatestFinishedDisplayRaw(SkCanvas * const canvas,
+                                               SkPaint& paint,
+                                               const qreal relFrame) const {
+    const auto drawData = mDrawRenderContainer.getSrcRenderData();
+    const bool preferDisplayContainer =
+            Actions::sInstance && Actions::sInstance->smoothChange();
+    if(preferDisplayContainer &&
+       isCurrentRenderData(drawData) &&
+       drawData->finished()) {
+        mDrawRenderContainer.drawSkRaw(canvas, paint);
+        return true;
+    }
+
+    const auto currentRenderData = currentRenderDataAtRelFrame(relFrame);
+    if(currentRenderData && currentRenderData->finished()) {
+        currentRenderData->drawOnParentLayerRaw(canvas, paint);
+        return true;
+    }
+
+    if(isCurrentRenderData(drawData) && drawData->finished()) {
+        mDrawRenderContainer.drawSkRaw(canvas, paint);
+        return true;
+    }
+
+    return false;
 }
 
 bool BoundingBox::isContainedIn(const QRectF &absRect) const {
@@ -1273,7 +1424,9 @@ void BoundingBox::setupWithoutRasterEffects(const qreal relFrame,
     data->fInheritedTransform = parentM;
     data->fTotalTransform = thisRelM*parentM;
 
-    data->fResolution = scene->getResolution();
+    data->fResolution = data->fResolutionOverride > 0 ?
+                data->fResolutionOverride :
+                scene->getResolution();
     data->fResolutionScale.reset();
     data->fResolutionScale.scale(data->fResolution, data->fResolution);
     data->fOpacity = getOpacity(relFrame);
@@ -1413,6 +1566,17 @@ ParentEffect *BoundingBox::getParentEffect() const
     return nullptr;
 }
 
+TrackMatteEffect *BoundingBox::getTrackMatteEffect() const
+{
+    const int totalEffects = mBlendEffectCollection->ca_getNumberOfChildren();
+    for(int i = 0; i < totalEffects; ++i) {
+        if(auto *effect = enve_cast<TrackMatteEffect*>(mBlendEffectCollection->getChild(i))) {
+            return effect;
+        }
+    }
+    return nullptr;
+}
+
 BoundingBox *BoundingBox::getParentEffectTarget() const
 {
     if(auto *effect = getParentEffect()) {
@@ -1433,6 +1597,18 @@ void BoundingBox::setParentEffectTarget(BoundingBox *target)
         return;
     }
 
+    QSet<const BoundingBox*> visited;
+    for(auto *current = target; current; current = current->getParentEffectTarget()) {
+        if(current == this) {
+            qWarning() << "Ignoring parent effect target cycle";
+            return;
+        }
+        if(visited.contains(current)) {
+            break;
+        }
+        visited.insert(current);
+    }
+
     if(!effect) {
         const auto parentEffect = enve::make_shared<ParentEffect>();
         effect = parentEffect.get();
@@ -1444,6 +1620,72 @@ void BoundingBox::setParentEffectTarget(BoundingBox *target)
 void BoundingBox::clearParentEffectTarget()
 {
     setParentEffectTarget(nullptr);
+}
+
+BoundingBox *BoundingBox::getTrackMatteTarget() const
+{
+    if(auto *effect = getTrackMatteEffect()) {
+        return effect->matteSource();
+    }
+    return nullptr;
+}
+
+TrackMatteMode BoundingBox::getTrackMatteMode() const
+{
+    if(auto *effect = getTrackMatteEffect()) {
+        return effect->getMode();
+    }
+    return TrackMatteMode::alphaMatte;
+}
+
+void BoundingBox::setTrackMatteTarget(BoundingBox *target,
+                                      TrackMatteMode mode)
+{
+    auto *effect = getTrackMatteEffect();
+    const auto oldTarget = effect ? effect->matteSource() : nullptr;
+    const auto oldMode = effect ? effect->getMode()
+                                : TrackMatteMode::alphaMatte;
+    if(!target) {
+        if(effect) {
+            effect->setMatteSourceAction(nullptr);
+            if(oldTarget) {
+                emit blendEffectChanged();
+            }
+        }
+        return;
+    }
+
+    if(!effect) {
+        const auto trackMatteEffect = enve::make_shared<TrackMatteEffect>();
+        effect = trackMatteEffect.get();
+        addBlendEffect(trackMatteEffect);
+    }
+    effect->setModeAction(mode);
+    effect->setMatteSourceAction(target);
+    ensureBlendEffectsVisible();
+    if(target != oldTarget || mode != oldMode) {
+        emit blendEffectChanged();
+    }
+}
+
+void BoundingBox::clearTrackMatte()
+{
+    setTrackMatteTarget(nullptr, TrackMatteMode::alphaMatte);
+}
+
+bool BoundingBox::isUsedAsTrackMatteSource() const
+{
+    const auto parent = getParentGroup();
+    if(!parent) return false;
+
+    const auto &siblings = parent->getContainedBoxes();
+    for(const auto &sibling : siblings) {
+        if(!sibling || sibling == this) continue;
+        if(sibling->getTrackMatteTarget() == this) {
+            return true;
+        }
+    }
+    return false;
 }
 
 //int BoundingBox::prp_getParentFrameShift() const {
@@ -1691,6 +1933,7 @@ void BoundingBox::selectAndAddContainedPointsToList(
         const QRectF &absRect,
         const MovablePoint::PtOp &adder,
         const CanvasMode mode) {
+    ensureCanvasPropsUpdated();
     for(const auto& desc : mCanvasProps) {
         const auto handler = desc->getPointsHandler();
         if(!handler) continue;
@@ -1700,6 +1943,7 @@ void BoundingBox::selectAndAddContainedPointsToList(
 
 void BoundingBox::selectAllCanvasPts(const MovablePoint::PtOp &adder,
                                      const CanvasMode mode) {
+    ensureCanvasPropsUpdated();
     for(const auto& desc : mCanvasProps) {
         const auto handler = desc->getPointsHandler();
         if(!handler) continue;
@@ -1779,24 +2023,41 @@ bool BoundingBox::SWT_drop(const QMimeData * const data) {
 }
 
 void BoundingBox::renderDataFinished(BoxRenderData *renderData) {
+    auto matchesCurrentTransform = [this, renderData, relFrame = renderData->fRelFrame]() {
+        const auto currentTransform = getTotalTransformAtFrame(relFrame);
+        return isZero4Dec(renderData->fTotalTransform.m11() - currentTransform.m11()) &&
+               isZero4Dec(renderData->fTotalTransform.m12() - currentTransform.m12()) &&
+               isZero4Dec(renderData->fTotalTransform.m21() - currentTransform.m21()) &&
+               isZero4Dec(renderData->fTotalTransform.m22() - currentTransform.m22()) &&
+               isZero4Dec(renderData->fTotalTransform.dx() - currentTransform.dx()) &&
+               isZero4Dec(renderData->fTotalTransform.dy() - currentTransform.dy());
+    };
+
     const bool currentState = renderData->fBoxStateId == mStateId;
     const qreal relFrame = renderData->fRelFrame;
+    const bool currentFrame = isZero4Dec(relFrame - anim_getCurrentRelFrame());
+    const bool transformMismatch = !matchesCurrentTransform();
     if(currentState) mRenderDataHandler.removeItemAtRelFrame(relFrame);
+
+    if(currentState && currentFrame && transformMismatch) {
+        planUpdate(UpdateReason::frameChange);
+        return;
+    }
+
     auto currentRenderData = mDrawRenderContainer.getSrcRenderData();
-    bool newerSate = true;
+    bool newerState = true;
     bool closerFrame = true;
     if(currentRenderData) {
-        newerSate = currentRenderData->fBoxStateId < renderData->fBoxStateId;
+        newerState = currentRenderData->fBoxStateId < renderData->fBoxStateId;
         const qreal finishedFrameDist =
                 qAbs(anim_getCurrentRelFrame() - relFrame);
         const qreal oldFrameDist =
                 qAbs(anim_getCurrentRelFrame() - currentRenderData->fRelFrame);
         closerFrame = finishedFrameDist < oldFrameDist;
     }
-    if(newerSate || closerFrame) {
+    if(newerState || closerFrame) {
         mDrawRenderContainer.setSrcRenderData(renderData);
-        const bool currentFrame = isZero4Dec(relFrame - anim_getCurrentRelFrame());
-        const bool expired = !currentState || !currentFrame;
+        const bool expired = !currentState || !currentFrame || transformMismatch;
         mDrawRenderContainer.setExpired(expired);
         if(expired) updateDrawRenderContainerTransform();
     }

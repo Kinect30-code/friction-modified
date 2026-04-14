@@ -54,10 +54,10 @@ protected:
     TransformEffectCollection();
 public:
     bool SWT_shouldFlattenHierarchy() const override { return true; }
-    void prp_setupTreeViewMenu(PropertyMenu * const menu);
+    void prp_setupTreeViewMenu(PropertyMenu * const menu) override;
 
-    void prp_readProperty(eReadStream &src);
-    void prp_readProperty_impl(eReadStream &src);
+    void prp_readProperty(eReadStream &src) override;
+    void prp_readProperty_impl(eReadStream &src) override;
 
     bool hasEffects();
     bool hasEffectsSVG();

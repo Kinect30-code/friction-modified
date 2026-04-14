@@ -24,10 +24,57 @@
 // Fork of enve - Copyright (C) 2016-2020 Maurycy Liebner
 
 #include "linkcanvasrenderdata.h"
+#include "CacheHandlers/imagecachecontainer.h"
 #include "skia/skiahelpers.h"
 #include "skia/skqtconversions.h"
 
+void LinkCanvasRenderData::setCachedSceneFrame(ImageCacheContainer * const container) {
+    if(!container) {
+        return;
+    }
+    mCachedSceneImage = container->getImage();
+}
+
+void LinkCanvasRenderData::setupRenderData() {
+    if(!mCachedSceneImage) {
+        return;
+    }
+
+    if(!fRelBoundingRectSet) {
+        fRelBoundingRectSet = true;
+        updateRelBoundingRect();
+    }
+
+    if(!fForceRasterize && !hasEffects()) {
+        fBaseMargin = QMargins();
+        dataSet();
+        updateGlobalRect();
+        fRenderTransform.reset();
+        fRenderTransform.translate(fRelBoundingRect.x(), fRelBoundingRect.y());
+        fRenderTransform *= fScaledTransform;
+        fRenderTransform.translate(-fGlobalRect.x(), -fGlobalRect.y());
+        fUseRenderTransform = true;
+        fRenderedImage = mCachedSceneImage;
+        fAntiAlias = true;
+        finishedProcessing();
+    }
+}
+
 void LinkCanvasRenderData::drawSk(SkCanvas * const canvas) {
+    if(mCachedSceneImage) {
+        const float x = static_cast<float>(fRelBoundingRect.x());
+        const float y = static_cast<float>(fRelBoundingRect.y());
+        if(fFilterQuality > kNone_SkFilterQuality) {
+            SkPaint paint;
+            paint.setAntiAlias(true);
+            paint.setFilterQuality(fFilterQuality);
+            canvas->drawImage(mCachedSceneImage, x, y, &paint);
+        } else {
+            canvas->drawImage(mCachedSceneImage, x, y);
+        }
+        return;
+    }
+
     ContainerBoxRenderData::drawSk(canvas);
     if(fClipToCanvas) {
         canvas->save();
@@ -36,4 +83,8 @@ void LinkCanvasRenderData::drawSk(SkCanvas * const canvas) {
         canvas->clear(SK_ColorTRANSPARENT);
         canvas->restore();
     }
+}
+
+void LinkCanvasRenderData::afterProcessing() {
+    BoxRenderData::afterProcessing();
 }

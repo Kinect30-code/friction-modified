@@ -302,7 +302,6 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
 
     mToolBar->addAction(mPlayFromBeginningButton);
     mToolBar->addAction(mPlayButton);
-    mToolBar->addAction(mStopButton);
     mToolBar->addAction(mLoopButton);
 
     addSpacer();
@@ -448,12 +447,14 @@ bool TimelineDockWidget::processKeyPress(QKeyEvent *event)
     if (!ctrl && !alt && !(mods & Qt::MetaModifier)) {
         switch (key) {
         case Qt::Key_T: {
+            if (!shift) { break; }
             const auto widget = currentTimelineWidget();
             if (!widget) { return false; }
             widget->showSelectedKeyStrengthMenu();
             return true;
         }
         case Qt::Key_U: {
+            if (!shift) { break; }
             const auto widget = currentTimelineWidget();
             if (!widget) { return false; }
             widget->toggleSelectedTransformVisibility();
@@ -470,8 +471,7 @@ bool TimelineDockWidget::processKeyPress(QKeyEvent *event)
 
     } else if (key == Qt::Key_Space && shift) { // play from first frame
         if (!setPreviewFromStart(state)) { return false; }
-    } else if (key == Qt::Key_Space ||
-               (key == Qt::Key_0 && (mods & Qt::KeypadModifier))) { // start/resume playback
+    } else if (key == Qt::Key_Space) { // start/resume playback
         if (!eSettings::instance().fPreviewCache) {
             if (mStepPreviewTimer->isActive()) { stopPreview(); }
             else { playPreview(); }
@@ -495,11 +495,23 @@ bool TimelineDockWidget::processKeyPress(QKeyEvent *event)
         } else {
             if (!moveSelectedLayerInToCurrentFrame()) { return false; }
         }
+    } else if (key == Qt::Key_BracketLeft && ctrl && !alt) {
+        if (mDocument.fActiveScene) {
+            mDocument.fActiveScene->lowerSelectedBoxes();
+        } else {
+            return false;
+        }
     } else if (key == Qt::Key_BracketRight && !ctrl) {
         if (alt) {
             if (!trimSelectedLayersAfterCurrentFrame()) { return false; }
         } else {
             if (!moveSelectedLayerOutToCurrentFrame()) { return false; }
+        }
+    } else if (key == Qt::Key_BracketRight && ctrl && !alt) {
+        if (mDocument.fActiveScene) {
+            mDocument.fActiveScene->raiseSelectedBoxes();
+        } else {
+            return false;
         }
     } else if (key == Qt::Key_Asterisk) { // set marker
         setMarker();
@@ -908,6 +920,14 @@ bool TimelineDockWidget::applyAeRevealPreset(BoxScrollWidget::AeRevealPreset pre
     const auto widget = currentTimelineWidget();
     if (!widget) { return false; }
     widget->applyAeRevealPreset(preset);
+    return true;
+}
+
+bool TimelineDockWidget::revealSelectedMasks()
+{
+    const auto widget = currentTimelineWidget();
+    if (!widget) { return false; }
+    widget->revealSelectedMasks();
     return true;
 }
 

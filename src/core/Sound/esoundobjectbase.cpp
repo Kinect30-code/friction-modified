@@ -25,12 +25,21 @@
 
 #include "esoundobjectbase.h"
 
+#include "canvas.h"
 #include "esoundlink.h"
 #include "fileshandler.h"
 #include "Timeline/fixedlenanimationrect.h"
 
 eSoundObjectBase::eSoundObjectBase(const qsptr<FixedLenAnimationRect>& durRect) {
     connect(this, &eBoxOrSound::prp_ancestorChanged, this, [this]() {
+        auto& conn = mSceneConnection.assign(getParentScene());
+        if (mSceneConnection) {
+            conn << connect(mSceneConnection, &Canvas::fpsChanged,
+                            this, [this](const qreal) {
+                updateDurationRectLength();
+                prp_afterWholeInfluenceRangeChanged();
+            });
+        }
         if(!getParentScene()) return;
         updateDurationRectLength();
     });

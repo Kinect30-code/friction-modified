@@ -74,7 +74,8 @@ public:
     void processChildrenData(const qreal relFrame,
                              const QMatrix& thisM,
                              BoxRenderData* const data,
-                             Canvas* const scene);
+                             Canvas* const scene,
+                             qreal resolutionOverride = 0);
 
     virtual BoundingBox *getBoxAt(const QPointF &absPos);
 

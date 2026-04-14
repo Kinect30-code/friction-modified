@@ -65,7 +65,10 @@ protected:
 public:
     virtual void drawOnParentLayer(SkCanvas * const canvas,
                                    SkPaint& paint);
+    virtual void drawOnParentLayerRaw(SkCanvas * const canvas,
+                                      SkPaint& paint);
     void drawOnParentLayer(SkCanvas * const canvas);
+    void remapToTotalTransform(const QMatrix& totalTransform);
 
     virtual QPointF getCenterPosition() {
         return fRelBoundingRect.center();
@@ -103,6 +106,7 @@ public:
     QMargins fBaseMargin;
 
     qreal fOpacity = 1;
+    qreal fResolutionOverride = 0;
     qreal fResolution;
     qreal fRelFrame;
 

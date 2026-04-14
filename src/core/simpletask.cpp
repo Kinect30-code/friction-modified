@@ -45,6 +45,10 @@ SimpleTask* SimpleTask::sSchedule(const Func &func) {
     return task;
 }
 
+bool SimpleTask::sHasTasks() {
+    return !sTasks.isEmpty();
+}
+
 void SimpleTask::sProcessAll() {
     auto tasks = sTasks;
     sTasks.clear();

@@ -34,6 +34,7 @@
 #include <QShortcut>
 #include <QFrame>
 #include <QCursor>
+#include <QSet>
 
 #include "timelinewidget.h"
 #include "widgets/framescrollbar.h"
@@ -204,15 +205,10 @@ TimelineWidget::TimelineWidget(Document &document,
     mSearchLine->setFocusPolicy(Qt::ClickFocus);
     mSearchLine->installEventFilter(this);
 
-    const auto panelTitle = new QLabel(tr("Layers"), this);
-    panelTitle->setObjectName("AeTimelinePanelTitle");
-    panelTitle->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-
     mMenuWidget = new QWidget(this);
     mMenuWidget->setObjectName("AeTimelineHeader");
     mMenuWidget->setLayout(mMenuLayout);
 
-    mMenuLayout->addWidget(panelTitle);
     mMenuLayout->addWidget(mBoxesListMenuBar);
     mMenuLayout->addWidget(mSearchLine);
     mMenuLayout->addWidget(mCornerMenuBar);
@@ -400,6 +396,42 @@ bool TimelineWidget::handleAeShortcutEvent(QKeyEvent *event)
     }
 }
 
+void TimelineWidget::refreshTimelineFromSceneUpdate(const bool interactivePreview)
+{
+    if(interactivePreview) {
+        scheduleInteractivePlaybackRefresh();
+        return;
+    }
+
+    mFrameScrollBar->update();
+    mFrameRangeScrollBar->update();
+    mKeysView->update();
+    mBoxesListWidget->updateVisible();
+}
+
+void TimelineWidget::scheduleInteractivePlaybackRefresh()
+{
+    if(!mPlaybackUiRefreshQueued) {
+        mPlaybackUiRefreshQueued = true;
+        QTimer::singleShot(16, this, [this]() {
+            mPlaybackUiRefreshQueued = false;
+            mFrameScrollBar->update();
+            mFrameRangeScrollBar->update();
+            mKeysView->update();
+        });
+    }
+
+    if(!mPlaybackHeavyUiRefreshQueued) {
+        mPlaybackHeavyUiRefreshQueued = true;
+        QTimer::singleShot(120, this, [this]() {
+            mPlaybackHeavyUiRefreshQueued = false;
+            if(mCurrentScene && mCurrentScene->isPreviewingOrRendering()) {
+                mBoxesListWidget->updateVisible();
+            }
+        });
+    }
+}
+
 bool TimelineWidget::eventFilter(QObject *watched, QEvent *event)
 {
     Q_UNUSED(watched)
@@ -426,6 +458,43 @@ void TimelineWidget::selectOnlyBox(BoundingBox *box)
     mCurrentScene->clearBoxesSelection();
     mCurrentScene->addBoxToSelection(box);
     mTimelineSelectionAnchor = box;
+}
+
+QList<BoundingBox*> TimelineWidget::displayedTimelineLayerBoxes() const
+{
+    if (!mBoxesListWidget) {
+        return {};
+    }
+
+    auto *mainAbstraction = mBoxesListWidget->getMainAbstration();
+    if (!mainAbstraction) {
+        return mCurrentScene ? mCurrentScene->getContainedBoxes() : QList<BoundingBox*>{};
+    }
+
+    QList<BoundingBox*> boxes;
+    QSet<BoundingBox*> seenBoxes;
+    const auto rules = mBoxesListWidget->getRulesCollection();
+    const int rowHeight = eSizesUI::widget;
+    int currY = rowHeight/2;
+    const int maxY = qMax(mBoxesListWidget->getContentHeight(), rowHeight) +
+                     rowHeight;
+    const SetAbsFunc collectBox = [&boxes, &seenBoxes](
+            SWT_Abstraction *abs, const int) {
+        if (!abs) { return; }
+        auto *box = enve_cast<BoundingBox*>(abs->getTarget());
+        if (!box || seenBoxes.contains(box)) { return; }
+        seenBoxes.insert(box);
+        boxes.append(box);
+    };
+    mainAbstraction->setAbstractions(-1, maxY,
+                                     currY, 0, rowHeight,
+                                     collectBox, rules,
+                                     true, false);
+
+    if (boxes.isEmpty() && mCurrentScene) {
+        return mCurrentScene->getContainedBoxes();
+    }
+    return boxes;
 }
 
 bool TimelineWidget::handleTimelineLayerSelection(BoundingBox *box,
@@ -466,9 +535,30 @@ bool TimelineWidget::handleTimelineLayerSelection(BoundingBox *box,
         return true;
     }
 
-    const auto &boxes = mCurrentScene->getContainedBoxes();
-    const int anchorIndex = boxes.indexOf(anchor);
-    const int boxIndex = boxes.indexOf(box);
+    const auto boxes = displayedTimelineLayerBoxes();
+    if (boxes.isEmpty()) {
+        mCurrentScene->clearSelectedProps();
+        mCurrentScene->addBoxToSelection(box);
+        mTimelineSelectionAnchor = box;
+        return true;
+    }
+
+    auto indexForBox = [&boxes](BoundingBox *candidate) {
+        return candidate ? boxes.indexOf(candidate) : -1;
+    };
+
+    int anchorIndex = indexForBox(anchor);
+    if (anchorIndex < 0) {
+        const auto selected = mCurrentScene->selectedBoxesList();
+        for (int i = selected.count() - 1; i >= 0; --i) {
+            anchor = selected.at(i);
+            anchorIndex = indexForBox(anchor);
+            if (anchorIndex >= 0) {
+                break;
+            }
+        }
+    }
+    const int boxIndex = indexForBox(box);
     if (anchorIndex < 0 || boxIndex < 0) {
         mCurrentScene->clearSelectedProps();
         mCurrentScene->addBoxToSelection(box);
@@ -487,6 +577,37 @@ bool TimelineWidget::handleTimelineLayerSelection(BoundingBox *box,
             mCurrentScene->addBoxToSelection(candidate);
         }
     }
+    return true;
+}
+
+bool TimelineWidget::handleTimelineLayerRectSelection(
+        const QList<BoundingBox *> &boxes,
+        Qt::KeyboardModifiers modifiers)
+{
+    if (!mCurrentScene) { return false; }
+
+    QList<BoundingBox*> uniqueBoxes;
+    QSet<BoundingBox*> seenBoxes;
+    for (auto *box : boxes) {
+        if (!box || seenBoxes.contains(box)) {
+            continue;
+        }
+        seenBoxes.insert(box);
+        uniqueBoxes.append(box);
+    }
+    if (uniqueBoxes.isEmpty()) {
+        return false;
+    }
+
+    const bool extendSelection = modifiers & (Qt::ShiftModifier | Qt::ControlModifier);
+    mCurrentScene->clearSelectedProps();
+    if (!extendSelection) {
+        mCurrentScene->clearBoxesSelection();
+    }
+    for (auto *box : uniqueBoxes) {
+        mCurrentScene->addBoxToSelection(box);
+    }
+    mTimelineSelectionAnchor = uniqueBoxes.last();
     return true;
 }
 
@@ -781,9 +902,9 @@ void TimelineWidget::showGroupFlowPopup()
                                 ? MainWindow::sGetInstance()->sceneNavigationChain()
                                 : QList<Canvas*>();
 
-    auto addNode = [this, popup, layout](const QString &name,
-                                         const bool current,
-                                         const std::function<void()> &fn) {
+    auto addNode = [popup, layout](const QString &name,
+                                   const bool current,
+                                   const std::function<void()> &fn) {
         auto *button = new QPushButton(name, popup);
         button->setObjectName(QStringLiteral("AeTimelineFlowNode"));
         button->setProperty("current", current);
@@ -888,10 +1009,8 @@ void TimelineWidget::setCurrentScene(Canvas * const scene) {
             mBoxesListWidget->scheduleContentUpdateIfIsCurrentTarget(
                         container, SWT_Target::group);
         });
-        connect(scene, &Canvas::requestUpdate, this, [this]() {
-            mFrameScrollBar->update();
-            mBoxesListWidget->updateVisible();
-            update();
+        connect(scene, &Canvas::requestUpdate, this, [this, scene]() {
+            refreshTimelineFromSceneUpdate(scene->isPreviewingOrRendering());
         });
     }
 }

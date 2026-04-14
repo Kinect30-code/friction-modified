@@ -32,6 +32,42 @@
 #include "complextask.h"
 #include "Private/document.h"
 #include "Boxes/boxrenderdata.h"
+#include "hardwareinfo.h"
+
+namespace {
+
+int recommendedGpuQueueDepth() {
+    const auto renderer = HardwareInfo::sGpuRendererString();
+    if(renderer.contains("llvmpipe", Qt::CaseInsensitive) ||
+       renderer.contains("softpipe", Qt::CaseInsensitive) ||
+       renderer.contains("swiftshader", Qt::CaseInsensitive)) {
+        return 2;
+    }
+
+    int depth = 4;
+    switch(HardwareInfo::sGpuVendor()) {
+    case GpuVendor::nvidia:
+        depth = 8;
+        break;
+    case GpuVendor::amd:
+        depth = 6;
+        break;
+    case GpuVendor::intel:
+        depth = 4;
+        break;
+    case GpuVendor::unrecognized:
+        depth = 4;
+        break;
+    }
+
+    const int cpuThreads = qMax(1, HardwareInfo::sCpuThreads() > 0 ?
+                                       HardwareInfo::sCpuThreads() :
+                                       QThread::idealThreadCount());
+    const int cpuBound = qBound(2, cpuThreads*2, 12);
+    return qMin(depth, cpuBound);
+}
+
+}
 
 TaskScheduler *TaskScheduler::sInstance = nullptr;
 
@@ -207,7 +243,7 @@ void TaskScheduler::processNextTasks() {
 bool TaskScheduler::processNextQuedGpuTask() {
     bool finished = false;
     QList<stdsptr<eTask>> tasks;
-    const int count = 3 - GpuTaskExecutor::sWaitingTasks();
+    const int count = qMax(0, maxGpuQueuedTasks() - GpuTaskExecutor::sWaitingTasks());
     for(int i = 0; i < count; i++) {
         const auto task = mQuedCGTasks.takeQuedForGpuProcessing();
         if(!task) break;
@@ -336,4 +372,9 @@ void TaskScheduler::processNextQuedCpuTask() {
     if(!tasks.isEmpty()) CpuTaskExecutor::sAddTasks(tasks);
     if(finished) processNextTasks();
     emit cpuUsageChanged(busyCpuThreads());
+}
+
+int TaskScheduler::maxGpuQueuedTasks() const {
+    // This is queue depth for the single GPU executor, not GPU thread count.
+    return recommendedGpuQueueDepth();
 }

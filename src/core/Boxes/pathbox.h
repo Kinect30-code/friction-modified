@@ -53,26 +53,26 @@ public:
             const int frame1, const int frame2) const = 0;
     virtual SkPath getRelativePath(const qreal relFrame) const = 0;
 
-    HardwareSupport hardwareSupport() const;
+    HardwareSupport hardwareSupport() const override;
 
-    OutlineSettingsAnimator *getStrokeSettings() const;
-    FillSettingsAnimator *getFillSettings() const;
+    OutlineSettingsAnimator *getStrokeSettings() const override;
+    FillSettingsAnimator *getFillSettings() const override;
 
-    SmartVectorPath *objectToVectorPathBox();
-    SmartVectorPath *strokeToVectorPathBox();
+    SmartVectorPath *objectToVectorPathBox() override;
+    SmartVectorPath *strokeToVectorPathBox() override;
 
-    bool relPointInsidePath(const QPointF &relPos) const;
+    bool relPointInsidePath(const QPointF &relPos) const override;
 
-    void drawHoveredSk(SkCanvas *canvas, const float invScale);
+    void drawHoveredSk(SkCanvas *canvas, const float invScale) override;
 
     void setupRenderData(const qreal relFrame, const QMatrix& parentM,
                          BoxRenderData * const data,
-                         Canvas * const scene);
-    stdsptr<BoxRenderData> createRenderData() {
+                         Canvas * const scene) override;
+    stdsptr<BoxRenderData> createRenderData() override {
         return enve::make_shared<PathBoxRenderData>(this);
     }
     void updateCurrentPreviewDataFromRenderData(
-            BoxRenderData *renderData);
+            BoxRenderData *renderData) override;
 
     typedef QList<stdsptr<PathEffectCaller>> PathEffectsCList;
     void addPathEffects(

@@ -817,6 +817,15 @@ void handleDelayed(QList<BlendEffect::Delayed> &delayed,
     }
 }
 
+bool shouldRenderForTrackMatte(const BoundingBox* const box,
+                               const qreal relFrame) {
+    if(!box) {
+        return false;
+    }
+    return box->isFrameFInDurationRect(relFrame) &&
+           box->isVisible();
+}
+
 void ContainerBox::drawContained(SkCanvas * const canvas,
                                  const SkFilterQuality filter, int& drawId,
                                  QList<BlendEffect::Delayed> &delayed) const {
@@ -827,7 +836,7 @@ void ContainerBox::drawContained(SkCanvas * const canvas,
     for(int i = minMax.fMax; i >= minMax.fMin; i--) {
         const auto& box = mContainedBoxes.at(i);
         const auto& nextBox = i == 0 ? nullptr : mContainedBoxes.at(i - 1);
-        if(box->isVisibleAndInVisibleDurationRect()) {
+        if(shouldRenderForTrackMatte(box, box->anim_getCurrentRelFrame())) {
             box->drawPixmapSk(canvas, filter, drawId, delayed);
             if(!box->isGroup()) drawId++;
         }
@@ -876,7 +885,7 @@ void ContainerBox::updateUIElementsForBlendEffects(
     for(int i = mContainedBoxes.count() - 1; i >= 0; i--) {
         const auto& box = mContainedBoxes.at(i);
         const auto& nextBox = i == 0 ? nullptr : mContainedBoxes.at(i - 1);
-        if(box->isVisibleAndInVisibleDurationRect()) {
+        if(shouldRenderForTrackMatte(box, box->anim_getCurrentRelFrame())) {
             if(box->isGroup()) {
                 const auto groupBox = static_cast<ContainerBox*>(box);
                 groupBox->updateUIElementsForBlendEffects(drawId, delayed);
@@ -890,7 +899,7 @@ void ContainerBox::containedDetachedBlendUISetup(
         int& drawId, QList<BlendEffect::UIDelayed> &delayed) {
     for(int i = mContainedBoxes.count() - 1; i >= 0; i--) {
         const auto& box = mContainedBoxes.at(i);
-        if(box->isVisibleAndInVisibleDurationRect()) {
+        if(shouldRenderForTrackMatte(box, box->anim_getCurrentRelFrame())) {
             if(box->isGroup()) {
                 const auto cBox = static_cast<ContainerBox*>(box);
                 cBox->containedDetachedBlendUISetup(drawId, delayed);
@@ -922,7 +931,7 @@ void ContainerBox::containedDetachedBlendSetup(
         QList<BlendEffect::Delayed> &delayed) const {
     for(int i = mContainedBoxes.count() - 1; i >= 0; i--) {
         const auto& box = mContainedBoxes.at(i);
-        if(box->isVisibleAndInVisibleDurationRect()) {
+        if(shouldRenderForTrackMatte(box, box->anim_getCurrentRelFrame())) {
             if(box->isGroup()) {
                 const auto cBox = static_cast<ContainerBox*>(box);
                 cBox->containedDetachedBlendSetup(canvas, filter, drawId, delayed);
@@ -947,6 +956,9 @@ void ContainerBox::drawContained(SkCanvas * const canvas,
 void ContainerBox::drawPixmapSk(SkCanvas * const canvas,
                                 const SkFilterQuality filter, int& drawId,
                                 QList<BlendEffect::Delayed> &delayed) const {
+    if(!isVisible() || isUsedAsTrackMatteSource()) {
+        return;
+    }
     if(isGroup()) return drawContained(canvas, filter, drawId, delayed);
     if(mIsDescendantCurrentGroup) {
         SkPaint paint;
@@ -979,8 +991,9 @@ void processChildData(BoundingBox * const child,
                       const qreal childRelFrame,
                       const QMatrix& thisM,
                       const qreal absFrame,
-                      QList<ChildRenderData>& delayed) {
-    if(!child->isFrameFVisibleAndInDurationRect(childRelFrame)) return;
+                      QList<ChildRenderData>& delayed,
+                      const qreal resolutionOverride) {
+    if(!shouldRenderForTrackMatte(child, childRelFrame)) return;
     if(child->isGroup()) {
         const auto childGroup = static_cast<ContainerBox*>(child);
         const auto childRelM = child->getRelativeTransformAtFrame(childRelFrame);
@@ -991,16 +1004,18 @@ void processChildData(BoundingBox * const child,
             const auto& desc = descs.at(i);
             const qreal descRelFrame = desc->prp_absFrameToRelFrameF(absFrame);
             processChildData(desc, parentData, descRelFrame,
-                             childM, absFrame, delayed);
+                             childM, absFrame, delayed, resolutionOverride);
         }
         return;
     }
     stdsptr<BoxRenderData> boxRenderData;
     if(parentData->fParentIsTarget) {
-        boxRenderData = child->getCurrentRenderData(childRelFrame);
+        boxRenderData = child->getCurrentRenderData(childRelFrame,
+                                                    resolutionOverride);
     }
     if(!boxRenderData) {
-        boxRenderData = child->queRender(childRelFrame, thisM);
+        boxRenderData = child->queRender(childRelFrame, thisM,
+                                         resolutionOverride);
     }
     if(!boxRenderData) return;
     boxRenderData->fParentIsTarget = parentData->fParentIsTarget;
@@ -1017,7 +1032,8 @@ void processChildData(BoundingBox * const child,
 void ContainerBox::processChildrenData(const qreal relFrame,
                                        const QMatrix& thisM,
                                        BoxRenderData * const data,
-                                       Canvas* const scene) {
+                                       Canvas* const scene,
+                                       const qreal resolutionOverride) {
     Q_UNUSED(scene);
     const auto groupData = static_cast<ContainerBoxRenderData*>(data);
     groupData->fChildrenRenderData.clear();
@@ -1029,7 +1045,7 @@ void ContainerBox::processChildrenData(const qreal relFrame,
         const auto& box = mContainedBoxes.at(i);
         const qreal boxRelFrame = box->prp_absFrameToRelFrameF(absFrame);
         processChildData(box, groupData, boxRelFrame,
-                         thisM, absFrame, delayed);
+                         thisM, absFrame, delayed, resolutionOverride);
     }
     for(auto& del : delayed) {
         auto& iClip = del.fClip;
@@ -1517,6 +1533,7 @@ void ContainerBox::writeBoxOrSoundXEV(const stdsptr<XevZipFileSaver>& xevFileSav
 #include "videobox.h"
 #include "rectangle.h"
 #include "circle.h"
+#include "polygonbox.h"
 //#include "paintbox.h"
 #include "imagesequencebox.h"
 #include "internallinkcanvas.h"
@@ -1524,6 +1541,7 @@ void ContainerBox::writeBoxOrSoundXEV(const stdsptr<XevZipFileSaver>& xevFileSav
 #include "customboxcreator.h"
 #include "svglinkbox.h"
 #include "nullobject.h"
+#include "../../modules/gltf/glbbox.h"
 
 qsptr<BoundingBox> createBoxOfNonCustomType(const eBoxType type) {
     switch(type) {
@@ -1539,6 +1557,8 @@ qsptr<BoundingBox> createBoxOfNonCustomType(const eBoxType type) {
             return enve::make_shared<RectangleBox>();
         case(eBoxType::circle):
             return enve::make_shared<Circle>();
+        case(eBoxType::polygon):
+            return enve::make_shared<PolygonBox>();
         case(eBoxType::layer):
             return enve::make_shared<ContainerBox>(eBoxType::layer);
         case(eBoxType::group):
@@ -1557,6 +1577,8 @@ qsptr<BoundingBox> createBoxOfNonCustomType(const eBoxType type) {
             return enve::make_shared<InternalLinkCanvas>(nullptr, false);
         case(eBoxType::nullObject):
             return enve::make_shared<NullObject>();
+        case(eBoxType::glb):
+            return enve::make_shared<GlbBox>();
         case(eBoxType::deprecated0): break;
         case(eBoxType::canvas) : break;
         case(eBoxType::count) : break;

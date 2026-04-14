@@ -55,6 +55,17 @@ AnimationBox::AnimationBox(const QString &name, const eBoxType type) :
     BoundingBox(name, type) {
     connect(this, &eBoxOrSound::parentChanged,
             this, &AnimationBox::updateAnimationRange);
+    connect(this, &Property::prp_ancestorChanged, this, [this]() {
+        auto& conn = mParentSceneConnection.assign(getParentScene());
+        if (mParentSceneConnection) {
+            conn << connect(mParentSceneConnection, &Canvas::fpsChanged,
+                            this, [this](const qreal) {
+                updateAnimationRange();
+                prp_afterWholeInfluenceRangeChanged();
+            });
+        }
+        updateAnimationRange();
+    });
 
     setDurationRectangle(enve::make_shared<FixedLenAnimationRect>(*this), true);
 

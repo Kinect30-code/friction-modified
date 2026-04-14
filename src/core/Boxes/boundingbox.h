@@ -37,6 +37,7 @@
 #include "BlendEffects/blendeffect.h"
 #include "TransformEffects/transformeffect.h"
 #include "Tasks/domeletask.h"
+#include <QHash>
 
 class Canvas;
 
@@ -59,6 +60,8 @@ class CustomProperties;
 class BlendEffectCollection;
 class TransformEffectCollection;
 class ParentEffect;
+class TrackMatteEffect;
+enum class TrackMatteMode;
 
 class ContainerBox;
 class SmartVectorPath;
@@ -76,6 +79,7 @@ enum class eBoxType {
     circle,
     image,
     rectangle,
+    polygon,
     text,
     layer,
     canvas,
@@ -90,6 +94,7 @@ enum class eBoxType {
     custom,
     deprecated0, // sculptPath,
     nullObject,
+    glb,
 
     count
 };
@@ -119,6 +124,7 @@ public:
 private:
     static int sNextDocumentId;
     static QList<BoundingBox*> sDocumentBoxes;
+    static QHash<int, BoundingBox*> sDocumentBoxesById;
 
     static int sNextWriteId;
     static QList<const BoundingBox*> sBoxesWithWriteIds;
@@ -271,7 +277,8 @@ public:
 
     stdsptr<BoxRenderData> createRenderData(const qreal relFrame);
     stdsptr<BoxRenderData> queRender(const qreal relFrame,
-                                     const QMatrix& parentM);
+                                     const QMatrix& parentM,
+                                     qreal resolutionOverride = 0);
     stdsptr<BoxRenderData> queExternalRender(
             const qreal relFrame, const bool forceRasterize);
 
@@ -402,6 +409,13 @@ public:
     BoundingBox *getParentEffectTarget() const;
     void setParentEffectTarget(BoundingBox *target);
     void clearParentEffectTarget();
+    TrackMatteEffect *getTrackMatteEffect() const;
+    BoundingBox *getTrackMatteTarget() const;
+    TrackMatteMode getTrackMatteMode() const;
+    void setTrackMatteTarget(BoundingBox *target,
+                             TrackMatteMode mode);
+    void clearTrackMatte();
+    bool isUsedAsTrackMatteSource() const;
 
     void setBlendModeSk(const SkBlendMode blendMode);
     void setTimelineColor(const QColor &color);
@@ -419,7 +433,15 @@ public:
     bool diffsIncludingInherited(const qreal relFrame1, const qreal relFrame2) const;
 
     bool hasCurrentRenderData(const qreal relFrame) const;
-    stdsptr<BoxRenderData> getCurrentRenderData(const qreal relFrame) const;
+    stdsptr<BoxRenderData> getCurrentRenderData(const qreal relFrame,
+                                                qreal resolutionOverride = 0) const;
+    stdsptr<BoxRenderData> getLatestFinishedRenderData(
+            const qreal relFrame) const;
+    bool hasLatestFinishedDisplayData(const qreal relFrame) const;
+    QRectF getLatestFinishedDisplayRect(const qreal relFrame) const;
+    bool drawLatestFinishedDisplayRaw(SkCanvas * const canvas,
+                                      SkPaint& paint,
+                                      const qreal relFrame) const;
     BoxRenderData *updateCurrentRenderData(const qreal relFrame);
 
     void updateDrawRenderContainerTransform();
@@ -457,6 +479,7 @@ public:
     bool hasBlendEffects() const;
     bool hasEnabledBlendEffects() const
     { return blendEffectsEnabled() && hasBlendEffects(); }
+    uint currentStateId() const { return mStateId; }
 
     const QStringList checkRasterEffectsForSVGSupport();
 
@@ -478,6 +501,14 @@ public:
                                 const FrameRange& parentVisRange,
                                 const QString &maskId = QString()) const;
 private:
+    void planUpdate(const UpdateReason reason,
+                    const bool causedByDescendant);
+    bool isCurrentRenderData(const BoxRenderData *renderData) const;
+    BoxRenderData *currentRenderDataAtRelFrame(const qreal relFrame) const;
+    BoxRenderData *reusableDisplayRenderData(const qreal relFrame,
+                                             qreal targetResolution) const;
+    void rebuildCanvasProps();
+    void ensureCanvasPropsUpdated() const;
     void cancelWaitingTasks();
     void afterTotalTransformChanged(const UpdateReason reason);
 signals:
@@ -537,7 +568,8 @@ private:
 
     BasicTransformAnimator* mParentTransform = nullptr;
 
-    QList<Property*> mCanvasProps;
+    mutable QList<Property*> mCanvasProps;
+    mutable bool mCanvasPropsNeedUpdate = true;
 
     RenderContainer mDrawRenderContainer;
 };

@@ -260,7 +260,7 @@ BoundingBox *Canvas::precomposeSelectedBoxes()
     addBoxToSelection(link.get());
     setCurrentBox(link.get());
     emit objectSelectionChanged();
-    emit requestUpdate();
+    scheduleUpdate();
     mDocument.actionFinished();
     return link.get();
 }
@@ -800,7 +800,7 @@ void Canvas::removeSelectedBoxesAndClearList() {
         box->removeFromParent_k();
     }
     emit objectSelectionChanged();
-    emit requestUpdate();
+    scheduleUpdate();
     mDocument.actionFinished();
 }
 

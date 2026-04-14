@@ -48,7 +48,8 @@ ToolboxToolBar::ToolboxToolBar(const QString &name,
 {
     setToolButtonStyle(Qt::ToolButtonIconOnly);
     setContextMenuPolicy(Qt::NoContextMenu);
-    setAllowedAreas(Qt::TopToolBarArea | Qt::BottomToolBarArea);
+    setAllowedAreas(Qt::AllToolBarAreas);
+    setFloatable(true);
     setWindowTitle(title);
 
     mGroupCommon = new QActionGroup(this);

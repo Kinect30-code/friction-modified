@@ -28,6 +28,7 @@
 #include "RasterEffects/customrastereffectcreator.h"
 #include "ShaderEffects/shadereffectcreator.h"
 #include "ShaderEffects/shadereffect.h"
+#include "pluginmanager.h"
 
 void RasterEffectMenuCreator::forEveryEffect(const EffectAdder& add) {
 
@@ -41,13 +42,21 @@ void RasterEffectMenuCreator::forEveryEffectCore(const EffectAdder &add)
     add("Blur", "", []() { return enve::make_shared<BlurEffect>(); });
     add("Shadow", "", []() { return enve::make_shared<ShadowEffect>(); });
     add("Motion Blur", "", []() { return enve::make_shared<MotionBlurEffect>(); });
+    if(PluginManager::isEnabled(PluginFeature::deepGlow)) {
+        add("Deep Glow", "Stylize", []() { return enve::make_shared<DeepGlowEffect>(); });
+    }
     add("Brightness-Contrast", "Color", []() { return enve::make_shared<BrightnessContrastEffect>(); });
     add("Colorize", "Color", []() { return enve::make_shared<ColorizeEffect>(); });
     add("Displacement Map", "Distort", []() { return enve::make_shared<DisplacementMapEffect>(); });
     add("Corner Pin", "Distort", []() { return enve::make_shared<CornerPinEffect>(); });
+    add("Motion Tile", "Distort", []() { return enve::make_shared<MotionTileEffect>(); });
     add("Puppet", "Distort", []() { return enve::make_shared<PuppetEffect>(); });
     add("Wipe", "Transitions", []() { return enve::make_shared<WipeEffect>(); });
+    add("Blinds", "Transitions", []() { return enve::make_shared<BlindsEffect>(); });
     add("Noise Fade", "Transitions", []() { return enve::make_shared<NoiseFadeEffect>(); });
+    if(PluginManager::isEnabled(PluginFeature::particleSystem)) {
+        add("Particle System", "Generate", []() { return enve::make_shared<ParticleSystemEffect>(); });
+    }
 }
 
 void RasterEffectMenuCreator::forEveryEffectCustom(const EffectAdder &add)

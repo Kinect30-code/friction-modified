@@ -130,6 +130,7 @@ void MainWindow::setupMenuEffects()
 
 void MainWindow::addRasterEffect(const qsptr<RasterEffect> &effect)
 {
+    if (!effect) { return; }
     const auto box = getCurrentBox();
     if (!box) { return; }
 

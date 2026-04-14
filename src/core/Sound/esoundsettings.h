@@ -27,6 +27,7 @@
 #define ESOUNDSETTINGS_H
 
 #include <QObject>
+#include "../ffmpegcompat.h"
 extern "C" {
     #include <libavutil/samplefmt.h>
     #include <libavutil/channel_layout.h>
@@ -48,7 +49,7 @@ struct CORE_EXPORT eSoundSettingsData {
     }
 
     int channelCount() const {
-        return av_get_channel_layout_nb_channels(fChannelLayout);
+        return Friction::FFmpegCompat::channelCountForMask(fChannelLayout);
     }
 
     int bytesPerSample() const {

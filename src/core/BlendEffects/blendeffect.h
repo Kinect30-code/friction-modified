@@ -43,13 +43,13 @@ public:
     virtual void drawBlendSetup(const qreal relFrame,
                                 SkCanvas * const canvas) const = 0;
 
-    void prp_setupTreeViewMenu(PropertyMenu * const menu);
-    void prp_readProperty_impl(eReadStream& src);
+    void prp_setupTreeViewMenu(PropertyMenu * const menu) override;
+    void prp_readProperty_impl(eReadStream& src) override;
     bool prp_dependsOn(const Property* const prop) const override;
     FrameRange prp_getIdenticalRelRange(const int relFrame) const override;
 
-    void writeIdentifier(eWriteStream &dst) const;
-    void writeIdentifierXEV(QDomElement& ele) const;
+    void writeIdentifier(eWriteStream &dst) const override;
+    void writeIdentifierXEV(QDomElement& ele) const override;
 
     bool isPathValid() const;
     SkPath clipPath(const qreal relFrame) const;

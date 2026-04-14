@@ -68,8 +68,10 @@ public:
         ImportFileDirProject
     };
     enum UiTheme {
-        UiThemeDark,
-        UiThemeLight
+        UiThemeDark = 0,
+        UiThemeLight = 1,
+        UiThemeSlate = 2,
+        UiThemePaper = 3
     };
     eSettings(const int cpuThreads,
               const intKB ramKB);
@@ -153,7 +155,7 @@ public:
     bool fPreviewCache = true;
 
     // timeline settings
-    bool fTimelineAlternateRow = true;
+    bool fTimelineAlternateRow = false;
     QColor fTimelineAlternateRowColor = QColor(0, 0, 0, 25);
     bool fTimelineHighlightRow = true;
     QColor fTimelineHighlightRowColor = ThemeSupport::getThemeHighlightColor(15);

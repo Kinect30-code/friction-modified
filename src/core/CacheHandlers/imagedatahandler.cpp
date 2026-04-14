@@ -43,9 +43,8 @@ int ImageDataHandler::getImageByteCount() const {
     if(!mImage) return 0;
     SkPixmap pixmap;
     if(mImage->peekPixels(&pixmap)) {
-        const int nCopies = mImageCopies.count();
         return pixmap.width()*pixmap.height()*
-               pixmap.info().bytesPerPixel()*(1 + nCopies);
+               pixmap.info().bytesPerPixel();
     }
     return 0;
 }
@@ -62,7 +61,7 @@ const sk_sp<SkImage>& ImageDataHandler::getImage() const {
 }
 
 sk_sp<SkImage> ImageDataHandler::requestImageCopy() {
-    if(mImageCopies.isEmpty()) return SkiaHelpers::makeCopy(mImage);
+    if(mImageCopies.isEmpty()) return mImage;
     else return mImageCopies.takeLast();
 }
 

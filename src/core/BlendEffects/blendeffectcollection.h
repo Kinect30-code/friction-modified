@@ -29,10 +29,10 @@ protected:
     BlendEffectCollection();
 public:
     bool SWT_shouldFlattenHierarchy() const override { return true; }
-    void prp_setupTreeViewMenu(PropertyMenu * const menu);
+    void prp_setupTreeViewMenu(PropertyMenu * const menu) override;
 
-    void prp_writeProperty_impl(eWriteStream &dst) const;
-    void prp_readProperty_impl(eReadStream &src);
+    void prp_writeProperty_impl(eWriteStream &dst) const override;
+    void prp_readProperty_impl(eReadStream &src) override;
 
     void blendSetup(ChildRenderData &data,
                     const int index, const qreal relFrame,

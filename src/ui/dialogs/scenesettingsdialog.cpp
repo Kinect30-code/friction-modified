@@ -320,10 +320,27 @@ void SceneSettingsDialog::populateResPresets()
 void SceneSettingsDialog::applySettingsToCanvas(Canvas * const canvas) const
 {
     if (!canvas) { return; }
+    const auto oldRange = canvas->getFrameRange();
+    const auto newRange = getFrameRange();
+    const qreal oldFps = canvas->getFps();
+    const qreal newFps = getFps();
+    const bool fpsChanged = !qFuzzyCompare(oldFps + 1.0, newFps + 1.0);
+    const bool preserveDurationOnFpsChange =
+        canvas == mTargetCanvas &&
+        fpsChanged &&
+        mTypeTime->currentData().toString() == "Frames" &&
+        newRange == oldRange;
+
     canvas->prp_setNameAction(getCanvasName());
     canvas->setCanvasSize(getCanvasWidth(), getCanvasHeight());
-    canvas->setFps(getFps());
-    canvas->setFrameRange(getFrameRange());
+    if (canvas == mTargetCanvas && fpsChanged) {
+        canvas->changeFpsTo(newFps);
+    } else {
+        canvas->setFps(newFps);
+    }
+    if (!preserveDurationOnFpsChange) {
+        canvas->setFrameRange(newRange);
+    }
 
     if (mSaveAsDefault) {
         const bool saveDef = mSaveAsDefault->isChecked();

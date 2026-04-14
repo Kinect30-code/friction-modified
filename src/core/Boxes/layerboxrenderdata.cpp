@@ -25,13 +25,100 @@
 
 #include "layerboxrenderdata.h"
 #include "containerbox.h"
+#include "BlendEffects/trackmattedrawresolver.h"
+#include "BlendEffects/trackmatteeffect.h"
 #include "skia/skiahelpers.h"
 #include "skia/skqtconversions.h"
 
 namespace {
 
-QRect localRectForChild(const QRect& childRect, const QRect& parentRect) {
-    return childRect.translated(-parentRect.topLeft());
+bool isTrackMatteInverted(const BoundingBox* const box) {
+    if(!box) {
+        return false;
+    }
+    switch(box->getTrackMatteMode()) {
+    case TrackMatteMode::alphaInvertedMatte:
+    case TrackMatteMode::lumaInvertedMatte:
+        return true;
+    default:
+        return false;
+    }
+}
+
+const ChildRenderData* findMainChildRenderDataForBox(
+        const QList<ChildRenderData>& children,
+        const BoundingBox* const box) {
+    if(!box) {
+        return nullptr;
+    }
+    for(const auto& candidate : children) {
+        if(!candidate.fIsMain || !candidate.fData) {
+            continue;
+        }
+        if(candidate.fData->fBlendEffectIdentifier == box) {
+            return &candidate;
+        }
+    }
+    return nullptr;
+}
+
+bool drawTrackMatteChild(const QList<ChildRenderData>& children,
+                         const ChildRenderData& child,
+                         const QRect& parentRect,
+                         SkCanvas * const canvas) {
+    if(!child.fData) {
+        return false;
+    }
+
+    const auto box = child.fData->fParentBox.data();
+    if(!box) {
+        return false;
+    }
+
+    const auto matteSource = box->getTrackMatteTarget();
+    if(!matteSource) {
+        return false;
+    }
+
+    const auto matteChild = findMainChildRenderDataForBox(children, matteSource);
+    if(!matteChild || !matteChild->fData) {
+        return false;
+    }
+
+    const auto childRelFrame = child.fData->fRelFrame;
+    const auto matteRelFrame = matteChild->fData->fRelFrame;
+    const auto targetDrawData =
+            TrackMatteDrawResolver::resolve(box, childRelFrame, child.fData);
+    const auto matteDrawData =
+            TrackMatteDrawResolver::resolve(matteSource, matteRelFrame,
+                                            matteChild->fData);
+    if(!targetDrawData || !matteDrawData) {
+        return false;
+    }
+
+    const QRectF compositeRect =
+            targetDrawData.fBounds.united(matteDrawData.fBounds);
+    const auto compositeBounds =
+            SkRect::MakeLTRB(compositeRect.left() - parentRect.left(),
+                             compositeRect.top() - parentRect.top(),
+                             compositeRect.right() - parentRect.left(),
+                             compositeRect.bottom() - parentRect.top());
+
+    SkPaint compositePaint;
+    compositePaint.setBlendMode(child.fData->fBlendMode);
+    canvas->saveLayer(&compositeBounds, &compositePaint);
+
+    SkPaint mattePaint;
+    matteDrawData.fDrawRaw(canvas, mattePaint);
+
+    SkPaint boxPaint;
+    boxPaint.setBlendMode(isTrackMatteInverted(box)
+                              ? SkBlendMode::kSrcOut
+                              : SkBlendMode::kSrcIn);
+    targetDrawData.fDrawRaw(canvas, boxPaint);
+
+    canvas->restore();
+    return true;
 }
 
 }
@@ -92,6 +179,19 @@ void ContainerBoxRenderData::drawSk(SkCanvas * const canvas) {
             child.fClip.clip(canvas);
             canvas->setMatrix(transform);
         }
+
+        if(drawTrackMatteChild(fChildrenRenderData, child, fGlobalRect, canvas)) {
+            canvas->restore();
+            continue;
+        }
+
+        const auto childBox = child.fData ? child.fData->fParentBox.data()
+                                          : nullptr;
+        if(childBox && childBox->isUsedAsTrackMatteSource()) {
+            canvas->restore();
+            continue;
+        }
+
         child->drawOnParentLayer(canvas);
         canvas->restore();
     }

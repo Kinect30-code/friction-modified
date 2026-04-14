@@ -146,9 +146,7 @@ void BoxScrollWidget::applyAeRevealPreset(const AeRevealPreset preset)
     }
 
     if (mCurrentAeRevealPreset == preset) {
-        for (const auto &box : selected) {
-            applyAeRevealPresetToBox(box);
-        }
+        clearAeRevealPreset();
         return;
     }
 
@@ -185,17 +183,6 @@ void BoxScrollWidget::clearAeRevealPreset()
         setCurrentType(mStoredRules.fType);
         setAlwaysShowChildren(mStoredRules.fAlwaysShowChildren);
         setCurrentTarget(target, mStoredRules.fTarget);
-        mHasStoredRules = false;
-    }
-}
-
-void BoxScrollWidget::dismissAeRevealPreset()
-{
-    mCurrentAeRevealPreset = AeRevealPreset::None;
-    mStoredVisibility.clear();
-    mStoredExpanded.clear();
-    if (mHasStoredRules) {
-        mStoredRules = getRulesCollection();
         mHasStoredRules = false;
     }
 }
@@ -418,37 +405,19 @@ void BoxScrollWidget::applyAeRevealPresetToBox(BoundingBox *box)
     setTargetVisibleTracked(transformProp, true);
     setAbstractionExpandedTracked(transformAbs, true);
 
-    if (mCurrentAeRevealPreset == AeRevealPreset::AnchorPoint) {
-        if (const auto advanced = enve_cast<AdvancedTransformAnimator*>(transform)) {
-            revealPropertyTracked(advanced->getPivotAnimator());
-            return;
-        }
-    } else if (mCurrentAeRevealPreset == AeRevealPreset::Position) {
-        revealPropertyTracked(transform->getPosAnimator());
-        return;
-    } else if (mCurrentAeRevealPreset == AeRevealPreset::Scale) {
-        revealPropertyTracked(transform->getScaleAnimator());
-        return;
-    } else if (mCurrentAeRevealPreset == AeRevealPreset::Rotation) {
-        revealPropertyTracked(transform->getRotAnimator());
-        return;
-    } else if (mCurrentAeRevealPreset == AeRevealPreset::Opacity) {
-        if (const auto advanced = enve_cast<AdvancedTransformAnimator*>(transform)) {
-            revealPropertyTracked(advanced->getOpacityAnimator());
-            return;
-        }
-    }
-
     const int nChildren = transform->ca_getNumberOfChildren();
     for (int i = 0; i < nChildren; i++) {
         const auto child = transform->ca_getChildAt<Property>(i);
         if (!child) {
             continue;
         }
-        const bool visible = matchesRevealPreset(child, mCurrentAeRevealPreset);
-        setTargetVisibleTracked(child, visible);
+
+        const bool visible = propertyMatchesRevealPresetRecursive(
+                    child, mCurrentAeRevealPreset);
         if (visible) {
-            setAbstractionExpandedTracked(child->SWT_getAbstractionForWidget(getId()), true);
+            revealPropertyTracked(child);
+        } else {
+            setTargetVisibleTracked(child, false);
         }
     }
 }
@@ -471,6 +440,31 @@ void BoxScrollWidget::revealPropertyTracked(Property *property)
             }
         }
     }
+}
+
+bool BoxScrollWidget::propertyMatchesRevealPresetRecursive(
+        Property *property,
+        const AeRevealPreset preset) const
+{
+    if (!property) {
+        return false;
+    }
+
+    if (matchesRevealPreset(property, preset)) {
+        return true;
+    }
+
+    if (const auto complex = enve_cast<ComplexAnimator*>(property)) {
+        const int childCount = complex->ca_getNumberOfChildren();
+        for (int i = 0; i < childCount; ++i) {
+            if (propertyMatchesRevealPresetRecursive(
+                        complex->ca_getChildAt<Property>(i), preset)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 void BoxScrollWidget::applyFrameRemappingRevealToBox(BoundingBox *box)
@@ -501,10 +495,6 @@ void BoxScrollWidget::applyMaskRevealToBox(BoundingBox *box)
     setAbstractionExpandedTracked(box->SWT_getAbstractionForWidget(getId()), true);
 
     const auto &siblings = parent->getContainedBoxes();
-    const int boxIndex = siblings.indexOf(box);
-    if (boxIndex < 0) {
-        return;
-    }
 
     box->ca_execOnDescendants([this](Property *prop) {
         const auto layerMask = enve_cast<LayerMaskEffect*>(prop);
@@ -561,13 +551,9 @@ void BoxScrollWidget::applyMaskRevealToBox(BoundingBox *box)
         if (!candidate || candidate == box) {
             continue;
         }
-        const auto blendMode = candidate->getBlendMode();
-        if (blendMode != SkBlendMode::kDstIn &&
-            blendMode != SkBlendMode::kDstOut) {
-            continue;
-        }
-        const int candidateIndex = siblings.indexOf(candidate);
-        if (candidateIndex < 0 || candidateIndex > boxIndex) {
+        const bool candidateUsesBox = candidate->getTrackMatteTarget() == box;
+        const bool boxUsesCandidate = box->getTrackMatteTarget() == candidate;
+        if (!candidateUsesBox && !boxUsesCandidate) {
             continue;
         }
 

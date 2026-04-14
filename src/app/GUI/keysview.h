@@ -229,6 +229,10 @@ private:
     void handleMouseMove(const QPoint &pos, const Qt::MouseButtons &buttons);
     void graphConstrainAnimatorCtrlsFrameValues();
     void graphGetAnimatorsMinMaxValue(qreal &minVal, qreal &maxVal);
+    bool graphUsesNormalizedFrameDomain() const;
+    GraphAnimator *graphPrimaryAnimator() const;
+    void graphResetHorizontalRangeIfNeeded();
+    QString graphFormatFrameLabel(const qreal frame) const;
     void graphMakeSegmentsSmoothAction(const bool smooth);
     QList<GraphAnimator*> selectedGraphAnimators() const;
     bool applyQuickInterpolation(const bool smooth);

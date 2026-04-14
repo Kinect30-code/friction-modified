@@ -70,7 +70,6 @@ public:
     TimelineHighlightWidget *requestHighlighter();
     void applyAeRevealPreset(AeRevealPreset preset);
     void clearAeRevealPreset();
-    void dismissAeRevealPreset();
     void revealSelectedFrameRemapping();
     void revealSelectedMasks();
     void toggleSelectedTransformVisibility();
@@ -85,6 +84,8 @@ private:
     void applyFrameRemappingRevealToBox(BoundingBox *box);
     void applyMaskRevealToBox(BoundingBox *box);
     void revealPropertyTracked(Property *property);
+    bool propertyMatchesRevealPresetRecursive(Property *property,
+                                              AeRevealPreset preset) const;
     void setTargetVisibleTracked(SingleWidgetTarget *target, bool visible);
     void setAbstractionExpandedTracked(SWT_Abstraction *abstraction, bool expanded);
     bool matchesRevealPreset(Property *property, AeRevealPreset preset) const;

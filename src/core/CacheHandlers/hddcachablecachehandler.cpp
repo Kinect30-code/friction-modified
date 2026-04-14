@@ -83,3 +83,26 @@ void HddCachableCacheHandler::drawCacheOnTimeline(QPainter * const p,
     }
     p->restore();
 }
+
+int HddCachableCacheHandler::freeUnusedMemoryOutsideRange(
+        const iValueRange &range,
+        int maxToFree) {
+    if(maxToFree <= 0) {
+        return 0;
+    }
+
+    int freedBytes = 0;
+    int freedCount = 0;
+    for(auto it = mConts.begin(); it != mConts.end() && freedCount < maxToFree; ++it) {
+        const auto cont = it->second.get();
+        if(!cont || cont->inUse() || !cont->storesDataInMemory()) {
+            continue;
+        }
+        if(range.isValid() && range.overlaps(cont->getRange())) {
+            continue;
+        }
+        freedBytes += cont->free_RAM_k();
+        freedCount++;
+    }
+    return freedBytes;
+}

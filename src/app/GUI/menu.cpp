@@ -164,7 +164,7 @@ void MainWindow::setupMenuBar()
                                                  tr("Exit", "MenuBar_File"),
                                                  this, &MainWindow::close,
                                                  QKeySequence(tr("Ctrl+Q")));
-    quitAppAct->setData(tr("Quit Friction"));
+    quitAppAct->setData(tr("Quit VECB"));
     cmdAddAction(quitAppAct);
 
     mEditMenu = mMenuBar->addMenu(tr("Edit", "MenuBar"));
@@ -270,7 +270,7 @@ void MainWindow::setupMenuBar()
                                                 "MenuBar_Edit"),
                                              &mActions,
                                              &Actions::selectAllAction,
-                                             Qt::Key_A,
+                                             Qt::CTRL + Qt::Key_A,
                                              mEditMenu);
         mSelectAllAct->setIcon(QIcon::fromTheme("select"));
         mSelectAllAct->setEnabled(false);
@@ -283,7 +283,7 @@ void MainWindow::setupMenuBar()
                                                 "MenuBar_Edit"),
                                              &mActions,
                                              &Actions::invertSelectionAction,
-                                             Qt::SHIFT + Qt::Key_A,
+                                             Qt::CTRL + Qt::SHIFT + Qt::Key_A,
                                              mEditMenu);
         mInvertSelAct->setIcon(QIcon::fromTheme("select"));
         mInvertSelAct->setEnabled(false);
@@ -296,7 +296,7 @@ void MainWindow::setupMenuBar()
                                                "MenuBar_Edit"),
                                             &mActions,
                                             &Actions::clearSelectionAction,
-                                            Qt::ALT + Qt::Key_A,
+                                            Qt::CTRL + Qt::ALT + Qt::Key_A,
                                             mEditMenu);
         mClearSelAct->setIcon(QIcon::fromTheme("select"));
         mClearSelAct->setEnabled(false);
@@ -390,7 +390,7 @@ void MainWindow::setupMenuBar()
     {
         const auto qAct = mObjectMenu->addAction(tr("Flip Horizontal", "MenuBar_Object"));
         qAct->setIcon(QIcon::fromTheme("width"));
-        qAct->setShortcut(Qt::Key_H);
+        qAct->setShortcut(QKeySequence(tr("Ctrl+Alt+H")));
         mActions.flipHorizontalAction->connect(qAct);
         cmdAddAction(qAct);
     }
@@ -398,7 +398,7 @@ void MainWindow::setupMenuBar()
     {
         const auto qAct = mObjectMenu->addAction(tr("Flip Vertical", "MenuBar_Object"));
         qAct->setIcon(QIcon::fromTheme("height"));
-        qAct->setShortcut(Qt::Key_V);
+        qAct->setShortcut(QKeySequence(tr("Ctrl+Alt+V")));
         mActions.flipVerticalAction->connect(qAct);
         cmdAddAction(qAct);
     }
@@ -485,7 +485,7 @@ void MainWindow::setupMenuBar()
         const auto qAct = mPathMenu->addAction(
             tr("Combine", "MenuBar_Path"));
         qAct->setIcon(QIcon::fromTheme("booleans_combine"));
-        qAct->setShortcut(Qt::CTRL + Qt::Key_K);
+        qAct->setShortcut(QKeySequence(tr("Ctrl+Alt+K")));
         mActions.pathsCombineAction->connect(qAct);
         cmdAddAction(qAct);
     }
@@ -800,8 +800,8 @@ void MainWindow::setupMenuBar()
     connect(mPanelLayersAct, &QAction::triggered,
             this, [this](bool triggered) {
                 mUI->setDockVisible(tr("Layers"), triggered);
-                if (triggered && mBottomTabs) {
-                    mBottomTabs->setCurrentWidget(mTimeline);
+                if (triggered && *mDocument.fActiveScene) {
+                    selectBottomSceneTab(*mDocument.fActiveScene);
                 }
                 syncPanelsMenuState();
             });
@@ -895,7 +895,9 @@ void MainWindow::setupMenuBar()
                                mUI->setDockVisible(tr("Character"), true);
                                mUI->setDockVisible(tr("Align"), true);
                                if (mCenterTabs) { mCenterTabs->setCurrentIndex(0); }
-                               if (mBottomTabs) { mBottomTabs->setCurrentWidget(mTimeline); }
+                               if (*mDocument.fActiveScene) {
+                                   selectBottomSceneTab(*mDocument.fActiveScene);
+                               }
                                syncPanelsMenuState();
                                statusBar()->showMessage(tr("AE panel layout restored"), 2500);
                            });

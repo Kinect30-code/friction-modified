@@ -12,6 +12,7 @@ namespace OraModule {
 qsptr<BoundingBox> importOraFileAsGroup(const QFileInfo& fileInfo);
 qsptr<BoundingBox> importOraFileAsPrecomp(const QFileInfo& fileInfo,
                                           Canvas* const scene);
+QList<int> sceneNavigationChainIds(const Canvas* scene);
 
 }
 

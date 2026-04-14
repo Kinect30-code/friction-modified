@@ -37,8 +37,11 @@
 #include "pointhelpers.h"
 #include "GUI/BoxesList/boolpropertywidget.h"
 #include "boxtargetwidget.h"
+#include "particleoverlifewidget.h"
 #include "Properties/boxtargetproperty.h"
 #include "Properties/comboboxproperty.h"
+#include "Animators/enumanimator.h"
+#include "Animators/boolanimator.h"
 #include "Animators/qstringanimator.h"
 #include "RasterEffects/rastereffectcollection.h"
 #include "Properties/boolproperty.h"
@@ -56,6 +59,7 @@
 #include "canvas.h"
 #include "BlendEffects/blendeffectcollection.h"
 #include "BlendEffects/blendeffectboxshadow.h"
+#include "BlendEffects/trackmatteeffect.h"
 #include "Sound/eindependentsound.h"
 #include "GUI/propertynamedialog.h"
 #include "Animators/SmartPath/smartpathcollection.h"
@@ -63,6 +67,8 @@
 #include "GUI/BoxesList/boxscrollwidget.h"
 #include "GUI/dialogsinterface.h"
 #include "Expressions/expression.h"
+#include "../../../modules/particles/particleoverlifeanimator.h"
+#include "../../../modules/particles/particlesystemeffect.h"
 
 #include "typemenu.h"
 #include "themesupport.h"
@@ -104,6 +110,40 @@ bool boxIsAncestorOf(BoundingBox *ancestor, BoundingBox *box)
         current = current->getParentGroup();
     }
     return false;
+}
+
+BoundingBox *defaultTrackMatteSource(BoundingBox *box)
+{
+    if (!box) {
+        return nullptr;
+    }
+    auto *parent = box->getParentGroup();
+    if (!parent) {
+        return nullptr;
+    }
+
+    const auto &siblings = parent->getContainedBoxes();
+    const int boxIndex = siblings.indexOf(box);
+    if (boxIndex < 0 || boxIndex + 1 >= siblings.count()) {
+        return nullptr;
+    }
+    return siblings.at(boxIndex + 1);
+}
+
+int matteIndexForTrackMatte(BoundingBox *box)
+{
+    if (!box || !box->getTrackMatteTarget()) {
+        return 0;
+    }
+
+    switch (box->getTrackMatteMode()) {
+    case TrackMatteMode::alphaMatte:
+        return 1;
+    case TrackMatteMode::alphaInvertedMatte:
+        return 2;
+    default:
+        return 0;
+    }
 }
 
 QString titleCaseWords(const QString &text)
@@ -288,6 +328,66 @@ QString timelineDisplayNameForProperty(Property *prop)
     return QObject::tr("Layer");
 }
 
+QStringList propertyPathRelativeToBox(Property *prop, BoundingBox *box)
+{
+    QStringList path;
+    Property *cursor = prop;
+    while (cursor && cursor != box) {
+        path.prepend(cursor->prp_getName());
+        cursor = cursor->getParent<Property>();
+    }
+    if (cursor != box) {
+        path.clear();
+    }
+    return path;
+}
+
+QList<Animator*> animatorsForSelectedBoxesMatchingPath(Animator *sourceAnim)
+{
+    QList<Animator*> result;
+    if (!sourceAnim) {
+        return result;
+    }
+
+    auto *sourceProp = static_cast<Property*>(sourceAnim);
+    auto *sourceScene = sourceProp->getParentScene();
+    auto *sourceBox = sourceProp->getFirstAncestor<BoundingBox>();
+    if (!sourceScene || !sourceBox || !sourceBox->isSelected()) {
+        result.append(sourceAnim);
+        return result;
+    }
+
+    const auto selectedBoxes = sourceScene->selectedBoxesList();
+    if (selectedBoxes.count() < 2) {
+        result.append(sourceAnim);
+        return result;
+    }
+
+    const QStringList relativePath = propertyPathRelativeToBox(sourceProp, sourceBox);
+    if (relativePath.isEmpty()) {
+        result.append(sourceAnim);
+        return result;
+    }
+
+    QSet<Animator*> seen;
+    for (auto *box : selectedBoxes) {
+        if (!box) {
+            continue;
+        }
+        auto *match = enve_cast<Animator*>(box->ca_findPropertyWithPath(0, relativePath));
+        if (!match || seen.contains(match)) {
+            continue;
+        }
+        seen.insert(match);
+        result.append(match);
+    }
+
+    if (result.isEmpty()) {
+        result.append(sourceAnim);
+    }
+    return result;
+}
+
 }
 
 #include "GUI/global.h"
@@ -415,9 +515,6 @@ BoxSingleWidget::BoxSingleWidget(BoxScroller * const parent)
     mSoloButton->setFocusPolicy(Qt::NoFocus);
     mSoloButton->setToolTip(tr("Solo layer"));
     mSoloButton->setFixedWidth(qRound(eSizesUI::widget * 0.95));
-    mSoloButton->setStyleSheet(QStringLiteral(
-        "QPushButton#AeTimelineSoloButton { padding: 0; margin: 0; color: rgba(210,210,210,180); font-weight: 700; }"
-        "QPushButton#AeTimelineSoloButton:checked { color: rgb(255, 204, 96); }"));
     mSoloButton->hide();
     mMainLayout->addWidget(mSoloButton);
     connect(mSoloButton, &QPushButton::clicked, this, [this]() {
@@ -481,8 +578,6 @@ BoxSingleWidget::BoxSingleWidget(BoxScroller * const parent)
     mNameLabel->setObjectName(QStringLiteral("AeTimelineNameLabel"));
     mNameLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     mNameLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    mNameLabel->setStyleSheet(QStringLiteral(
-        "QLabel#AeTimelineNameLabel { color: rgb(232,232,232); background: transparent; }"));
     fillLayout->addWidget(mNameLabel);
     mExpressionEdit = new QLineEdit(mFillWidget);
     mExpressionEdit->setObjectName(QStringLiteral("AeInlineExpressionEdit"));
@@ -527,8 +622,6 @@ BoxSingleWidget::BoxSingleWidget(BoxScroller * const parent)
     mPointValueLabel = new QLabel(this);
     mPointValueLabel->setObjectName(QStringLiteral("AeTimelinePointValueLabel"));
     mPointValueLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    mPointValueLabel->setStyleSheet(QStringLiteral(
-        "QLabel#AeTimelinePointValueLabel { color: rgb(214,214,214); background: transparent; padding: 0 6px; }"));
     mPointValueLabel->hide();
     mMainLayout->addWidget(mPointValueLabel, Qt::AlignRight);
 
@@ -583,7 +676,6 @@ BoxSingleWidget::BoxSingleWidget(BoxScroller * const parent)
     mParentPickWhipButton->setFocusPolicy(Qt::NoFocus);
     mParentPickWhipButton->setToolTip(tr("Pick-whip parent target from another layer row."));
     mParentPickWhipButton->setFixedWidth(qRound(eSizesUI::widget * 1.1));
-    mParentPickWhipButton->setStyleSheet(QStringLiteral("QPushButton#AeTimelineRelationPickWhip { padding: 0; margin: 0; color: rgb(210,210,210); font-weight: 600; }"));
     mMainLayout->addWidget(mParentPickWhipButton);
     connect(mParentPickWhipButton, &QPushButton::pressed, this, [this]() {
         const auto box = mTarget ? enve_cast<BoundingBox*>(mTarget->getTarget()) : nullptr;
@@ -594,13 +686,12 @@ BoxSingleWidget::BoxSingleWidget(BoxScroller * const parent)
                     mParentPickWhipButton->mapToGlobal(mParentPickWhipButton->rect().center()));
     });
 
-    mMattePickWhipButton = new QPushButton(tr("M"), this);
+    mMattePickWhipButton = new QPushButton(tr("T"), this);
     mMattePickWhipButton->setObjectName("AeTimelineRelationPickWhip");
     mMattePickWhipButton->setFlat(true);
     mMattePickWhipButton->setFocusPolicy(Qt::NoFocus);
-    mMattePickWhipButton->setToolTip(tr("Pick-whip a layer to clip below with this matte layer."));
+    mMattePickWhipButton->setToolTip(tr("Pick-whip another layer to use as this layer's track matte source."));
     mMattePickWhipButton->setFixedWidth(qRound(eSizesUI::widget * 1.1));
-    mMattePickWhipButton->setStyleSheet(QStringLiteral("QPushButton#AeTimelineRelationPickWhip { padding: 0; margin: 0; color: rgb(210,210,210); font-weight: 600; }"));
     mMainLayout->addWidget(mMattePickWhipButton);
     mMattePickWhipButton->hide();
     connect(mMattePickWhipButton, &QPushButton::pressed, this, [this]() {
@@ -655,10 +746,10 @@ BoxSingleWidget::BoxSingleWidget(BoxScroller * const parent)
 
     mTrackMatteCombo = createCombo(this);
     mTrackMatteCombo->setObjectName("timelineTrackMatteCombo");
-    mTrackMatteCombo->setToolTip(tr("AE-style track matte column for clipping the layer below."));
-    mTrackMatteCombo->addItem(tr("None"), int(SkBlendMode::kSrcOver));
-    mTrackMatteCombo->addItem(tr("alpF"), int(SkBlendMode::kDstIn));
-    mTrackMatteCombo->addItem(tr("alpB"), int(SkBlendMode::kDstOut));
+    mTrackMatteCombo->setToolTip(tr("AE-style track matte mode for this layer. If no matte source is linked yet, the layer above is used by default."));
+    mTrackMatteCombo->addItem(tr("None"), -1);
+    mTrackMatteCombo->addItem(tr("alpF"), int(TrackMatteMode::alphaMatte));
+    mTrackMatteCombo->addItem(tr("alpB"), int(TrackMatteMode::alphaInvertedMatte));
     mTrackMatteCombo->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Minimum);
     mTrackMatteCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     mTrackMatteCombo->setMinimumContentsLength(5);
@@ -669,8 +760,31 @@ BoxSingleWidget::BoxSingleWidget(BoxScroller * const parent)
         if (!mTarget || mUpdatingTimelineRelations) return;
         const auto box = enve_cast<BoundingBox*>(mTarget->getTarget());
         if (!box) return;
-        const auto blendMode = static_cast<SkBlendMode>(mTrackMatteCombo->itemData(id).toInt());
-        box->setBlendModeSk(blendMode);
+        if (id == 0) {
+            box->clearTrackMatte();
+            Document::sInstance->actionFinished();
+            syncTimelineRelationControls();
+            return;
+        }
+
+        auto *matteSource = box->getTrackMatteTarget();
+        if (!matteSource) {
+            matteSource = defaultTrackMatteSource(box);
+        }
+        if (!matteSource || matteSource == box) {
+            if (auto *win = MainWindow::sGetInstance()) {
+                if (win->statusBar()) {
+                    win->statusBar()->showMessage(
+                        tr("No matte source layer is available above this layer. Move the matte source above this layer or use the T whip to pick one."),
+                        3500);
+                }
+            }
+            syncTimelineRelationControls();
+            return;
+        }
+
+        const auto mode = static_cast<TrackMatteMode>(mTrackMatteCombo->itemData(id).toInt());
+        box->setTrackMatteTarget(matteSource, mode);
         Document::sInstance->actionFinished();
         syncTimelineRelationControls();
     });
@@ -681,6 +795,10 @@ BoxSingleWidget::BoxSingleWidget(BoxScroller * const parent)
 
     mCheckBox = new BoolPropertyWidget(this);
     mMainLayout->addWidget(mCheckBox);
+
+    mOverLifeWidget = new ParticleOverLifeWidget(this);
+    mMainLayout->addWidget(mOverLifeWidget);
+    mOverLifeWidget->hide();
 
     //eSizesUI::widget.addHalfSpacing(mMainLayout);
 
@@ -802,13 +920,7 @@ void BoxSingleWidget::syncTimelineRelationControls() {
     }
     mParentLayerCombo->setCurrentIndex(parentIndex);
 
-    int matteIndex = 0;
-    if (box->getBlendMode() == SkBlendMode::kDstIn) {
-        matteIndex = 1;
-    } else if (box->getBlendMode() == SkBlendMode::kDstOut) {
-        matteIndex = 2;
-    }
-    mTrackMatteCombo->setCurrentIndex(matteIndex);
+    mTrackMatteCombo->setCurrentIndex(matteIndexForTrackMatte(box));
     mUpdatingTimelineRelations = false;
 }
 
@@ -828,9 +940,48 @@ void BoxSingleWidget::setComboProperty(ComboBoxProperty* const combo) {
     mPropertyComboBox->show();
 }
 
+void BoxSingleWidget::setComboProperty(EnumAnimator* const combo) {
+    if(!combo) return mPropertyComboBox->hide();
+    mPropertyComboBox->clear();
+    mPropertyComboBox->addItems(combo->getValueNames());
+    mPropertyComboBox->setCurrentIndex(combo->getCurrentValue());
+    mTargetConn << connect(combo, &EnumAnimator::valueNamesChanged,
+                           this, [this, combo](const QStringList&) {
+        const QSignalBlocker blocker(mPropertyComboBox);
+        mPropertyComboBox->clear();
+        mPropertyComboBox->addItems(combo->getValueNames());
+        mPropertyComboBox->setCurrentIndex(combo->getCurrentValue());
+    });
+    mTargetConn << connect(combo, &QrealAnimator::baseValueChanged,
+                           this, [this, combo](qreal) {
+        const QSignalBlocker blocker(mPropertyComboBox);
+        mPropertyComboBox->setCurrentIndex(combo->getCurrentValue());
+    });
+    mTargetConn << connect(mPropertyComboBox,
+                           qOverload<int>(&QComboBox::activated),
+                           this, [combo](const int id) {
+        combo->prp_startTransform();
+        combo->setCurrentValue(id);
+        combo->prp_finishTransform();
+        Document::sInstance->actionFinished();
+    });
+    mPropertyComboBox->show();
+}
+
 Property *BoxSingleWidget::targetProperty() const
 {
     return mTarget ? enve_cast<Property*>(mTarget->getTarget()) : nullptr;
+}
+
+bool BoxSingleWidget::isTimelineLayerBackgroundRow() const
+{
+    const auto prop = targetProperty();
+    return enve_cast<BoundingBox*>(prop) || enve_cast<eIndependentSound*>(prop);
+}
+
+bool BoxSingleWidget::hasExpandedTimelineContent() const
+{
+    return mTarget && mTarget->contentVisible();
 }
 
 bool BoxSingleWidget::isPropertyRowSelected() const
@@ -926,20 +1077,23 @@ void BoxSingleWidget::setTargetAbstraction(SWT_Abstraction *abs) {
     const auto boolPropertyContainer = enve_cast<BoolPropertyContainer*>(prop);
     const auto boxTargetProperty = enve_cast<BoxTargetProperty*>(prop);
     const auto comboBoxProperty = enve_cast<ComboBoxProperty*>(prop);
+    const auto enumAnimator = enve_cast<EnumAnimator*>(prop);
+    const auto boolAnimator = enve_cast<BoolAnimator*>(prop);
     const auto animator = enve_cast<Animator*>(prop);
     const auto graphAnimator = enve_cast<GraphAnimator*>(prop);
     const auto smartPathAnimator = enve_cast<SmartPathAnimator*>(prop);
     const auto complexAnimator = enve_cast<ComplexAnimator*>(prop);
+    const auto colorAnimator = enve_cast<ColorAnimator*>(prop);
     const auto pointAnimator = enve_cast<QPointFAnimator*>(prop);
     const auto eboxOrSound = enve_cast<eBoxOrSound*>(prop);
     const auto eindependentSound = enve_cast<eIndependentSound*>(prop);
     const auto eeffect = enve_cast<eEffect*>(prop);
     const auto rasterEffect = enve_cast<RasterEffect*>(prop);
     const auto boundingBox = enve_cast<BoundingBox*>(prop);
-
     mMainLayout->setContentsMargins(0, 0, boundingBox ? 0 : 5, 0);
-    mContentButton->setVisible(complexAnimator);
-    mRecordButton->setVisible(animator && !eboxOrSound);
+    mContentButton->setVisible(complexAnimator && !colorAnimator);
+    mRecordButton->setVisible(animator && !eboxOrSound &&
+                              !enve_cast<ParticleOverLifeAnimator*>(prop));
     mVisibleButton->setVisible(eboxOrSound || eeffect ||
                                (graphAnimator && !smartPathAnimator));
     mLockedButton->setVisible(boundingBox);
@@ -961,10 +1115,9 @@ void BoxSingleWidget::setTargetAbstraction(SWT_Abstraction *abs) {
             });
         }
     }
-    mBoxTargetWidget->setVisible(boxTargetProperty);
-    mCheckBox->setVisible(boolProperty || boolPropertyContainer);
-
-    mPropertyComboBox->setVisible(comboBoxProperty);
+    bool boxTargetWidgetVisible = boxTargetProperty;
+    bool checkBoxVisible = boolProperty || boolPropertyContainer || boolAnimator;
+    bool propertyComboVisible = comboBoxProperty || enumAnimator;
     cancelInlineExpressionEdit();
 
     mPathBlendModeVisible = false;
@@ -982,12 +1135,14 @@ void BoxSingleWidget::setTargetAbstraction(SWT_Abstraction *abs) {
     mColorButton->setColorTarget(nullptr);
     mValueSlider->setTarget(nullptr);
     mSecondValueSlider->setTarget(nullptr);
+    mOverLifeWidget->setTarget(nullptr);
     mPointValueLabel->hide();
     mPointValueLabel->clear();
 
     bool valueSliderVisible = false;
     bool secondValueSliderVisible = false;
     bool colorButtonVisible = false;
+    bool overLifeWidgetVisible = false;
 
     if(boundingBox) {
         if (isTimelineLayerRow()) {
@@ -1019,6 +1174,12 @@ void BoxSingleWidget::setTargetAbstraction(SWT_Abstraction *abs) {
                 syncTimelineRelationControls();
             }
         });
+        mTargetConn << connect(boundingBox, &BoundingBox::blendEffectChanged,
+                               this, [this, boundingBox]() {
+            if (boundingBox && isTimelineLayerRow()) {
+                syncTimelineRelationControls();
+            }
+        });
         mTargetConn << connect(boundingBox, &BoundingBox::timelineColorChanged,
                                this, qOverload<>(&QWidget::update));
         mTargetConn << connect(boundingBox->getTransformAnimator(),
@@ -1040,19 +1201,35 @@ void BoxSingleWidget::setTargetAbstraction(SWT_Abstraction *abs) {
     } else if(enve_cast<eSoundObjectBase*>(prop)) {
     } else if(boolProperty) {
         mCheckBox->setTarget(boolProperty);
+        checkBoxVisible = true;
         mTargetConn << connect(boolProperty, &BoolProperty::valueChanged,
                                this, [this]() { mCheckBox->update(); });
     } else if(boolPropertyContainer) {
         mCheckBox->setTarget(boolPropertyContainer);
+        checkBoxVisible = true;
         mTargetConn << connect(boolPropertyContainer,
                                &BoolPropertyContainer::valueChanged,
                                this, [this]() { mCheckBox->update(); });
+    } else if(boolAnimator) {
+        mCheckBox->setTarget(boolAnimator);
+        checkBoxVisible = true;
+        mTargetConn << connect(boolAnimator, &QrealAnimator::baseValueChanged,
+                               this, [this](qreal) { mCheckBox->update(); });
     } else if(comboBoxProperty) {
+        propertyComboVisible = true;
         setComboProperty(comboBoxProperty);
+    } else if(enumAnimator) {
+        propertyComboVisible = true;
+        setComboProperty(enumAnimator);
     } else if(const auto qra = enve_cast<QrealAnimator*>(prop)) {
-        mValueSlider->setTarget(qra);
-        valueSliderVisible = true;
-        mValueSlider->setIsLeftSlider(false);
+        if (enve_cast<ParticleOverLifeAnimator*>(qra)) {
+            mOverLifeWidget->setTarget(qra);
+            overLifeWidgetVisible = true;
+        } else {
+            mValueSlider->setTarget(qra);
+            valueSliderVisible = true;
+            mValueSlider->setIsLeftSlider(false);
+        }
     } else if(complexAnimator) {
         if(const auto col = enve_cast<ColorAnimator*>(prop)) {
             colorButtonVisible = true;
@@ -1076,20 +1253,42 @@ void BoxSingleWidget::setTargetAbstraction(SWT_Abstraction *abs) {
             {
                 const auto guiProp = complexAnimator->ca_getGUIProperty();
                 if(const auto qra = enve_cast<QrealAnimator*>(guiProp)) {
-                    valueSliderVisible = true;
-                    mValueSlider->setTarget(qra);
-                    mValueSlider->setIsLeftSlider(false);
-                    mSecondValueSlider->setTarget(nullptr);
+                    if (enve_cast<ParticleOverLifeAnimator*>(qra)) {
+                        mOverLifeWidget->setTarget(qra);
+                        overLifeWidgetVisible = true;
+                    } else {
+                        valueSliderVisible = true;
+                        mValueSlider->setTarget(qra);
+                        mValueSlider->setIsLeftSlider(false);
+                        mSecondValueSlider->setTarget(nullptr);
+                    }
                 } else if(const auto col = enve_cast<ColorAnimator*>(guiProp)) {
                     mColorButton->setColorTarget(col);
                     colorButtonVisible = true;
                 } else if(const auto combo = enve_cast<ComboBoxProperty*>(guiProp)) {
+                    propertyComboVisible = true;
                     setComboProperty(combo);
+                } else if(const auto combo = enve_cast<EnumAnimator*>(guiProp)) {
+                    propertyComboVisible = true;
+                    setComboProperty(combo);
+                } else if(const auto boxTarget = enve_cast<BoxTargetProperty*>(guiProp)) {
+                    mBoxTargetWidget->setTargetProperty(boxTarget);
+                    boxTargetWidgetVisible = true;
+                } else if(const auto boolProp = enve_cast<BoolProperty*>(guiProp)) {
+                    mCheckBox->setTarget(boolProp);
+                    checkBoxVisible = true;
+                } else if(const auto boolAnim = enve_cast<BoolAnimator*>(guiProp)) {
+                    mCheckBox->setTarget(boolAnim);
+                    checkBoxVisible = true;
+                } else if(const auto boolContainer = enve_cast<BoolPropertyContainer*>(guiProp)) {
+                    mCheckBox->setTarget(boolContainer);
+                    checkBoxVisible = true;
                 }
             }
         }
     } else if(boxTargetProperty) {
         mBoxTargetWidget->setTargetProperty(boxTargetProperty);
+        boxTargetWidgetVisible = true;
     } else if(const auto path = enve_cast<SmartPathAnimator*>(prop)) {
         mPathBlendModeVisible = true;
         mPathBlendModeCombo->setCurrentIndex(static_cast<int>(path->getMode()));
@@ -1132,7 +1331,11 @@ void BoxSingleWidget::setTargetAbstraction(SWT_Abstraction *abs) {
 
     mValueSlider->setVisible(valueSliderVisible);
     mSecondValueSlider->setVisible(secondValueSliderVisible);
+    mOverLifeWidget->setVisible(overLifeWidgetVisible);
     mColorButton->setVisible(colorButtonVisible);
+    mBoxTargetWidget->setVisible(boxTargetWidgetVisible);
+    mCheckBox->setVisible(checkBoxVisible);
+    mPropertyComboBox->setVisible(propertyComboVisible);
     updateCombinedPointValue();
 
     updateCompositionBoxVisible();
@@ -1336,7 +1539,22 @@ void BoxSingleWidget::mousePressEvent(QMouseEvent *event) {
 
         if(const auto pTarget = enve_cast<Property*>(target)) {
             const bool shiftPressed = event->modifiers() & Qt::ShiftModifier;
-            if(enve_cast<BoundingBox*>(target) || enve_cast<eIndependentSound*>(target)) {
+            const auto bbox = enve_cast<BoundingBox*>(target);
+            if (bbox && isTimelineLayerRow()) {
+                bool handled = false;
+                if (!bbox->isSelected()) {
+                    for (QWidget *p = parentWidget(); p; p = p->parentWidget()) {
+                        if (auto *timeline = qobject_cast<TimelineWidget*>(p)) {
+                            handled = timeline->handleTimelineLayerSelection(
+                                        bbox, event->modifiers());
+                            break;
+                        }
+                    }
+                }
+                if (!handled && !bbox->isSelected()) {
+                    bbox->selectionChangeTriggered(shiftPressed);
+                }
+            } else if(enve_cast<BoundingBox*>(target) || enve_cast<eIndependentSound*>(target)) {
                 const auto box = static_cast<eBoxOrSound*>(target);
                 if(!box->isSelected()) box->selectionChangeTriggered(shiftPressed);
             } else {
@@ -1350,6 +1568,11 @@ void BoxSingleWidget::mousePressEvent(QMouseEvent *event) {
     } else {
         mDragPressPos = event->pos().x() > mFillWidget->x();
         mDragStartPos = event->pos();
+        if (event->button() == Qt::LeftButton && bbox && isTimelineLayerRow() &&
+            mParent && !bbox->isSelected()) {
+            mParent->beginLayerRectSelection(mapToGlobal(event->pos()),
+                                             event->modifiers());
+        }
     }
     Document::sInstance->actionFinished();
 }
@@ -1367,8 +1590,14 @@ void BoxSingleWidget::mouseMoveEvent(QMouseEvent *event) {
     }
     if(!mDragPressPos) return;
     if(!(event->buttons() & Qt::LeftButton)) return;
+    if (mParent && mParent->updateLayerRectSelection(mapToGlobal(event->pos()))) {
+        return;
+    }
     const auto dist = (event->pos() - mDragStartPos).manhattanLength();
     if(dist < QApplication::startDragDistance()) return;
+    if (mParent) {
+        mParent->cancelLayerRectSelection();
+    }
     const auto drag = new QDrag(this);
     {
         const auto prop = static_cast<Property*>(mTarget->getTarget());
@@ -1411,6 +1640,10 @@ void BoxSingleWidget::mouseReleaseEvent(QMouseEvent *event)
     if (event->x() < mFillWidget->x() ||
         event->x() > mFillWidget->x() + mFillWidget->width()) { return; }
     setSelected(false);
+    if (bbox && isTimelineLayerRow() && mParent &&
+        mParent->finishLayerRectSelection(mapToGlobal(event->pos()))) {
+        return;
+    }
 
     if (pointToLen(event->pos() - mDragStartPos) > eSizesUI::widget/2) { return; }
 
@@ -1593,22 +1826,28 @@ void BoxSingleWidget::paintEvent(QPaintEvent *) {
         trackAccent = bbox->effectiveTimelineColor();
     }
 
-    QColor rowColor = isLayerRow ? ThemeSupport::getLightDarkColor(trackAccent, 520)
-                                 : ThemeSupport::getThemeBaseColor(130);
+    QColor rowColor = isLayerRow ? ThemeSupport::getThemeBaseColor(132)
+                                 : ThemeSupport::getThemeBaseColor(122);
     if (enve_cast<ComplexAnimator*>(prop)) {
-        rowColor = ThemeSupport::getThemeBaseColor(110);
+        rowColor = ThemeSupport::getThemeBaseColor(112);
+    }
+    if (mTarget->contentVisible()) {
+        rowColor = rowColor.darker(115);
     }
     p.fillRect(rect(), rowColor);
 
     if (rowSelected) {
         QColor selectionColor = isLayerRow
-                ? ThemeSupport::getLightDarkColor(trackAccent, 430)
+                ? ThemeSupport::getThemeHighlightColor(78)
                 : ThemeSupport::getThemeHighlightColor(45);
-        if (isLayerRow) { selectionColor.setAlpha(190); }
+        if (isLayerRow && !layerSelected) {
+            selectionColor = ThemeSupport::getLightDarkColor(trackAccent, 430);
+            selectionColor.setAlpha(190);
+        }
         p.fillRect(rect(), selectionColor);
     }
     p.fillRect(QRect(0, 0, qMax(2, eSizesUI::widget/7), height()),
-               rowSelected ? ThemeSupport::getLightDarkColor(trackAccent, 300)
+               rowSelected ? ThemeSupport::getThemeHighlightColor(220)
                            : trackAccent);
     if (mHover) {
         p.fillRect(rect(), ThemeSupport::getThemeHighlightColor(rowSelected ? 18 : 28));
@@ -1690,7 +1929,11 @@ void BoxSingleWidget::paintEvent(QPaintEvent *) {
 
     p.setPen(QPen(ThemeSupport::getThemeTimelineColor(180), 1));
     p.drawLine(rect().bottomLeft(), rect().bottomRight());
-    if(mSelected) {
+    if(layerSelected) {
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(ThemeSupport::getThemeHighlightColor(210), 1));
+        p.drawRect(rect().adjusted(0, 0, -1, -1));
+    } else if(mSelected) {
         p.setBrush(Qt::NoBrush);
         p.setPen(QPen(Qt::lightGray));
         p.drawRect(rect().adjusted(0, 0, -1, -1));
@@ -1702,7 +1945,7 @@ void BoxSingleWidget::switchContentVisibleAction() {
     if(!mTarget) return;
     if (auto *scrollWidget = qobject_cast<BoxScrollWidget*>(mParent->parentWidget())) {
         if (scrollWidget->currentAeRevealPreset() != BoxScrollWidget::AeRevealPreset::None) {
-            scrollWidget->dismissAeRevealPreset();
+            scrollWidget->clearAeRevealPreset();
         }
     }
     mTarget->switchContentVisible();
@@ -1722,16 +1965,28 @@ void BoxSingleWidget::switchRecordingAction() {
         }
     }
     if(const auto asAnim = enve_cast<Animator*>(target)) {
-        if (!asAnim->anim_isRecording()) {
-            asAnim->anim_setRecordingWithoutChangingKeys(true);
-            asAnim->anim_saveCurrentValueAsKey();
-        } else if (asAnim->anim_getKeyOnCurrentFrame()) {
-            asAnim->anim_deleteCurrentKeyAction();
-            if (!asAnim->anim_hasKeys()) {
-                asAnim->anim_setRecordingWithoutChangingKeys(false);
+        const bool enableAndAdd = !asAnim->anim_isRecording();
+        const bool deleteCurrent = !enableAndAdd && asAnim->anim_getKeyOnCurrentFrame();
+        const auto targets = animatorsForSelectedBoxesMatchingPath(asAnim);
+        for (auto *anim : targets) {
+            if (!anim) {
+                continue;
             }
-        } else {
-            asAnim->anim_saveCurrentValueAsKey();
+            if (enableAndAdd) {
+                if (!anim->anim_isRecording()) {
+                    anim->anim_setRecordingWithoutChangingKeys(true);
+                }
+                anim->anim_saveCurrentValueAsKey();
+            } else if (deleteCurrent) {
+                if (anim->anim_getKeyOnCurrentFrame()) {
+                    anim->anim_deleteCurrentKeyAction();
+                    if (!anim->anim_hasKeys()) {
+                        anim->anim_setRecordingWithoutChangingKeys(false);
+                    }
+                }
+            } else {
+                anim->anim_saveCurrentValueAsKey();
+            }
         }
         Document::sInstance->actionFinished();
         update();
@@ -1840,8 +2095,9 @@ void BoxSingleWidget::updatePickWhipButtonsVisible() {
     if (!mTarget) return;
     const int remaining = width() - mFillWidget->x();
     const bool canShowParent = remaining > qRound(4.2*eSizesUI::widget);
+    const bool canShowMatte = remaining > qRound(5.4*eSizesUI::widget);
     mParentPickWhipButton->setVisible(mTimelineParentVisible && canShowParent);
-    mMattePickWhipButton->hide();
+    mMattePickWhipButton->setVisible(mTimelineMatteVisible && canShowMatte);
     if (const auto target = enve_cast<eBoxOrSound*>(mTarget->getTarget())) {
         mSoloButton->setVisible(isTimelineLayerRow());
         mSoloButton->setChecked(mParent && mParent->isSolo(target));

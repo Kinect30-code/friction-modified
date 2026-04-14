@@ -3,6 +3,7 @@
 #include "Private/document.h"
 #include "Boxes/boundingbox.h"
 #include "Boxes/containerbox.h"
+#include "BlendEffects/trackmatteeffect.h"
 #include "canvas.h"
 
 #include <QComboBox>
@@ -15,27 +16,32 @@
 namespace {
 constexpr int kNoneItemData = 0;
 
-SkBlendMode blendModeForMatteIndex(const int index)
+BoundingBox *defaultTrackMatteSource(BoundingBox *box)
+{
+    if (!box) {
+        return nullptr;
+    }
+    auto *parent = box->getParentGroup();
+    if (!parent) {
+        return nullptr;
+    }
+    const auto &siblings = parent->getContainedBoxes();
+    const int boxIndex = siblings.indexOf(box);
+    if (boxIndex < 0 || boxIndex + 1 >= siblings.count()) {
+        return nullptr;
+    }
+    return siblings.at(boxIndex + 1);
+}
+
+TrackMatteMode matteModeForIndex(const int index)
 {
     switch (index) {
     case 1:
-        return SkBlendMode::kDstIn;
+        return TrackMatteMode::alphaMatte;
     case 2:
-        return SkBlendMode::kDstOut;
+        return TrackMatteMode::alphaInvertedMatte;
     default:
-        return SkBlendMode::kSrcOver;
-    }
-}
-
-int matteIndexForBlendMode(const SkBlendMode mode)
-{
-    switch (mode) {
-    case SkBlendMode::kDstIn:
-        return 1;
-    case SkBlendMode::kDstOut:
-        return 2;
-    default:
-        return 0;
+        return TrackMatteMode::alphaMatte;
     }
 }
 
@@ -45,13 +51,36 @@ QString matteStatusText(BoundingBox *box)
         return LayerRelationsWidget::tr("No active layer selected.");
     }
 
-    switch (box->getBlendMode()) {
-    case SkBlendMode::kDstIn:
-        return LayerRelationsWidget::tr("This layer acts as an alpha matte for layers below it.");
-    case SkBlendMode::kDstOut:
-        return LayerRelationsWidget::tr("This layer acts as an inverted alpha matte for layers below it.");
-    default:
+    const auto *matteSource = box->getTrackMatteTarget();
+    if (!matteSource) {
         return LayerRelationsWidget::tr("Track matte is off for this layer.");
+    }
+
+    switch (box->getTrackMatteMode()) {
+    case TrackMatteMode::alphaMatte:
+        return LayerRelationsWidget::tr("This layer uses \"%1\" as its alpha matte.")
+                .arg(matteSource->prp_getName());
+    case TrackMatteMode::alphaInvertedMatte:
+        return LayerRelationsWidget::tr("This layer uses \"%1\" as its inverted alpha matte.")
+                .arg(matteSource->prp_getName());
+    default:
+        return LayerRelationsWidget::tr("Track matte is linked to \"%1\".")
+                .arg(matteSource->prp_getName());
+    }
+}
+
+int matteIndexForBox(BoundingBox *box)
+{
+    if (!box || !box->getTrackMatteTarget()) {
+        return 0;
+    }
+    switch (box->getTrackMatteMode()) {
+    case TrackMatteMode::alphaMatte:
+        return 1;
+    case TrackMatteMode::alphaInvertedMatte:
+        return 2;
+    default:
+        return 0;
     }
 }
 }
@@ -84,7 +113,7 @@ LayerRelationsWidget::LayerRelationsWidget(Document &document,
     mMatteCombo->addItem(tr("None"));
     mMatteCombo->addItem(tr("Alpha Matte"));
     mMatteCombo->addItem(tr("Alpha Inverted Matte"));
-    mMatteCombo->setToolTip(tr("Uses the current layer as a matte for layers beneath it."));
+    mMatteCombo->setToolTip(tr("Uses another layer as the matte source for the current layer."));
     form->addRow(tr("Track Matte"), mMatteCombo);
 
     mStatusLabel = new QLabel(group);
@@ -92,7 +121,7 @@ LayerRelationsWidget::LayerRelationsWidget(Document &document,
     mStatusLabel->setObjectName(QStringLiteral("AeLayerRelationsStatus"));
     form->addRow(QString(), mStatusLabel);
 
-    mHintLabel = new QLabel(tr("Matte follows layer order: keep the matte layer above the layer you want to reveal."),
+    mHintLabel = new QLabel(tr("If no matte source is linked yet, enabling Track Matte uses the layer above by default. Use the timeline T whip to pick a different source."),
                             group);
     mHintLabel->setWordWrap(true);
     mHintLabel->setObjectName(QStringLiteral("AeLayerRelationsHint"));
@@ -131,7 +160,23 @@ LayerRelationsWidget::LayerRelationsWidget(Document &document,
             return;
         }
 
-        mCurrentBox->setBlendModeSk(blendModeForMatteIndex(index));
+        if (index == 0) {
+            mCurrentBox->clearTrackMatte();
+            mDocument.actionFinished();
+            syncControls();
+            return;
+        }
+
+        auto *matteSource = mCurrentBox->getTrackMatteTarget();
+        if (!matteSource) {
+            matteSource = defaultTrackMatteSource(mCurrentBox);
+        }
+        if (!matteSource || matteSource == mCurrentBox) {
+            syncControls();
+            return;
+        }
+
+        mCurrentBox->setTrackMatteTarget(matteSource, matteModeForIndex(index));
         mDocument.actionFinished();
         syncControls();
     });
@@ -170,9 +215,12 @@ void LayerRelationsWidget::setCurrentBox(BoundingBox *box)
     mCurrentBox = box;
     if (mCurrentBox) {
         mBoxBlendConn = connect(mCurrentBox,
-                                &BoundingBox::blendModeChanged,
+                                &BoundingBox::blendEffectChanged,
                                 this,
-                                [this]() { syncControls(); });
+                                [this]() {
+            rebuildParentChoices();
+            syncControls();
+        });
     }
 
     rebuildParentChoices();
@@ -233,7 +281,7 @@ void LayerRelationsWidget::syncControls()
     {
         QSignalBlocker blocker(mMatteCombo);
         mUpdatingControls = true;
-        mMatteCombo->setCurrentIndex(matteIndexForBlendMode(mCurrentBox->getBlendMode()));
+        mMatteCombo->setCurrentIndex(matteIndexForBox(mCurrentBox));
         mUpdatingControls = false;
     }
 }

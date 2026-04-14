@@ -29,7 +29,9 @@
 #include <QDebug>
 #include <QApplication>
 #include <QPolygonF>
+#include <QTimer>
 #include "Boxes/videobox.h"
+#include "Boxes/polygonbox.h"
 #include "MovablePoints/pathpivot.h"
 #include "Boxes/imagebox.h"
 #include "Sound/soundcomposition.h"
@@ -142,6 +144,26 @@ void Canvas::queTasks()
         mCurrentContainer->queChildrenTasks();
     } else ContainerBox::queTasks();
     mDrawnSinceQue = false;
+}
+
+void Canvas::scheduleUpdate()
+{
+    if (mUpdateSignalQueued) { return; }
+    mUpdateSignalQueued = true;
+    QTimer::singleShot(0, this, [this]() {
+        mUpdateSignalQueued = false;
+        emit requestUpdate();
+    });
+}
+
+void Canvas::scheduleOverlayUpdate()
+{
+    if (mOverlayUpdateSignalQueued) { return; }
+    mOverlayUpdateSignalQueued = true;
+    QTimer::singleShot(0, this, [this]() {
+        mOverlayUpdateSignalQueued = false;
+        emit requestOverlayUpdate();
+    });
 }
 
 void Canvas::addSelectedForGraph(const int widgetId,
@@ -288,20 +310,60 @@ void Canvas::renderSk(SkCanvas* const canvas,
     const auto& gridSettings = mDocument.getGrid()->getSettings();
     const bool gridVisible = gridSettings.show && (!haveWorldTransform || !gridViewport.isEmpty());
     const bool gridOnTop = gridSettings.drawOnTop;
-    const bool drawCanvas = mSceneFrame && mSceneFrame->fBoxState == mStateId;
+    const bool interactiveTransform =
+            mouseGrabbing &&
+            (mCurrentMode == CanvasMode::boxTransform ||
+             mCurrentMode == CanvasMode::pointTransform ||
+             mTransMode != TransformMode::none);
+    const bool drawCanvas = !interactiveTransform &&
+                            mSceneFrame &&
+                            mSceneFrame->fBoxState == mStateId;
+    const auto drawCanvasOutline = [&]() {
+        if (mClipToCanvasSize) { return; }
+
+        SkPaint shadowPaint;
+        shadowPaint.setStyle(SkPaint::kStroke_Style);
+        shadowPaint.setColor(SkColorSetARGB(120, 0, 0, 0));
+        shadowPaint.setStrokeWidth(invZoom * 4.f);
+        canvas->drawRect(canvasRect.makeOutset(invZoom * 2.f, invZoom * 2.f),
+                         shadowPaint);
+
+        SkPaint framePaint;
+        framePaint.setStyle(SkPaint::kStroke_Style);
+        framePaint.setColor(SkColorSetARGB(220, 210, 210, 210));
+        framePaint.setStrokeWidth(invZoom * 1.5f);
+        canvas->drawRect(canvasRect, framePaint);
+    };
 
     canvas->concat(skViewTrans);
     if (isPreviewingOrRendering()) {
         if (mSceneFrame) {
-            canvas->clear(SK_ColorBLACK);
+            if (mClipToCanvasSize) {
+                canvas->clear(SK_ColorBLACK);
+            } else {
+                canvas->clear(toSkColor(ThemeSupport::getThemeBaseDarkerColor()));
+            }
             canvas->save();
-            if (bgColor.alpha() != 255) {
+            const bool forceOpaquePreviewBackground = mPreviewing || mRenderingOutput;
+            if (bgColor.alpha() == 255 || forceOpaquePreviewBackground) {
+                SkPaint previewBgPaint;
+                previewBgPaint.setStyle(SkPaint::kFill_Style);
+                previewBgPaint.setColor(toSkColor(bgColor.alpha() == 255
+                                                      ? bgColor
+                                                      : QColor(Qt::black)));
+                canvas->drawRect(canvasRect, previewBgPaint);
+            } else {
+                SkPaint previewBgPaint;
+                previewBgPaint.setStyle(SkPaint::kFill_Style);
+                previewBgPaint.setColor(toSkColor(bgColor));
+                canvas->drawRect(canvasRect, previewBgPaint);
                 drawTransparencyMesh(canvas, canvasRect);
             }
             const float reversedRes = toSkScalar(1/mSceneFrame->fResolution);
             canvas->scale(reversedRes, reversedRes);
             mSceneFrame->drawImage(canvas, filter);
             canvas->restore();
+            drawCanvasOutline();
         }
         return;
     }
@@ -313,7 +375,7 @@ void Canvas::renderSk(SkCanvas* const canvas,
     } else {
         canvas->clear(toSkColor(ThemeSupport::getThemeBaseDarkerColor()));
     }
-    if (!mClipToCanvasSize || !drawCanvas) {
+    if (!drawCanvas) {
         if (bgColor.alpha() == 255 && skViewTrans.mapRect(canvasRect).contains(toSkRect(drawRect))) {
             canvas->clear(toSkColor(bgColor));
         } else {
@@ -343,7 +405,7 @@ void Canvas::renderSk(SkCanvas* const canvas,
         drawTransparencyMesh(canvas, canvasRect);
     }
 
-    if (!mClipToCanvasSize || !drawCanvas) {
+    if (!drawCanvas) {
         canvas->saveLayer(nullptr, nullptr);
         drawContained(canvas, filter);
         canvas->restore();
@@ -355,20 +417,7 @@ void Canvas::renderSk(SkCanvas* const canvas,
         canvas->restore();
     }
 
-    if (!mClipToCanvasSize) {
-        SkPaint shadowPaint;
-        shadowPaint.setStyle(SkPaint::kStroke_Style);
-        shadowPaint.setColor(SkColorSetARGB(120, 0, 0, 0));
-        shadowPaint.setStrokeWidth(invZoom * 4.f);
-        canvas->drawRect(canvasRect.makeOutset(invZoom * 2.f, invZoom * 2.f),
-                         shadowPaint);
-
-        SkPaint framePaint;
-        framePaint.setStyle(SkPaint::kStroke_Style);
-        framePaint.setColor(SkColorSetARGB(220, 210, 210, 210));
-        framePaint.setStrokeWidth(invZoom * 1.5f);
-        canvas->drawRect(canvasRect, framePaint);
-    }
+    drawCanvasOutline();
 
     canvas->restore();
     canvas->restore();
@@ -579,7 +628,7 @@ void Canvas::setFrameIn(const bool enabled,
     const auto oIn = mIn;
     mIn.enabled = enabled;
     mIn.frame = frameIn;
-    emit requestUpdate();
+    scheduleUpdate();
     {
         prp_pushUndoRedoName(tr("Frame In Changed"));
         UndoRedo ur;
@@ -596,7 +645,7 @@ void Canvas::setFrameOut(const bool enabled,
     const auto oOut = mOut;
     mOut.enabled = enabled;
     mOut.frame = frameOut;
-    emit requestUpdate();
+    scheduleUpdate();
     {
         prp_pushUndoRedoName(tr("Frame Out Changed"));
         UndoRedo ur;
@@ -626,7 +675,7 @@ void Canvas::clearFrameInOut()
     mOut.frame = 0;
     mOut.enabled = false;
 
-    emit requestUpdate();
+    scheduleUpdate();
     {
         prp_pushUndoRedoName(tr("Cleared Frame In/Out"));
         UndoRedo ur;
@@ -641,7 +690,7 @@ void Canvas::restoreFrameInOut(const FrameMarker &frameIn,
 {
     mIn = frameIn;
     mOut = frameOut;
-    emit requestUpdate();
+    scheduleUpdate();
 }
 
 void Canvas::setMarker(const QString &title,
@@ -655,7 +704,7 @@ void Canvas::setMarker(const QString &title,
     }
     const QString mark = title.isEmpty() ? QString::number(mMarkers.size()) : title;
     mMarkers.push_back({mark, true, frame});
-    emit requestUpdate();
+    scheduleUpdate();
     {
         prp_pushUndoRedoName(tr("Added Marker"));
         UndoRedo ur;;
@@ -801,7 +850,7 @@ void Canvas::clearMarkers()
     const auto markers = mMarkers;
     mMarkers.clear();
     emit markersChanged();
-    emit requestUpdate();
+    scheduleUpdate();
     {
         prp_pushUndoRedoName(tr("Cleared Markers"));
         UndoRedo ur;
@@ -814,7 +863,7 @@ void Canvas::clearMarkers()
 void Canvas::updateMarkers()
 {
     emit newFrameRange(mRange);
-    emit requestUpdate();
+    scheduleUpdate();
 }
 
 void Canvas::restoreMarkers(const std::vector<FrameMarker> &markers)
@@ -851,11 +900,11 @@ void Canvas::setRenderingPreview(const bool bT) {
 
 void Canvas::anim_scaleTime(const int pivotAbsFrame, const qreal scale) {
     ContainerBox::anim_scaleTime(pivotAbsFrame, scale);
-    //        int newAbsPos = qRound(scale*pivotAbsFrame);
-    //        anim_shiftAllKeys(newAbsPos - pivotAbsFrame);
-    const int newMin = qRound((mRange.fMin - pivotAbsFrame)*scale);
-    const int newMax = qRound((mRange.fMax - pivotAbsFrame)*scale);
-    setFrameRange({newMin, newMax});
+    const int newMin =
+        pivotAbsFrame + qRound((mRange.fMin - pivotAbsFrame)*scale);
+    const int newMax =
+        pivotAbsFrame + qRound((mRange.fMax + 1 - pivotAbsFrame)*scale) - 1;
+    setFrameRange({newMin, qMax(newMin, newMax)});
 }
 
 void Canvas::setOutputRendering(const bool bT) {
@@ -869,8 +918,9 @@ void Canvas::setSceneFrame(const int relFrame) {
 
 void Canvas::setSceneFrame(const stdsptr<SceneFrameContainer>& cont) {
     setLoadingSceneFrame(nullptr);
+    if(mSceneFrame == cont) return;
     mSceneFrame = cont;
-    emit requestUpdate();
+    scheduleUpdate();
 }
 
 void Canvas::setLoadingSceneFrame(const stdsptr<SceneFrameContainer>& cont) {
@@ -902,10 +952,10 @@ void Canvas::renderDataFinished(BoxRenderData *renderData) {
     if(currentState) mSceneFramesHandler.add(cont);
 
     if(!mPreviewing && !mRenderingOutput){
-        bool newerSate = true;
+        bool newerState = true;
         bool closerFrame = true;
         if(mSceneFrame) {
-            newerSate = mSceneFrame->fBoxState < renderData->fBoxStateId;
+            newerState = mSceneFrame->fBoxState < renderData->fBoxStateId;
             const int cRelFrame = anim_getCurrentRelFrame();
             const int finishedFrameDist = qMin(qAbs(cRelFrame - range.fMin),
                                                qAbs(cRelFrame - range.fMax));
@@ -914,7 +964,7 @@ void Canvas::renderDataFinished(BoxRenderData *renderData) {
                                           qAbs(cRelFrame - cRange.fMax));
             closerFrame = finishedFrameDist < oldFrameDist;
         }
-        if(newerSate || closerFrame) {
+        if(newerState || closerFrame) {
             mSceneFrameOutdated = !currentState;
             setSceneFrame(cont);
         }
@@ -1051,6 +1101,19 @@ void Canvas::setCanvasMode(const CanvasMode mode)
     emit canvasModeSet(mode);
 }
 
+bool Canvas::adjustActivePolygonSidesBy(const int delta)
+{
+    if (mCurrentMode != CanvasMode::polygonCreate ||
+        !mCurrentPolygon ||
+        !mHasCreationPressPos ||
+        delta == 0) {
+        return false;
+    }
+    mCurrentPolygon->adjustSideCountBy(delta);
+    planUpdate(UpdateReason::userChange);
+    return true;
+}
+
 /*void Canvas::updatePaintBox()
 {
     mPaintTarget.setPaintBox(nullptr);
@@ -1104,13 +1167,13 @@ bool Canvas::handleTransormationInputKeyEvent(const eKeyEvent &e)
         mValueInput.switchXOnlyMode();
         const bool linesChanged = updateLineGizmoVisibility();
         updateTransformation(e);
-        if (linesChanged) { emit requestUpdate(); }
+        if (linesChanged) { scheduleUpdate(); }
     } else if (e.fKey == Qt::Key_Y) {
         if (e.fAutorepeat) { return false; }
         mValueInput.switchYOnlyMode();
         const bool linesChanged = updateLineGizmoVisibility();
         updateTransformation(e);
-        if (linesChanged) { emit requestUpdate(); }
+        if (linesChanged) { scheduleUpdate(); }
     } else { return false; }
     return true;
 }
@@ -1125,6 +1188,7 @@ void Canvas::deleteAction()
     case CanvasMode::boxTransform:
     case CanvasMode::circleCreate:
     case CanvasMode::rectCreate:
+    case CanvasMode::polygonCreate:
     case CanvasMode::textCreate:
     case CanvasMode::nullCreate:
     case CanvasMode::drawPath:

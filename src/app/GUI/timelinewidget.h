@@ -89,6 +89,8 @@ public:
     void showGroupFlowPopup();
     void showAeTimelineContextMenu(const QPoint &globalPos);
     bool handleTimelineLayerSelection(BoundingBox *box, Qt::KeyboardModifiers modifiers);
+    bool handleTimelineLayerRectSelection(const QList<BoundingBox*> &boxes,
+                                          Qt::KeyboardModifiers modifiers);
 
     void writeState(eWriteStream& dst) const;
     void readState(eReadStream& src);
@@ -106,6 +108,9 @@ protected:
 
 private:
     bool handleAeShortcutEvent(QKeyEvent *event);
+    void refreshTimelineFromSceneUpdate(bool interactivePreview);
+    void scheduleInteractivePlaybackRefresh();
+    QList<BoundingBox*> displayedTimelineLayerBoxes() const;
     void setViewedFrameRange(const FrameRange &range);
     void setCanvasFrameRange(const FrameRange &range);
     void ensureCurrentFrameVisible(int frame);
@@ -152,6 +157,8 @@ private:
     KeysView *mKeysView;
     AnimationDockWidget *mAnimationDockWidget;
     QWidget *mGroupFlowPopup = nullptr;
+    bool mPlaybackUiRefreshQueued = false;
+    bool mPlaybackHeavyUiRefreshQueued = false;
 };
 
 #endif // BOXESLISTKEYSVIEWWIDGET_H

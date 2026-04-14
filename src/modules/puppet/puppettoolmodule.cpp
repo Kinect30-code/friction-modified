@@ -1,6 +1,7 @@
 #include "puppettoolmodule.h"
 
 #include "../../core/Boxes/boundingbox.h"
+#include "../../core/pluginmanager.h"
 #include "../../core/RasterEffects/puppeteffect.h"
 #include "../../core/conncontextobjlist.h"
 
@@ -8,6 +9,9 @@ namespace PuppetToolModule {
 
 BoundingBox* resolveTarget(BoundingBox* const currentBox,
                            const ConnContextObjList<BoundingBox*>& selectedBoxes) {
+    if(!PluginManager::isEnabled(PluginFeature::puppetTool)) {
+        return nullptr;
+    }
     if(currentBox) {
         return currentBox;
     }
@@ -18,6 +22,9 @@ BoundingBox* resolveTarget(BoundingBox* const currentBox,
 }
 
 PuppetEffect* findEffect(BoundingBox* const target) {
+    if(!PluginManager::isEnabled(PluginFeature::puppetTool)) {
+        return nullptr;
+    }
     if(!target) {
         return nullptr;
     }
@@ -39,6 +46,9 @@ PuppetEffect* findEffect(BoundingBox* const target) {
 }
 
 PuppetEffect* ensureEffect(BoundingBox* const target) {
+    if(!PluginManager::isEnabled(PluginFeature::puppetTool)) {
+        return nullptr;
+    }
     if(!target) {
         return nullptr;
     }
@@ -55,6 +65,9 @@ PuppetEffect* ensureEffect(BoundingBox* const target) {
 
 QPointF absoluteToNormalized(BoundingBox* const target,
                              const QPointF& absPos) {
+    if(!PluginManager::isEnabled(PluginFeature::puppetTool)) {
+        return QPointF(0.5, 0.5);
+    }
     if(!target) {
         return QPointF(0.5, 0.5);
     }
@@ -70,6 +83,9 @@ QPointF absoluteToNormalized(BoundingBox* const target,
 
 bool addPinAtCanvasPos(BoundingBox* const target,
                        const QPointF& absPos) {
+    if(!PluginManager::isEnabled(PluginFeature::puppetTool)) {
+        return false;
+    }
     auto* const puppet = ensureEffect(target);
     if(!puppet) {
         return false;

@@ -76,6 +76,8 @@ intKB getTotalRamBytes() {
     if(ret) RuntimeThrow("Failed to retrieve memory using sysctl");
     return intKB(longB(bytes));
 #endif
+    RuntimeThrow("Unsupported platform for RAM detection");
+    return intKB(0);
 }
 
 #include "Private/Tasks/offscreenqgl33c.h"

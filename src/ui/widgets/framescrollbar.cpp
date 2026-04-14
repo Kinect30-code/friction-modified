@@ -299,19 +299,23 @@ void FrameScrollBar::wheelEvent(QWheelEvent *event)
 }
 
 bool FrameScrollBar::setFirstViewedFrame(const int firstFrame) {
+    int newFirstViewedFrame = firstFrame;
     if(mClamp) {
         if(mRange) {
-            mFirstViewedFrame = clampInt(firstFrame, mFrameRange.fMin, mFrameRange.fMax -
-                                          mViewedFramesSpan);
+            newFirstViewedFrame = clampInt(firstFrame, mFrameRange.fMin,
+                                           mFrameRange.fMax - mViewedFramesSpan);
         } else {
-            mFirstViewedFrame = clampInt(firstFrame, mFrameRange.fMin, mFrameRange.fMax);
+            newFirstViewedFrame = clampInt(firstFrame,
+                                           mFrameRange.fMin,
+                                           mFrameRange.fMax);
         }
-        return true;
-    } else {
-        mFirstViewedFrame = firstFrame;
-        return true;
     }
-
+    const bool changed = mFirstViewedFrame != newFirstViewedFrame;
+    mFirstViewedFrame = newFirstViewedFrame;
+    if(changed) {
+        update();
+    }
+    return changed;
 }
 
 void FrameScrollBar::mousePressEvent(QMouseEvent *event)

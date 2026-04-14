@@ -41,12 +41,18 @@ struct VideoStreamsData;
 class CORE_EXPORT VideoFrameLoader : public eHddTask {
     e_OBJECT
 protected:
+    static bool shouldPreferSeek(VideoFrameAccessMode mode) {
+        return mode == VideoFrameAccessMode::seek;
+    }
+protected:
     VideoFrameLoader(VideoFrameHandler * const cacheHandler,
                      const stdsptr<VideoStreamsData>& openedVideo,
-                     const int frameId);
+                     const int frameId,
+                     VideoFrameAccessMode accessMode = VideoFrameAccessMode::sequential);
     VideoFrameLoader(VideoFrameHandler * const cacheHandler,
                      const stdsptr<VideoStreamsData>& openedVideo,
-                     const int frameId, AVFrame* const frame);
+                     const int frameId, AVFrame* const frame,
+                     VideoFrameAccessMode accessMode = VideoFrameAccessMode::sequential);
 public:
     ~VideoFrameLoader();
 
@@ -69,6 +75,7 @@ private:
     const qptr<VideoFrameHandler> mCacheHandler;
     const stdsptr<VideoStreamsData> mOpenedVideo;
     const int mFrameId;
+    const bool mPreferSeek = false;
     sk_sp<SkImage> mLoadedFrame;
 
     QList<std::pair<int, AVFrame*>> mExcessFrames;

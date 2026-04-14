@@ -29,6 +29,7 @@
 #include "appsupport.h"
 #include "themesupport.h"
 #include "formatoptions.h"
+#include "../../../core/ffmpegcompat.h"
 
 using namespace Friction::Core;
 
@@ -643,7 +644,7 @@ void OutputSettingsDialog::updateAvailableSampleFormats() {
         sampleFormats++;
     }
 
-    if(mSampleFormatsComboBox->findText(lastSet)) {
+    if(mSampleFormatsComboBox->findText(lastSet) != -1) {
         mSampleFormatsComboBox->setCurrentText(lastSet);
     }
 }
@@ -731,6 +732,7 @@ void OutputSettingsDialog::updateAvailableAudioBitrates() {
 
 void OutputSettingsDialog::updateAvailableSampleRates() {
     const auto lastSet = mSampleRateComboBox->currentData();
+    mSampleRateComboBox->clear();
     const AVCodec *currentCodec = nullptr;
     if(mAudioCodecsComboBox->count() > 0) {
         int codecId = mAudioCodecsComboBox->currentIndex();
@@ -760,8 +762,13 @@ void OutputSettingsDialog::updateAvailableSampleRates() {
         if(set) mSampleRateComboBox->setCurrentIndex(lastSetId);
     }
     if(!set) {
-        const int i441 = mAudioBitrateComboBox->findData(44100);
-        if(i441 != -1) mAudioBitrateComboBox->setCurrentIndex(i441);
+        const int i480 = mSampleRateComboBox->findData(48000);
+        if(i480 != -1) {
+            mSampleRateComboBox->setCurrentIndex(i480);
+        } else {
+            const int i441 = mSampleRateComboBox->findData(44100);
+            if(i441 != -1) mSampleRateComboBox->setCurrentIndex(i441);
+        }
     }
 }
 
@@ -775,7 +782,29 @@ void OutputSettingsDialog::updateAvailableAudioChannelLayouts() {
         currentCodec = mAudioCodecsList.at(codecId);
     }
     if(!currentCodec) return;
-    const uint64_t *layouts = currentCodec->channel_layouts;
+#if FRICTION_HAS_AVCHANNEL_LAYOUT
+    const AVChannelLayout *layouts = Friction::FFmpegCompat::codecChannelLayouts(currentCodec);
+    if(!layouts) {
+        mAudioChannelLayoutsList << AV_CH_LAYOUT_MONO;
+        mAudioChannelLayoutsList << AV_CH_LAYOUT_STEREO;
+        mAudioChannelLayoutsComboBox->addItem("Mono");
+        mAudioChannelLayoutsComboBox->addItem("Stereo");
+    } else {
+        while(layouts->nb_channels > 0) {
+            const uint64_t layout =
+                    Friction::FFmpegCompat::channelLayoutMask(*layouts);
+            if(layout == 0) {
+                ++layouts;
+                continue;
+            }
+            const QString layoutName = OutputSettings::sGetChannelsLayoutName(layout);
+            mAudioChannelLayoutsList << layout;
+            mAudioChannelLayoutsComboBox->addItem(layoutName);
+            ++layouts;
+        }
+    }
+#else
+    const uint64_t *layouts = Friction::FFmpegCompat::codecChannelLayouts(currentCodec);
     if(!layouts) {
         mAudioChannelLayoutsList << AV_CH_LAYOUT_MONO;
         mAudioChannelLayoutsList << AV_CH_LAYOUT_STEREO;
@@ -791,9 +820,16 @@ void OutputSettingsDialog::updateAvailableAudioChannelLayouts() {
             layout = *layouts;
         }
     }
+#endif
+    if(mAudioChannelLayoutsComboBox->count() == 0) {
+        mAudioChannelLayoutsList << AV_CH_LAYOUT_MONO;
+        mAudioChannelLayoutsList << AV_CH_LAYOUT_STEREO;
+        mAudioChannelLayoutsComboBox->addItem("Mono");
+        mAudioChannelLayoutsComboBox->addItem("Stereo");
+    }
     if(mAudioChannelLayoutsComboBox->findText(lastSet) != -1) {
         mAudioChannelLayoutsComboBox->setCurrentText(lastSet);
-    } else if(mAudioChannelLayoutsComboBox->findText("Stereo")) {
+    } else if(mAudioChannelLayoutsComboBox->findText("Stereo") != -1) {
         mAudioChannelLayoutsComboBox->setCurrentText("Stereo");
     }
 }

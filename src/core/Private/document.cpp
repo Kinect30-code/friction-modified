@@ -77,7 +77,7 @@ Document::Document(TaskScheduler& taskScheduler)
     });
 
     connect(&taskScheduler, &TaskScheduler::finishedAllQuedTasks,
-            this, &Document::updateScenes);
+            this, &Document::handleQueuedTasksFinished);
 }
 
 Grid* Document::getGrid()
@@ -85,14 +85,40 @@ Grid* Document::getGrid()
     return mGrid;
 }
 
+void Document::processScheduledSimpleTasks()
+{
+    if(SimpleTask::sHasTasks()) {
+        SimpleTask::sProcessAll();
+    }
+}
+
+void Document::queueVisibleSceneTasks()
+{
+    TaskScheduler::instance()->queTasks();
+}
+
+void Document::scheduleVisibleSceneUpdates()
+{
+    for (const auto& scene : fVisibleScenes) {
+        scene.first->scheduleUpdate();
+    }
+}
+
+void Document::handleQueuedTasksFinished()
+{
+    const bool hadSimpleTasks = SimpleTask::sHasTasks();
+    processScheduledSimpleTasks();
+    if(hadSimpleTasks || SimpleTask::sHasTasks()) {
+        queueVisibleSceneTasks();
+    }
+    scheduleVisibleSceneUpdates();
+}
+
 void Document::updateScenes()
 {
-    SimpleTask::sProcessAll();
-    TaskScheduler::instance()->queTasks();
-
-    for (const auto& scene : fVisibleScenes) {
-        emit scene.first->requestUpdate();
-    }
+    processScheduledSimpleTasks();
+    queueVisibleSceneTasks();
+    scheduleVisibleSceneUpdates();
 }
 
 void Document::actionFinished()

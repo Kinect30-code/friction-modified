@@ -54,7 +54,7 @@ protected:
     PathEffectCollection();
 public:
     bool SWT_shouldFlattenHierarchy() const override { return true; }
-    void prp_setupTreeViewMenu(PropertyMenu * const menu);
+    void prp_setupTreeViewMenu(PropertyMenu * const menu) override;
 
     bool hasEffects();
     void readPathEffect(eReadStream &target);

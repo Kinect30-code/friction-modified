@@ -32,6 +32,7 @@
 
 #include "ReadWrite/ereadstream.h"
 #include "ReadWrite/ewritestream.h"
+#include "../ffmpegcompat.h"
 
 extern "C" {
     #include <libavutil/samplefmt.h>
@@ -51,7 +52,7 @@ protected:
         fSampleRate(sampleRate),
         fSampleSize(uint(av_get_bytes_per_sample(format))),
         fChannelLayout(channelLayout),
-        fNChannels(av_get_channel_layout_nb_channels(channelLayout)),
+        fNChannels(Friction::FFmpegCompat::channelCountForMask(channelLayout)),
         fSampleRange(range), fData(data) {
     }
 
@@ -64,7 +65,7 @@ protected:
         fSampleRate(sampleRate),
         fSampleSize(uint(av_get_bytes_per_sample(format))),
         fChannelLayout(channelLayout),
-        fNChannels(av_get_channel_layout_nb_channels(channelLayout)),
+        fNChannels(Friction::FFmpegCompat::channelCountForMask(channelLayout)),
         fSampleRange(range) {
         const auto bytes = static_cast<ulong>(fSampleRange.span())*fSampleSize;
         if(fPlanar) {

@@ -113,6 +113,8 @@ void CanvasWindow::setCurrentCanvas(Canvas * const canvas)
         updatePivotIfNeeded();
         conn << connect(mCurrentCanvas, &Canvas::requestUpdate,
                         this, qOverload<>(&CanvasWindow::update));
+        conn << connect(mCurrentCanvas, &Canvas::requestOverlayUpdate,
+                        this, qOverload<>(&CanvasWindow::update));
         conn << connect(mCurrentCanvas, &Canvas::destroyed,
                         this, [this]() { setCurrentCanvas(nullptr); });
     }
@@ -147,6 +149,7 @@ void CanvasWindow::setCanvasMode(const CanvasMode mode)
         break;
     case CanvasMode::circleCreate:
     case CanvasMode::rectCreate:
+    case CanvasMode::polygonCreate:
         setCursor(Qt::SizeFDiagCursor);
         break;
     case CanvasMode::textCreate:
@@ -531,19 +534,19 @@ void CanvasWindow::mouseMoveEvent(QMouseEvent *event)
         translateView(pos - mPrevMousePos);
         pos = mPrevMousePos;
     }
-    mCurrentCanvas->mouseMoveEvent(eMouseEvent(pos,
-                                               mPrevMousePos,
-                                               mPrevPressPos,
-                                               mMouseGrabber,
-                                               mViewTransform.m11(),
-                                               event,
-                                               [this]() { releaseMouse(); },
-                                               [this]() { grabMouse(); },
-                                               this));
+    const bool needsUpdate = mCurrentCanvas->mouseMoveEvent(eMouseEvent(pos,
+                                                                        mPrevMousePos,
+                                                                        mPrevPressPos,
+                                                                        mMouseGrabber,
+                                                                        mViewTransform.m11(),
+                                                                        event,
+                                                                        [this]() { releaseMouse(); },
+                                                                        [this]() { grabMouse(); },
+                                                                        this));
 
     if (mDocument.fCanvasMode == CanvasMode::paint) { update(); }
     else if (isMouseGrabber()) { queTasksAndUpdate(); }
-    else { update(); }
+    else if (needsUpdate) { update(); }
     mPrevMousePos = pos;
 }
 
@@ -573,6 +576,16 @@ void CanvasWindow::wheelEvent(QWheelEvent *event)
         event->phase() != Qt::NoScrollPhase) { return; }
 #endif
     if (!mCurrentCanvas) { return; }
+    if (mDocument.fCanvasMode == CanvasMode::polygonCreate) {
+        int steps = event->angleDelta().y() / 120;
+        if (steps == 0 && event->angleDelta().y() != 0) {
+            steps = event->angleDelta().y() > 0 ? 1 : -1;
+        }
+        if (mCurrentCanvas->adjustActivePolygonSidesBy(steps)) {
+            update();
+            return;
+        }
+    }
     const auto ePos = event->position();
     if (event->angleDelta().y() > 0) {
         zoomView(1.1, ePos);
@@ -717,7 +730,16 @@ bool CanvasWindow::handleTransformationKeyPress(QKeyEvent *event)
 
 bool CanvasWindow::handleZValueKeyPress(QKeyEvent *event)
 {
-    if (event->key() == Qt::Key_PageUp) {
+    const bool ctrlPressed = event->modifiers() & Qt::ControlModifier;
+    const bool altPressed = event->modifiers() & Qt::AltModifier;
+    const bool metaPressed = event->modifiers() & Qt::MetaModifier;
+    if (!altPressed && !metaPressed && ctrlPressed &&
+        event->key() == Qt::Key_BracketLeft) {
+       mCurrentCanvas->lowerSelectedBoxes();
+    } else if (!altPressed && !metaPressed && ctrlPressed &&
+               event->key() == Qt::Key_BracketRight) {
+       mCurrentCanvas->raiseSelectedBoxes();
+    } else if (event->key() == Qt::Key_PageUp) {
        mCurrentCanvas->raiseSelectedBoxes();
     } else if (event->key() == Qt::Key_PageDown) {
        mCurrentCanvas->lowerSelectedBoxes();
@@ -801,7 +823,12 @@ bool CanvasWindow::handleStartTransformKeyPress(const eKeyEvent& e)
 
 bool CanvasWindow::handleSelectAllKeyPress(QKeyEvent* event)
 {
-    if (event->key() == Qt::Key_A && !isMouseGrabber()) {
+    const auto mods = event->modifiers();
+    const bool cmdPressed = (mods & Qt::ControlModifier) ||
+                            (mods & Qt::MetaModifier);
+    if (event->key() == Qt::Key_A &&
+        !isMouseGrabber() &&
+        cmdPressed) {
         bool altPressed = event->modifiers() & Qt::AltModifier;
         bool shiftPressed = event->modifiers() & Qt::ShiftModifier;
         auto currentMode = mDocument.fCanvasMode;

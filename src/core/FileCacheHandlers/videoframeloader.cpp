@@ -31,14 +31,17 @@
 
 VideoFrameLoader::VideoFrameLoader(VideoFrameHandler * const cacheHandler,
                                    const stdsptr<VideoStreamsData> &openedVideo,
-                                   const int frameId) :
+                                   const int frameId,
+                                   const VideoFrameAccessMode accessMode) :
     mCacheHandler(cacheHandler), mOpenedVideo(openedVideo),
-    mFrameId(frameId) {}
+    mFrameId(frameId),
+    mPreferSeek(shouldPreferSeek(accessMode)) {}
 
 VideoFrameLoader::VideoFrameLoader(VideoFrameHandler * const cacheHandler,
                                    const stdsptr<VideoStreamsData> &openedVideo,
-                                   const int frameId, AVFrame * const frame) :
-    VideoFrameLoader(cacheHandler, openedVideo, frameId) {
+                                   const int frameId, AVFrame * const frame,
+                                   const VideoFrameAccessMode accessMode) :
+    VideoFrameLoader(cacheHandler, openedVideo, frameId, accessMode) {
     setFrameToConvert(frame, openedVideo->fCodecContext);
 }
 
@@ -133,8 +136,15 @@ void VideoFrameLoader::readFrame() {
     const qreal fps = mOpenedVideo->fFps;
 
     int seekTry = 0;
-    if(mOpenedVideo->fLastFrame >= mFrameId ||
-       mFrameId - mOpenedVideo->fLastFrame > fps) {
+    const bool sequentialForward =
+            mOpenedVideo->fLastFrame >= 0 &&
+            mFrameId == mOpenedVideo->fLastFrame + 1;
+    const int seekWindow = mPreferSeek ?
+                qMax(2, qRound(fps*0.1)) :
+                qMax(2, qRound(fps));
+    if((mPreferSeek && !sequentialForward) ||
+       mOpenedVideo->fLastFrame >= mFrameId ||
+       mFrameId - mOpenedVideo->fLastFrame > seekWindow) {
         seek(seekTry++, mFrameId, fps, formatContext,
              videoStreamIndex, videoStream, codecContext);
     }

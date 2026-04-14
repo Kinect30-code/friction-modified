@@ -26,28 +26,37 @@
 #ifndef LINKCANVASRENDERDATA_H
 #define LINKCANVASRENDERDATA_H
 #include "canvasrenderdata.h"
+
+class ImageCacheContainer;
+
 struct CORE_EXPORT LinkCanvasRenderData : public CanvasRenderData {
     LinkCanvasRenderData(BoundingBox * const parentBoxT) :
         CanvasRenderData(parentBoxT) {}
 
     bool fClipToCanvas = false;
+    void setCachedSceneFrame(ImageCacheContainer* const container);
 protected:
-    SkColor eraseColor() const {
+    SkColor eraseColor() const override {
         if(fClipToCanvas) return fBgColor;
         else return SK_ColorTRANSPARENT;
     }
 
-    void drawSk(SkCanvas * const canvas);
+    void drawSk(SkCanvas * const canvas) override;
+    void setupRenderData() override;
+    void afterProcessing() override;
 
-    void updateRelBoundingRect() {
+    void updateRelBoundingRect() override {
         if(fClipToCanvas) CanvasRenderData::updateRelBoundingRect();
         else ContainerBoxRenderData::updateRelBoundingRect();
     }
 
-    void updateGlobalRect() {
+    void updateGlobalRect() override {
         if(fClipToCanvas) CanvasRenderData::updateGlobalRect();
         else ContainerBoxRenderData::updateGlobalRect();
     }
+
+private:
+    sk_sp<SkImage> mCachedSceneImage;
 };
 
 #endif // LINKCANVASRENDERDATA_H

@@ -39,12 +39,15 @@ class CORE_EXPORT ThemeSupport
 public:
     enum class ThemeVariant {
         dark = 0,
-        light = 1
+        light = 1,
+        slate = 2,
+        paper = 3
     };
 
     static const QColor getQColor(int r, int g, int b, int a = 255);
     static void setThemeVariant(ThemeVariant variant);
     static ThemeVariant themeVariant();
+    static ThemeVariant themeVariantFromSetting(int uiThemeValue);
     static bool isLightTheme();
     static const QColor getThemeBaseColor(int alpha = 255);
     static SkColor getThemeBaseSkColor(int alpha = 255);

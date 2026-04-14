@@ -38,11 +38,13 @@ public:
     void updateSettings(bool restore = false);
 
 private:
+    QTreeWidget *mPluginTree;
     QLineEdit *mShaderPath;
     QStringList mShadersList;
     QStringList mShadersDisabled;
     QTreeWidget *mShaderTree;
 
+    void populatePluginTree(bool restore = false);
     void populateShaderTree();
 };
 

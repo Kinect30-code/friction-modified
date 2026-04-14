@@ -67,7 +67,7 @@ endif()
 
 if(APPLE)
     set(ICON_FILE ${CMAKE_CURRENT_SOURCE_DIR}/icons/${PROJECT_NAME}.icns)
-    set(MACOSX_BUNDLE_BUNDLE_NAME "Friction")
+    set(MACOSX_BUNDLE_BUNDLE_NAME ${FRICTION_DISPLAY_NAME})
     set(MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION})
     set(MACOSX_BUNDLE_LONG_VERSION_STRING ${PROJECT_VERSION})
     set(MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
@@ -205,6 +205,7 @@ set(
     evfileio.cpp
     renderhandler.cpp
     GUI/BoxesList/boxsinglewidget.cpp
+    GUI/BoxesList/particleoverlifewidget.cpp
     GUI/BoxesList/boxscrollwidget.cpp
     GUI/BoxesList/boolpropertywidget.cpp
     memorychecker.cpp
@@ -258,6 +259,7 @@ set(
     eimporters.h
     renderhandler.h
     GUI/BoxesList/boxsinglewidget.h
+    GUI/BoxesList/particleoverlifewidget.h
     GUI/BoxesList/boxscrollwidget.h
     GUI/BoxesList/boolpropertywidget.h
     memorychecker.h
@@ -301,6 +303,12 @@ add_executable(
     ${SOURCES}
     ${RESOURCES}
     ${WINDOWS_RESOURCE_FILE}
+)
+
+set_target_properties(
+    ${PROJECT_NAME}
+    PROPERTIES
+    OUTPUT_NAME "${FRICTION_NAME}"
 )
 
 if(APPLE)

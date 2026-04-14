@@ -37,6 +37,11 @@ SoundComposition::SoundComposition(Canvas * const parent) :
         mSettings = eSoundSettings::sData();
         mSecondsCache.clear();
     });
+    connect(parent, &Canvas::fpsChanged, this, [this](const qreal) {
+        mProcessingSeconds.clear();
+        mSecondsCache.clear();
+        clearUseRange();
+    });
 }
 
 void SoundComposition::start(const int startFrame) {
@@ -166,10 +171,14 @@ qint64 SoundComposition::readData(char *data, qint64 maxLen) {
         const SampleRange samplesToRead = readSamples*contSampleRange;
         const SampleRange contRelRange = samplesToRead.shifted(-contSampleRange.fMin);
         const qint64 nSamples = contRelRange.span();
-        const qint64 chunk = qMin(maxLen - total, nSamples*bytesPerSampleFrame);
+        const qint64 maxSampleFramesToCopy =
+                (maxLen - total) / bytesPerSampleFrame;
+        const qint64 copiedSamples = qMin(nSamples, maxSampleFramesToCopy);
+        const qint64 chunk = copiedSamples * bytesPerSampleFrame;
+        if(chunk <= 0) { break; }
         const auto src = secondData[0] + contRelRange.fMin*bytesPerSampleFrame;
         memcpy(data + total, src, static_cast<size_t>(chunk));
-        mPos += nSamples;
+        mPos += copiedSamples;
         total += chunk;
     }
 

@@ -27,6 +27,7 @@
 #define BOOLPROPERTYWIDGET_H
 
 #include <QWidget>
+#include "Animators/boolanimator.h"
 #include "Properties/boolproperty.h"
 #include "Properties/boolpropertycontainer.h"
 
@@ -37,6 +38,7 @@ public:
 
     void setTarget(BoolProperty *property);
     void setTarget(BoolPropertyContainer *property);
+    void setTarget(BoolAnimator *property);
     void setPlaceholderCrossVisible(bool visible);
 protected:
     void mousePressEvent(QMouseEvent *);
@@ -48,6 +50,7 @@ private:
     bool mPlaceholderCross = false;
     qptr<BoolProperty> mTarget;
     qptr<BoolPropertyContainer> mTargetContainer;
+    qptr<BoolAnimator> mAnimatorTarget;
 };
 
 #endif // BOOLPROPERTYWIDGET_H

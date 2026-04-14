@@ -56,6 +56,7 @@ void TaskExecutor::start() {
 
 void TaskExecutor::stop() {
     mStop = true;
+    mTasks.notifyAll();
 }
 
 void TaskExecutor::processLoop() {

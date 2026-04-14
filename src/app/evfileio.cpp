@@ -85,7 +85,7 @@ void MainWindow::loadEVFile(const QString &path)
             QMessageBox::warning(this,
                                  tr("Unsupported project version"),
                                  tr("This project file (version %1) is not compatible"
-                                    " with this version of Friction,"
+                                    " with this version of VECB,"
                                     " max supported project version is %2.").arg(QString::number(evVersion),
                                                                                  QString::number(EvFormat::version)));
             file.close();

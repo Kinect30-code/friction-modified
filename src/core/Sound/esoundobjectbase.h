@@ -30,8 +30,10 @@
 
 #include "CacheHandlers/soundcachehandler.h"
 #include "FileCacheHandlers/filehandlerobjref.h"
+#include "conncontextptr.h"
 
 class FixedLenAnimationRect;
+class Canvas;
 
 class CORE_EXPORT eSoundObjectBase : public eSound {
 protected:
@@ -60,6 +62,7 @@ private:
 
     qreal mStretch = 1;
     stdsptr<SoundHandler> mCacheHandler;
+    ConnContextPtr<Canvas> mSceneConnection;
 
     qsptr<QrealAnimator> mVolumeAnimator =
             enve::make_shared<QrealAnimator>(100, 0, 200, 1, "volume");

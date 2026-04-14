@@ -24,6 +24,7 @@
 #include "pluginssettingswidget.h"
 #include "appsupport.h"
 #include "effectsloader.h"
+#include "pluginmanager.h"
 
 #include <QHBoxLayout>
 #include <QLabel>
@@ -39,6 +40,7 @@
 
 PluginsSettingsWidget::PluginsSettingsWidget(QWidget *parent)
     : SettingsWidget(parent)
+    , mPluginTree(nullptr)
     , mShaderPath(nullptr)
     , mShaderTree(nullptr)
 {
@@ -47,10 +49,33 @@ PluginsSettingsWidget::PluginsSettingsWidget(QWidget *parent)
     mShadersDisabled = AppSupport::getSettings("settings",
                                                "DisabledShaders").toStringList();
 
+    const auto pluginLabel = new QLabel(tr("Feature Plugins"), this);
+    pluginLabel->setText(QStringLiteral("<strong>%1</strong><br><i>%2</i>")
+                         .arg(tr("Feature Plugins"),
+                              tr("Disable module-like features here to isolate them from normal entry points.")));
+    addWidget(pluginLabel);
+
+    mPluginTree = new QTreeWidget(this);
+    mPluginTree->setHeaderLabels(QStringList() << tr("Plugin")
+                                               << tr("Category")
+                                               << tr("Description"));
+    mPluginTree->setAlternatingRowColors(true);
+    mPluginTree->setSortingEnabled(false);
+    mPluginTree->header()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    mPluginTree->header()->setStretchLastSection(true);
+    addWidget(mPluginTree);
+    populatePluginTree();
+
     const auto mShaderWidget = new QWidget(this);
     mShaderWidget->setContentsMargins(0, 0, 0, 0);
     const auto mShaderLayout = new QHBoxLayout(mShaderWidget);
     mShaderLayout->setContentsMargins(0, 0, 0, 0);
+
+    const auto shaderSectionLabel = new QLabel(tr("Shader Plugins"), this);
+    shaderSectionLabel->setText(QStringLiteral("<strong>%1</strong><br><i>%2</i>")
+                                .arg(tr("Shader Plugins"),
+                                     tr("These are file-based external shader effects discovered at startup.")));
+    addWidget(shaderSectionLabel);
 
     const auto mShaderLabel = new QLabel(tr("Shaders Path"), this);
     mShaderLabel->setToolTip(tr("This location will be scanned for shader plugins during startup."));
@@ -91,13 +116,22 @@ PluginsSettingsWidget::PluginsSettingsWidget(QWidget *parent)
 
     const auto infoLabel = new QLabel(this);
     infoLabel->setText(QString("<strong>%1.</strong><br><i>%2.</i>")
-                       .arg(tr("Any changes in this section require a restart of Friction"),
-                            tr("Also note that shader effects are still considered experimental")));
+                       .arg(tr("Some plugin changes apply immediately, but menus and startup discovery are safest after restarting VECB"),
+                            tr("Shader effects are still considered experimental")));
     addWidget(infoLabel);
 }
 
 void PluginsSettingsWidget::applySettings()
 {
+    if(mPluginTree) {
+        for(int i = 0; i < mPluginTree->topLevelItemCount(); ++i) {
+            const auto item = mPluginTree->topLevelItem(i);
+            const auto feature = static_cast<PluginFeature>(
+                        item->data(0, Qt::UserRole).toInt());
+            PluginManager::setEnabled(feature, item->checkState(0) == Qt::Checked);
+        }
+    }
+
     AppSupport::setSettings("settings",
                             "CustomShaderPath",
                             mShaderPath->text());
@@ -117,10 +151,39 @@ void PluginsSettingsWidget::updateSettings(bool restore)
     mShaderPath->setText(AppSupport::getAppShaderEffectsPath(restore));
     mShadersDisabled = AppSupport::getSettings("settings",
                                                "DisabledShaders").toStringList();
+    populatePluginTree(restore);
     if (restore) {
         mShadersDisabled.clear();
-        populateShaderTree();
     }
+    populateShaderTree();
+}
+
+void PluginsSettingsWidget::populatePluginTree(bool restore)
+{
+    if(!mPluginTree) {
+        return;
+    }
+
+    mPluginTree->setSortingEnabled(false);
+    mPluginTree->clear();
+    const auto plugins = PluginManager::plugins();
+    for(const auto& plugin : plugins) {
+        const bool enabled = restore ?
+                    plugin.fEnabledByDefault :
+                    PluginManager::isEnabled(plugin.fFeature);
+        auto* const item = new QTreeWidgetItem(mPluginTree);
+        item->setCheckState(0, enabled ? Qt::Checked : Qt::Unchecked);
+        item->setData(0, Qt::UserRole, static_cast<int>(plugin.fFeature));
+        item->setText(0, plugin.fName);
+        item->setText(1, plugin.fCategory);
+        item->setText(2, plugin.fDescription);
+        item->setToolTip(0, plugin.fDescription);
+        item->setToolTip(1, plugin.fDescription);
+        item->setToolTip(2, plugin.fDescription);
+        mPluginTree->addTopLevelItem(item);
+    }
+    mPluginTree->setSortingEnabled(true);
+    mPluginTree->sortByColumn(0, Qt::AscendingOrder);
 }
 
 void PluginsSettingsWidget::populateShaderTree()

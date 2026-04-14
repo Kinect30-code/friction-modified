@@ -52,6 +52,8 @@ CanvasToolBar::CanvasToolBar(QWidget *parent)
     setToolButtonStyle(mIconsOnly ?
                            Qt::ToolButtonIconOnly :
                            Qt::ToolButtonTextBesideIcon);
+    setAllowedAreas(Qt::AllToolBarAreas);
+    setFloatable(true);
 
     setContextMenuPolicy(Qt::CustomContextMenu);
     connect(this, &QWidget::customContextMenuRequested,

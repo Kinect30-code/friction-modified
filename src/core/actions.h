@@ -122,6 +122,7 @@ public:
     void setPaintMode();
     void setRectangleMode();
     void setCircleMode();
+    void setPolygonMode();
     void setTextMode();
 
     void setNullMode();

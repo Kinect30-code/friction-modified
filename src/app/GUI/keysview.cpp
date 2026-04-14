@@ -35,6 +35,7 @@
 #include "GUI/BoxesList/boxsinglewidget.h"
 #include "Timeline/durationrectangle.h"
 #include "Boxes/animationbox.h"
+#include "Boxes/boundingbox.h"
 #include "GUI/global.h"
 #include "GUI/timelinedockwidget.h"
 #include "pointhelpers.h"
@@ -48,6 +49,86 @@
 #include "themesupport.h"
 
 namespace {
+TimelineWidget *findTimelineWidget(QWidget *widget)
+{
+    for (QWidget *p = widget; p; p = p->parentWidget()) {
+        if (auto *timeline = qobject_cast<TimelineWidget*>(p)) {
+            return timeline;
+        }
+    }
+    return nullptr;
+}
+
+bool handleTimelineMovableSelection(QWidget *widget,
+                                    TimelineMovable *movable,
+                                    Qt::KeyboardModifiers modifiers)
+{
+    auto *timeline = findTimelineWidget(widget);
+    if (!timeline || !movable) {
+        return false;
+    }
+    auto *box = enve_cast<BoundingBox*>(movable->getParentProperty());
+    if (!box) {
+        return false;
+    }
+    return timeline->handleTimelineLayerSelection(box, modifiers);
+}
+
+BoundingBox *timelineLayerRowBoxAtY(BoxScrollWidget *boxesListWidget,
+                                    const int y)
+{
+    if (!boxesListWidget) {
+        return nullptr;
+    }
+    const auto &widgets = boxesListWidget->visibleWidgets();
+    for (auto *widget : widgets) {
+        if (!widget) {
+            continue;
+        }
+        const int top = widget->y();
+        const int bottom = top + widget->height();
+        if (y < top || y >= bottom) {
+            continue;
+        }
+        auto *row = static_cast<BoxSingleWidget*>(widget);
+        return enve_cast<BoundingBox*>(row->targetProperty());
+    }
+    return nullptr;
+}
+
+QList<BoundingBox*> timelineLayerBoxesInContentRange(
+        BoxScrollWidget *boxesListWidget,
+        const int topContentY,
+        const int bottomContentY,
+        const int viewedTop)
+{
+    QList<BoundingBox*> boxes;
+    if (!boxesListWidget) {
+        return boxes;
+    }
+
+    QSet<BoundingBox*> seenBoxes;
+    const auto &widgets = boxesListWidget->visibleWidgets();
+    for (auto *widget : widgets) {
+        if (!widget) {
+            continue;
+        }
+        const int contentTop = widget->y() + viewedTop;
+        const int contentBottom = contentTop + widget->height();
+        if (bottomContentY <= contentTop || topContentY >= contentBottom) {
+            continue;
+        }
+        auto *row = static_cast<BoxSingleWidget*>(widget);
+        auto *box = enve_cast<BoundingBox*>(row->targetProperty());
+        if (!box || seenBoxes.contains(box)) {
+            continue;
+        }
+        seenBoxes.insert(box);
+        boxes.append(box);
+    }
+    return boxes;
+}
+
 QList<QList<GraphKey*>> selectedOrForwardSegments(GraphAnimator *anim)
 {
     QList<QList<GraphKey*>> segments;
@@ -322,7 +403,12 @@ void KeysView::wheelEvent(QWheelEvent *e)
     }
 #endif
 
-    const QPoint pos = e->pos();
+    const QPoint pos =
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
+            e->position().toPoint();
+#else
+            e->pos();
+#endif
     const QPoint posU = pos + QPoint(-eSizesUI::widget/2, 0);
     const qreal currentHoverFrame = static_cast<qreal>(posU.x()) / mPixelsPerFrame + mMinViewedFrame;
     // qDebug() << "currentHoverFrame" << currentHoverFrame;
@@ -891,12 +977,26 @@ void KeysView::paintEvent(QPaintEvent *) {
 
     if(mPixelsPerFrame < 0.001) return;
     if(!mGraphViewed) {
-        bool alternate = false;
         for (int rowY = 0; rowY < height(); rowY += eSizesUI::widget) {
             p.fillRect(QRect(0, rowY, width(), eSizesUI::widget),
-                       alternate ? ThemeSupport::getThemeBaseColor(120)
-                                 : ThemeSupport::getThemeAlternateColor(105));
-            alternate = !alternate;
+                       ThemeSupport::getThemeBaseColor(132));
+        }
+
+        const auto &wids = mBoxesListWidget->visibleWidgets();
+        for (const auto &container : wids) {
+            const auto row = static_cast<BoxSingleWidget*>(container);
+            if (!row || row->isHidden()) {
+                continue;
+            }
+
+            QColor rowColor = row->isTimelineLayerBackgroundRow()
+                    ? ThemeSupport::getThemeBaseColor(132)
+                    : ThemeSupport::getThemeBaseColor(112);
+            if (row->hasExpandedTimelineContent()) {
+                rowColor = rowColor.darker(115);
+            }
+
+            p.fillRect(QRect(0, row->y(), width(), row->height()), rowColor);
         }
 
         int currY = eSizesUI::widget;
@@ -908,7 +1008,6 @@ void KeysView::paintEvent(QPaintEvent *) {
     }
     p.translate(eSizesUI::widget/2, 0);
 
-    p.setPen(QPen(ThemeSupport::getThemeTimelineColor(170), 1.5));
     qreal xT = mPixelsPerFrame*0.5;
     int iInc = 1;
     bool mult5 = true;
@@ -948,11 +1047,6 @@ void KeysView::paintEvent(QPaintEvent *) {
                            ThemeSupport::getThemeColorOrange(150));
             }
         }
-    }
-
-    for(int i = minFrame; i <= maxFrame; i += iInc) {
-        const qreal xTT = xT + (i - mMinViewedFrame + 1)*mPixelsPerFrame;
-        p.drawLine(QPointF(xTT, 0), QPointF(xTT, height()));
     }
 
     // draw markers (and in/out)
@@ -1251,9 +1345,12 @@ void KeysView::handleMouseMove(const QPoint &pos,
         } else if(mMovingRect) {
             if(mFirstMove) {
                 if(mLastPressedMovable) {
-                    const bool shiftPressed = QApplication::keyboardModifiers() & Qt::SHIFT;
+                    const auto modifiers = QApplication::keyboardModifiers();
+                    const bool shiftPressed = modifiers & Qt::SHIFT;
                     if(!mLastPressedMovable->isSelected()) {
-                        mLastPressedMovable->selectionChangeTriggered(shiftPressed);
+                        if (!handleTimelineMovableSelection(this, mLastPressedMovable, modifiers)) {
+                            mLastPressedMovable->selectionChangeTriggered(shiftPressed);
+                        }
                     }
                     const auto childProp = mLastPressedMovable->getParentProperty();
                     mMoveAllSelected = true;
@@ -1352,8 +1449,46 @@ void KeysView::mouseReleaseEvent(QMouseEvent *e) {
                     mSelectionRect.setTop(bottomT);
                     mSelectionRect.setBottom(topT);
                 }
-                if(!shiftPressed) clearKeySelection();
-                selectKeysInSelectionRect();
+                bool handledRowSelection = false;
+                if (mFirstMove) {
+                    if (auto *layerRowBox = timelineLayerRowBoxAtY(mBoxesListWidget,
+                                                                   e->pos().y())) {
+                        if (!shiftPressed) clearKeySelection();
+                        if (auto *timeline = findTimelineWidget(this)) {
+                            handledRowSelection = timeline->handleTimelineLayerSelection(
+                                        layerRowBox, e->modifiers());
+                        }
+                    }
+                }
+                if (!handledRowSelection) {
+                    QList<Key*> selectionKeys;
+                    if (!mGraphViewed) {
+                        getKeysInRect(mSelectionRect.translated(-0.5, 0),
+                                      mPixelsPerFrame,
+                                      selectionKeys);
+                    }
+                    if(!shiftPressed) clearKeySelection();
+                    if (!mGraphViewed && selectionKeys.isEmpty()) {
+                        if (auto *timeline = findTimelineWidget(this)) {
+                            handledRowSelection = timeline->handleTimelineLayerRectSelection(
+                                        timelineLayerBoxesInContentRange(
+                                            mBoxesListWidget,
+                                            qRound(mSelectionRect.top()),
+                                            qRound(mSelectionRect.bottom()),
+                                            mViewedTop),
+                                        e->modifiers());
+                        }
+                    }
+                    if (!handledRowSelection) {
+                        if (mGraphViewed) {
+                            selectKeysInSelectionRect();
+                        } else {
+                            for (const auto &key : selectionKeys) {
+                                addKeyToSelection(key);
+                            }
+                        }
+                    }
+                }
             } else if(mMovingKeys) {
                 if(mFirstMove && mLastPressedKey) {
                     if(!shiftPressed) {
@@ -1367,7 +1502,9 @@ void KeysView::mouseReleaseEvent(QMouseEvent *e) {
             } else if(mMovingRect) {
                 if(mFirstMove) {
                     if(mLastPressedMovable) {
-                        mLastPressedMovable->selectionChangeTriggered(shiftPressed);
+                        if (!handleTimelineMovableSelection(this, mLastPressedMovable, e->modifiers())) {
+                            mLastPressedMovable->selectionChangeTriggered(shiftPressed);
+                        }
                     }
                 } else {
                     const auto childProp = mLastPressedMovable->getParentProperty();

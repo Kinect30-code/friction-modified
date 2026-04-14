@@ -42,15 +42,17 @@ struct CORE_EXPORT PathBoxRenderData : public BoxRenderData
     UpdatePaintSettings fPaintSettings;
     UpdateStrokeSettings fStrokeSettings;
 
-    void updateRelBoundingRect();
-    QPointF getCenterPosition();
+    void updateRelBoundingRect() override;
+    QPointF getCenterPosition() override;
 
 protected:
-    void setupRenderData();
-    void drawSk(SkCanvas * const canvas);
+    void setupRenderData() override;
+    void drawSk(SkCanvas * const canvas) override;
     void drawOnParentLayer(SkCanvas * const canvas,
-                           SkPaint &paint);
-    void copyFrom(BoxRenderData *src);
+                           SkPaint &paint) override;
+    void drawOnParentLayerRaw(SkCanvas * const canvas,
+                              SkPaint &paint) override;
+    void copyFrom(BoxRenderData *src) override;
 
 private:
     void setupDirectDraw();

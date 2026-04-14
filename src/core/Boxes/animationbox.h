@@ -29,6 +29,7 @@
 #include "Animators/intanimator.h"
 #include "Timeline/fixedlenanimationrect.h"
 #include "boundingbox.h"
+#include "conncontextptr.h"
 #include "imagebox.h"
 
 class AnimationFrameHandler;
@@ -83,6 +84,7 @@ private:
     qreal mStretch = 1;
     qsptr<AnimationFrameHandler> mSrcFramesCache;
     qsptr<IntFrameRemapping> mFrameRemapping;
+    ConnContextPtr<Canvas> mParentSceneConnection;
 };
 
 #endif // ANIMATIONBOX_H

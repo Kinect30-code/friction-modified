@@ -56,7 +56,9 @@ public:
                         SkCanvas * const canvas) const;
 
     TrackMatteMode getMode() const;
+    void setModeAction(TrackMatteMode mode);
     BoundingBox* matteSource() const;
+    void setMatteSourceAction(BoundingBox *source);
     bool invert() const;
 
 private:

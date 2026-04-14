@@ -1,7 +1,6 @@
 /*
 #
 # Friction - https://friction.graphics
-#
 # Copyright (c) Ole-André Rodlie and contributors
 #
 # This program is free software: you can redistribute it and/or modify

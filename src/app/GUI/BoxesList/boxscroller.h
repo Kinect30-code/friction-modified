@@ -40,6 +40,7 @@ class TimelineHighlightWidget;
 class BoundingBox;
 class PickWhipOverlay;
 class eBoxOrSound;
+class QRubberBand;
 
 class BoxScroller : public ScrollWidgetVisiblePart {
 public:
@@ -50,7 +51,7 @@ public:
     };
     explicit BoxScroller(ScrollWidget * const parent);
 
-    QWidget *createNewSingleWidget();
+    QWidget *createNewSingleWidget() override;
 
     void updateDropTarget();
 
@@ -83,17 +84,23 @@ public:
     void clearPickWhipHover(BoundingBox *target = nullptr);
     void toggleSolo(eBoxOrSound *target);
     bool isSolo(const eBoxOrSound *target) const;
+    void beginLayerRectSelection(const QPoint &globalPos,
+                                 Qt::KeyboardModifiers modifiers);
+    bool updateLayerRectSelection(const QPoint &globalPos);
+    bool finishLayerRectSelection(const QPoint &globalPos);
+    void cancelLayerRectSelection();
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
-    void paintEvent(QPaintEvent *);
-    void resizeEvent(QResizeEvent *e);
-    void mousePressEvent(QMouseEvent *event);
-    void mouseMoveEvent(QMouseEvent *event);
-    void leaveEvent(QEvent *event);
-    void dropEvent(QDropEvent *event);
-    void dragLeaveEvent(QDragLeaveEvent *event);
-    void dragMoveEvent(QDragMoveEvent *event);
-    void dragEnterEvent(QDragEnterEvent *event);
+    void paintEvent(QPaintEvent *) override;
+    void resizeEvent(QResizeEvent *e) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
+    void leaveEvent(QEvent *event) override;
+    void dropEvent(QDropEvent *event) override;
+    void dragLeaveEvent(QDragLeaveEvent *event) override;
+    void dragMoveEvent(QDragMoveEvent *event) override;
+    void dragEnterEvent(QDragEnterEvent *event) override;
 private:
     enum class DropType {
         none, on, into
@@ -139,6 +146,11 @@ private:
     BoundingBox *mPickWhipHoverTarget = nullptr;
     QRect mPickWhipHoverGlobalRect;
     PickWhipOverlay *mPickWhipOverlay = nullptr;
+    QRubberBand *mLayerRectRubberBand = nullptr;
+    QPoint mLayerRectPressGlobalPos;
+    QRect mLayerRectSelectionGlobalRect;
+    Qt::KeyboardModifiers mLayerRectSelectionModifiers = Qt::NoModifier;
+    bool mLayerRectSelectionActive = false;
 
     void ensurePickWhipOverlay();
     void updatePickWhipOverlay();

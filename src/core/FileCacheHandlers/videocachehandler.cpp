@@ -33,9 +33,64 @@
 
 #include "videoframeloader.h"
 
+namespace {
+
+constexpr int kVideoSequentialPrefetchFrames = 2;
+constexpr int kVideoMaxPendingFrameLoads = 6;
+
+template<typename T>
+qsptr<T> getOrCreateDataHandler(const QString& filePath,
+                                const bool reloadExisting = true) {
+    if(const auto existing = FileDataCacheHandler::sGetDataHandler<T>(filePath)) {
+        const auto shared = existing->template ref<T>();
+        if(reloadExisting) {
+            shared->reload();
+        }
+        return shared;
+    }
+    return FileDataCacheHandler::sCreateDataHandler<T>(filePath);
+}
+
+}
+
+class VideoSourceInfoTask : public eHddTask {
+    e_OBJECT
+public:
+    VideoSourceInfoTask(VideoDataHandler * const target,
+                        const QString &filePath,
+                        const int requestId) :
+        mTarget(target),
+        mFilePath(filePath),
+        mRequestId(requestId) {}
+
+    void process() override {
+        mInfo = VideoStreamsData::sInspect(mFilePath);
+    }
+
+    void afterProcessing() override {
+        if(mTarget) {
+            mTarget->applySourceInfo(mInfo, mFilePath, mRequestId);
+        }
+    }
+
+private:
+    const qptr<VideoDataHandler> mTarget;
+    const QString mFilePath;
+    const int mRequestId = 0;
+    VideoStreamsData::SourceInfo mInfo;
+};
+
 VideoFrameHandler::VideoFrameHandler(VideoDataHandler * const cacheHandler) :
     mDataHandler(cacheHandler) {
-    openVideoStream();
+    if(mDataHandler) {
+        mDataHandler->registerFrameHandler(this);
+    }
+}
+
+VideoFrameHandler::~VideoFrameHandler() {
+    if(mDataHandler) {
+        mDataHandler->unregisterFrameHandler(this);
+    }
 }
 
 ImageCacheContainer* VideoFrameHandler::getFrameAtFrame(const int relFrame) {
@@ -73,9 +128,12 @@ VideoFrameLoader *VideoFrameHandler::getFrameLoader(const int frame) {
     return mDataHandler->getFrameLoader(frame);
 }
 
-VideoFrameLoader *VideoFrameHandler::addFrameLoader(const int frameId) {
+VideoFrameLoader *VideoFrameHandler::addFrameLoader(
+        const int frameId,
+        const VideoFrameAccessMode accessMode) {
+    openVideoStream();
     const auto loader = enve::make_shared<VideoFrameLoader>(
-                    this, mVideoStreamsData, frameId);
+                    this, mVideoStreamsData, frameId, accessMode);
     mDataHandler->addFrameLoader(frameId, loader);
     for(const auto& nFrame : mNeededFrames) {
         const auto nLoader = getFrameLoader(nFrame);
@@ -89,6 +147,7 @@ VideoFrameLoader *VideoFrameHandler::addFrameLoader(const int frameId) {
 
 VideoFrameLoader *VideoFrameHandler::addFrameConverter(
         const int frameId,  AVFrame * const frame) {
+    openVideoStream();
     const auto loader = enve::make_shared<VideoFrameLoader>(
                     this, mVideoStreamsData, frameId, frame);
     mDataHandler->addFrameLoader(frameId, loader);
@@ -102,25 +161,96 @@ void VideoFrameHandler::removeFrameLoader(const int frame) {
 
 void VideoFrameHandler::openVideoStream()
 {
+    if(mVideoStreamsData && mVideoStreamsData->fOpened) {
+        return;
+    }
     const auto filePath = mDataHandler->getFilePath();
     mVideoStreamsData = VideoStreamsData::sOpen(filePath);
-    mDataHandler->setFrameCount(mVideoStreamsData->fFrameCount);
-    mDataHandler->setFps(mVideoStreamsData->fFps);
-    mDataHandler->setDim(QSize(mVideoStreamsData->fWidth,
-                               mVideoStreamsData->fHeight));
 }
 
 eTask* VideoFrameHandler::scheduleFrameLoad(const int frame) {
-    if(frame < 0 || frame >= getFrameCount())
-        RuntimeThrow("Frame outside of range " + std::to_string(frame));
+    const int previousFrame = mLastRequestedFrame;
+    const bool sequentialForward =
+            previousFrame >= 0 &&
+            frame >= previousFrame &&
+            frame - previousFrame <= 1;
+    const auto accessMode = sequentialForward ?
+                VideoFrameAccessMode::sequential :
+                VideoFrameAccessMode::seek;
+    mLastRequestedFrame = frame;
+    if(!sequentialForward) {
+        mLastPrefetchAnchorFrame = frame - 1;
+    }
+
+    const auto task = scheduleFrameLoadInternal(frame, true, accessMode);
+    if(sequentialForward) {
+        scheduleSequentialPrefetch(frame);
+    }
+    return task;
+}
+
+eTask *VideoFrameHandler::scheduleFrameLoadInternal(
+        const int frame,
+        const bool throwOnOutOfRange,
+        const VideoFrameAccessMode accessMode) {
+    if(frame < 0) {
+        if(throwOnOutOfRange) {
+            RuntimeThrow("Frame outside of range " + std::to_string(frame));
+        }
+        return nullptr;
+    }
+
+    const int frameCount = getFrameCount();
+    if(frameCount <= 0) {
+        if(throwOnOutOfRange && !mDataHandler->sourceInfoPending()) {
+            RuntimeThrow("Frame outside of range " + std::to_string(frame));
+        }
+        return nullptr;
+    }
+
+    if(frame >= frameCount) {
+        if(throwOnOutOfRange && !mDataHandler->sourceInfoPending()) {
+            RuntimeThrow("Frame outside of range " + std::to_string(frame));
+        }
+        return nullptr;
+    }
+
     const auto currLoader = getFrameLoader(frame);
     if(currLoader) return currLoader;
     if(mDataHandler->getFrameAtFrame(frame)) return nullptr;
     const auto loadTask = mDataHandler->scheduleFrameHddCacheLoad(frame);
     if(loadTask) return loadTask;
-    const auto loader = addFrameLoader(frame);
+    const auto loader = addFrameLoader(frame, accessMode);
     loader->queTask();
     return loader;
+}
+
+void VideoFrameHandler::scheduleSequentialPrefetch(const int frame) {
+    if(frame < 0) {
+        return;
+    }
+
+    const int frameCount = getFrameCount();
+
+    if(frameCount <= 0 || mDataHandler->sourceInfoPending()) {
+        return;
+    }
+    if(frame >= frameCount || frame <= mLastPrefetchAnchorFrame) {
+        return;
+    }
+
+    mLastPrefetchAnchorFrame = frame;
+    int scheduled = 0;
+    for(int nextFrame = frame + 1;
+        nextFrame < frameCount &&
+        scheduled < kVideoSequentialPrefetchFrames &&
+        mDataHandler->pendingFrameLoadCount() < kVideoMaxPendingFrameLoads;
+        nextFrame++) {
+        if(scheduleFrameLoadInternal(nextFrame, false,
+                                     VideoFrameAccessMode::sequential)) {
+            scheduled++;
+        }
+    }
 }
 
 int VideoFrameHandler::getFrameCount() const {
@@ -132,12 +262,18 @@ qreal VideoFrameHandler::getSourceFps() const {
 }
 
 void VideoFrameHandler::reload() {
-    mDataHandler->clearCache();
-    openVideoStream();
+    mVideoStreamsData.reset();
+    mNeededFrames.clear();
+    mLastRequestedFrame = -1;
+    mLastPrefetchAnchorFrame = -1;
+    mDataHandler->reload();
 }
 
 void VideoFrameHandler::afterSourceChanged() {
-    openVideoStream();
+    mVideoStreamsData.reset();
+    mNeededFrames.clear();
+    mLastRequestedFrame = -1;
+    mLastPrefetchAnchorFrame = -1;
 }
 
 void VideoDataHandler::clearCache() {
@@ -147,6 +283,9 @@ void VideoDataHandler::clearCache() {
     for(const auto& loader : frameLoaders)
         loader->cancel();
     mFrameLoaders.clear();
+    if(mSourceInfoTask && mSourceInfoTask->isActive()) {
+        mSourceInfoTask->cancel();
+    }
 }
 
 void VideoFileHandler::replace() {
@@ -167,6 +306,20 @@ void VideoFileHandler::replace() {
 }
 
 void VideoDataHandler::afterSourceChanged() {
+    if(isFileMissing()) {
+        if(mSourceInfoTask && mSourceInfoTask->isActive()) {
+            mSourceInfoTask->cancel();
+        }
+        setSourceInfoPending(false);
+        setFrameCount(0);
+        setFps(0);
+        setDim(QSize());
+        setHasAudio(false);
+        emit frameCountUpdated(mFrameCount);
+        emit sourceInfoUpdated();
+    } else {
+        queueSourceInfoRefresh();
+    }
     for(const auto& handler : mFrameHandlers) {
         handler->afterSourceChanged();
     }
@@ -245,43 +398,92 @@ void VideoDataHandler::setDim(const QSize dim)
     mFrameHeight = dim.height();
 }
 
-bool hasSound(const char* path) {
-    // get format from audio file
-    auto format = avformat_alloc_context();
-    if(avformat_open_input(&format, path, nullptr, nullptr) != 0) {
-        avformat_close_input(&format);
-        RuntimeThrow("Could not open file " + path);
-    }
-    if(avformat_find_stream_info(format, nullptr) < 0) {
-        avformat_close_input(&format);
-        RuntimeThrow("Could not retrieve stream info from file " + path);
-    }
+bool VideoDataHandler::hasAudio() const {
+    return mHasAudio;
+}
 
-    for(uint i = 0; i < format->nb_streams; i++) {
-        if(format->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-            avformat_close_input(&format);
-            return true;
-        }
+void VideoDataHandler::setHasAudio(const bool hasAudio) {
+    mHasAudio = hasAudio;
+}
+
+bool VideoDataHandler::sourceInfoPending() const {
+    return mSourceInfoPending;
+}
+
+int VideoDataHandler::pendingFrameLoadCount() const {
+    return mFramesBeingLoaded.count();
+}
+
+void VideoDataHandler::queueSourceInfoRefresh() {
+    mSourceInfoRequestId++;
+    if(mSourceInfoTask && mSourceInfoTask->isActive()) {
+        mSourceInfoTask->cancel();
     }
+    setSourceInfoPending(true);
+    const auto task = enve::make_shared<VideoSourceInfoTask>(
+                this, getFilePath(), mSourceInfoRequestId);
+    mSourceInfoTask = task;
+    task->queTask();
+}
 
-    avformat_close_input(&format);
+void VideoDataHandler::setSourceInfoPending(const bool pending) {
+    if(mSourceInfoPending == pending) {
+        return;
+    }
+    mSourceInfoPending = pending;
+    emit sourceInfoLoadingChanged(mSourceInfoPending);
+}
 
-    return false;
+void VideoDataHandler::applySourceInfo(const VideoStreamsData::SourceInfo &info,
+                                       const QString &filePath,
+                                       int requestId) {
+    if(filePath != getFilePath() || requestId != mSourceInfoRequestId) {
+        return;
+    }
+    setSourceInfoPending(false);
+    setFrameCount(info.fFrameCount);
+    setFps(info.fFps);
+    setDim(QSize(info.fWidth, info.fHeight));
+    setHasAudio(info.fHasAudio);
+    emit frameCountUpdated(mFrameCount);
+    emit sourceInfoUpdated();
+}
+
+void VideoDataHandler::registerFrameHandler(VideoFrameHandler * const handler) {
+    if(handler && !mFrameHandlers.contains(handler)) {
+        mFrameHandlers << handler;
+    }
+}
+
+void VideoDataHandler::unregisterFrameHandler(VideoFrameHandler * const handler) {
+    mFrameHandlers.removeOne(handler);
 }
 
 void VideoFileHandler::reload() {
     if(fileMissing()) {
+        QObject::disconnect(mSourceInfoConn);
         mDataHandler.reset();
         mSoundHandler.reset();
         return;
     }
-    const QString& path = this->path();
-    mDataHandler = VideoDataHandler::sGetCreateDataHandler<VideoDataHandler>(path);
-    mDataHandler->reload();
-    if(hasSound(path.toUtf8().data())) {
-        mSoundHandler = SoundDataHandler::sGetCreateDataHandler<SoundDataHandler>(path);
-        mSoundHandler->reload();
+    const QString currentPath = this->path();
+    mDataHandler = getOrCreateDataHandler<VideoDataHandler>(currentPath);
+    QObject::disconnect(mSourceInfoConn);
+    mSourceInfoConn = connect(mDataHandler.get(), &VideoDataHandler::sourceInfoUpdated,
+                              this, [this]() {
+        if(!mDataHandler) {
+            return;
+        }
+        if(mDataHandler->hasAudio()) {
+            mSoundHandler = getOrCreateDataHandler<SoundDataHandler>(this->path(), false);
+        } else {
+            mSoundHandler.reset();
+        }
+        emit reloaded();
+    });
+    if(mDataHandler && mDataHandler->hasAudio()) {
+        mSoundHandler = getOrCreateDataHandler<SoundDataHandler>(currentPath, false);
     } else {
-        return mSoundHandler.reset();
+        mSoundHandler.reset();
     }
 }

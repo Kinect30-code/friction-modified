@@ -27,7 +27,9 @@
 
 #include "GUI/mainwindow.h"
 #include "svgimporter.h"
+#include "pluginmanager.h"
 #include "../modules/ora/oramodule.h"
+#include "../modules/gltf/gltfmodule.h"
 
 qsptr<BoundingBox> eXevImporter::import(const QFileInfo &fileInfo, Canvas * const scene) const {
     Q_UNUSED(scene);
@@ -50,5 +52,21 @@ qsptr<BoundingBox> eSvgImporter::import(const QFileInfo &fileInfo, Canvas * cons
 }
 
 qsptr<BoundingBox> eOraImporter::import(const QFileInfo &fileInfo, Canvas * const scene) const {
+    if(!PluginManager::isEnabled(PluginFeature::oraImport)) {
+        return nullptr;
+    }
     return OraModule::importOraFileAsPrecomp(fileInfo, scene);
+}
+
+bool eGltfImporter::supports(const QFileInfo &fileInfo) const {
+    return PluginManager::isEnabled(PluginFeature::glbViewer) &&
+           GltfModule::supportsImport(fileInfo);
+}
+
+qsptr<BoundingBox> eGltfImporter::import(const QFileInfo &fileInfo,
+                                         Canvas * const scene) const {
+    if(!PluginManager::isEnabled(PluginFeature::glbViewer)) {
+        return nullptr;
+    }
+    return GltfModule::importFileAsBox(fileInfo, scene);
 }

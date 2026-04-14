@@ -50,10 +50,10 @@ public:
             const int visiblePartWidgetId,
             const bool visible) override;
 
-    QJSValue prp_getBaseJSValue(QJSEngine& e) const;
-    QJSValue prp_getBaseJSValue(QJSEngine& e, const qreal relFrame) const;
-    QJSValue prp_getEffectiveJSValue(QJSEngine& e) const;
-    QJSValue prp_getEffectiveJSValue(QJSEngine& e, const qreal relFrame) const;
+    QJSValue prp_getBaseJSValue(QJSEngine& e) const override;
+    QJSValue prp_getBaseJSValue(QJSEngine& e, const qreal relFrame) const override;
+    QJSValue prp_getEffectiveJSValue(QJSEngine& e) const override;
+    QJSValue prp_getEffectiveJSValue(QJSEngine& e, const qreal relFrame) const override;
 
     void setBaseValue(const qreal valX, const qreal valY) {
         setBaseValue({valX, valY});
@@ -133,7 +133,7 @@ public:
                          const bool motion = false,
                          const bool motionRotate = false,
                          const QString & motionPath = QString()) const;
-    QDomElement prp_writePropertyXEV_impl(const XevExporter& exp) const;
+    QDomElement prp_writePropertyXEV_impl(const XevExporter& exp) const override;
 protected:
     qsptr<QrealAnimator> mXAnimator;
     qsptr<QrealAnimator> mYAnimator;

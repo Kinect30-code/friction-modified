@@ -954,6 +954,10 @@ void Actions::setCircleMode() {
     mDocument.setCanvasMode(CanvasMode::circleCreate);
 }
 
+void Actions::setPolygonMode() {
+    mDocument.setCanvasMode(CanvasMode::polygonCreate);
+}
+
 void Actions::setTextMode() {
     mDocument.setCanvasMode(CanvasMode::textCreate);
 }

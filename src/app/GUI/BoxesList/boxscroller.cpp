@@ -37,6 +37,7 @@
 #include "swt_abstraction.h"
 #include "GUI/keysview.h"
 #include "RasterEffects/rastereffectcollection.h"
+#include "BlendEffects/trackmatteeffect.h"
 #include "GUI/timelinehighlightwidget.h"
 #include "GUI/timelinewidget.h"
 #include "renderhandler.h"
@@ -46,6 +47,7 @@
 #include <QStatusBar>
 #include <QApplication>
 #include <QPainterPath>
+#include <QRubberBand>
 #include <limits>
 
 class PickWhipOverlay : public QWidget {
@@ -121,34 +123,6 @@ bool boxIsAncestorOf(BoundingBox *ancestor, BoundingBox *box)
             return true;
         }
         current = current->getParentGroup();
-    }
-    return false;
-}
-
-bool pickWhipTargetFromWidget(QWidget *widget,
-                              BoundingBox *&target,
-                              QRect &globalRect)
-{
-    while (widget) {
-        const auto row = dynamic_cast<BoxSingleWidget*>(widget);
-        if (row) {
-            const auto bbox = enve_cast<BoundingBox*>(row->getTarget());
-            if (bbox) {
-                QRect rowRect = row->geometry();
-                if (row->parentWidget()) {
-                    rowRect.setLeft(0);
-                    rowRect.setWidth(row->parentWidget()->width());
-                }
-                target = bbox;
-                globalRect = QRect(row->parentWidget()
-                                       ? row->parentWidget()->mapToGlobal(rowRect.topLeft())
-                                       : row->mapToGlobal(QPoint(0, 0)),
-                                   rowRect.size());
-                return true;
-            }
-            return false;
-        }
-        widget = widget->parentWidget();
     }
     return false;
 }
@@ -248,7 +222,7 @@ void BoxScroller::beginPickWhip(BoundingBox *source, PickWhipMode mode,
     if (auto *win = MainWindow::sGetInstance()) {
         const auto message = mode == PickWhipMode::parent
                 ? tr("Pick-whip: click a layer row to use as parent.")
-                : tr("Pick-whip: click a layer row to place this matte above and clip it.");
+                : tr("Pick-whip: click a layer row to use as this layer's track matte source.");
         if (win->statusBar()) {
             win->statusBar()->showMessage(message, 4000);
         }
@@ -295,17 +269,15 @@ bool BoxScroller::handlePickWhipTarget(BoundingBox *target) {
     if (mode == PickWhipMode::matte) {
         const auto parent = source->getParentGroup();
         if (parent && parent == target->getParentGroup()) {
-            parent->moveContainedAbove(source, target);
-            const auto blendMode = source->getBlendMode();
-            if (blendMode != SkBlendMode::kDstIn &&
-                blendMode != SkBlendMode::kDstOut) {
-                source->setBlendModeSk(SkBlendMode::kDstIn);
-            }
+            const auto trackMatteMode = source->getTrackMatteTarget()
+                    ? source->getTrackMatteMode()
+                    : TrackMatteMode::alphaMatte;
+            source->setTrackMatteTarget(target, trackMatteMode);
             if (auto *win = MainWindow::sGetInstance()) {
                 if (win->statusBar()) {
                     win->statusBar()->showMessage(
-                        tr("Applied matte \"%1\" above \"%2\".").arg(source->prp_getName(),
-                                                                     target->prp_getName()),
+                        tr("Track matte for \"%1\" now uses \"%2\".").arg(source->prp_getName(),
+                                                                          target->prp_getName()),
                         2500);
                 }
             }
@@ -424,6 +396,108 @@ void BoxScroller::clearPickWhipHover(BoundingBox *target)
     if (!hasPendingPickWhip()) { return; }
     if (target && target != mPickWhipHoverTarget) { return; }
     updatePickWhipPointer(QCursor::pos());
+}
+
+void BoxScroller::beginLayerRectSelection(const QPoint &globalPos,
+                                          Qt::KeyboardModifiers modifiers)
+{
+    mLayerRectPressGlobalPos = globalPos;
+    mLayerRectSelectionGlobalRect = QRect(globalPos, globalPos);
+    mLayerRectSelectionModifiers = modifiers;
+    mLayerRectSelectionActive = false;
+    if (mLayerRectRubberBand) {
+        mLayerRectRubberBand->hide();
+    }
+}
+
+bool BoxScroller::updateLayerRectSelection(const QPoint &globalPos)
+{
+    if (mLayerRectPressGlobalPos.isNull()) {
+        return false;
+    }
+
+    const QPoint delta = globalPos - mLayerRectPressGlobalPos;
+    if (!mLayerRectSelectionActive) {
+        if (delta.manhattanLength() < QApplication::startDragDistance()) {
+            return false;
+        }
+        if (qAbs(delta.y()) < qAbs(delta.x())) {
+            return false;
+        }
+        mLayerRectSelectionActive = true;
+        if (!mLayerRectRubberBand) {
+            mLayerRectRubberBand = new QRubberBand(QRubberBand::Rectangle, this);
+        }
+    }
+
+    mLayerRectSelectionGlobalRect = QRect(mLayerRectPressGlobalPos, globalPos).normalized();
+    const QRect localRect(mapFromGlobal(mLayerRectSelectionGlobalRect.topLeft()),
+                          mapFromGlobal(mLayerRectSelectionGlobalRect.bottomRight()));
+    mLayerRectRubberBand->setGeometry(localRect.normalized());
+    mLayerRectRubberBand->show();
+    mLayerRectRubberBand->raise();
+    return true;
+}
+
+bool BoxScroller::finishLayerRectSelection(const QPoint &globalPos)
+{
+    if (mLayerRectPressGlobalPos.isNull()) {
+        return false;
+    }
+
+    const bool wasActive = mLayerRectSelectionActive;
+    const auto modifiers = mLayerRectSelectionModifiers;
+    if (wasActive) {
+        updateLayerRectSelection(globalPos);
+    }
+
+    QList<BoundingBox*> boxes;
+    if (wasActive) {
+        const auto &wids = widgets();
+        for (const auto &wid : wids) {
+            const auto row = dynamic_cast<BoxSingleWidget*>(wid);
+            if (!row || row->isHidden()) {
+                continue;
+            }
+            auto *box = enve_cast<BoundingBox*>(row->targetProperty());
+            if (!box) {
+                continue;
+            }
+            const QRect rowGlobalRect(row->mapToGlobal(QPoint(0, 0)), row->size());
+            if (mLayerRectSelectionGlobalRect.intersects(rowGlobalRect)) {
+                boxes.append(box);
+            }
+        }
+    }
+
+    cancelLayerRectSelection();
+
+    if (!wasActive || boxes.isEmpty()) {
+        return false;
+    }
+
+    for (QWidget *p = parentWidget(); p; p = p->parentWidget()) {
+        if (auto *timeline = qobject_cast<TimelineWidget*>(p)) {
+            const bool handled = timeline->handleTimelineLayerRectSelection(
+                        boxes, modifiers);
+            if (handled) {
+                Document::sInstance->actionFinished();
+            }
+            return handled;
+        }
+    }
+    return false;
+}
+
+void BoxScroller::cancelLayerRectSelection()
+{
+    mLayerRectPressGlobalPos = QPoint();
+    mLayerRectSelectionGlobalRect = QRect();
+    mLayerRectSelectionModifiers = Qt::NoModifier;
+    mLayerRectSelectionActive = false;
+    if (mLayerRectRubberBand) {
+        mLayerRectRubberBand->hide();
+    }
 }
 
 QWidget *BoxScroller::createNewSingleWidget() {
@@ -545,6 +619,14 @@ void BoxScroller::mouseMoveEvent(QMouseEvent *event)
         updatePickWhipPointer(mapToGlobal(event->pos()));
     }
     ScrollWidgetVisiblePart::mouseMoveEvent(event);
+}
+
+void BoxScroller::mouseReleaseEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton) {
+        finishLayerRectSelection(mapToGlobal(event->pos()));
+    }
+    ScrollWidgetVisiblePart::mouseReleaseEvent(event);
 }
 
 void BoxScroller::leaveEvent(QEvent *event)

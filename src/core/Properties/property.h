@@ -53,6 +53,7 @@ enum class CanvasMode : short {
     paint,
     circleCreate,
     rectCreate,
+    polygonCreate,
     textCreate,
 
     nullCreate,

@@ -17,9 +17,13 @@
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QSettings>
+#include <QSet>
 #include <QTimer>
 
 namespace {
+
+QHash<int, int> gOraSceneParentIds;
+bool gOraSceneParentCacheLoaded = false;
 
 QString oraCacheDirForFile(const QFileInfo &fileInfo)
 {
@@ -43,12 +47,14 @@ void writeOraImportMetadata(const QFileInfo &fileInfo,
     meta.setValue(QStringLiteral("ora/sourcePath"), fileInfo.absoluteFilePath());
     meta.remove(QStringLiteral("ora/sceneIds"));
     meta.remove(QStringLiteral("ora/rootSceneId"));
+    meta.remove(QStringLiteral("ora/sceneParents"));
     meta.sync();
 }
 
 void registerOraSceneMetadata(const QString &extractDir,
                               Canvas * const scene,
-                              const bool rootScene)
+                              const bool rootScene,
+                              Canvas * const parentScene = nullptr)
 {
     if (!scene) { return; }
     QSettings meta(QDir(extractDir).filePath(QStringLiteral(".friction_ora_import.ini")),
@@ -66,10 +72,69 @@ void registerOraSceneMetadata(const QString &extractDir,
         sceneIds.append(sceneId);
         meta.setValue(QStringLiteral("ora/sceneIds"), sceneIds);
     }
+    const int parentSceneId = parentScene ? parentScene->getDocumentId() : -1;
+    meta.setValue(QStringLiteral("ora/sceneParents/%1").arg(sceneId), parentSceneId);
+    gOraSceneParentIds.insert(sceneId, parentSceneId);
+    gOraSceneParentCacheLoaded = true;
     if (rootScene) {
         meta.setValue(QStringLiteral("ora/rootSceneId"), sceneId);
     }
     meta.sync();
+}
+
+void loadOraSceneParentCache()
+{
+    if (gOraSceneParentCacheLoaded) {
+        return;
+    }
+    gOraSceneParentCacheLoaded = true;
+
+    const QDir rootDir(QDir(AppSupport::getAppConfigPath()).filePath(QStringLiteral("OraImports")));
+    if (!rootDir.exists()) {
+        return;
+    }
+
+    const auto importDirs = rootDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QString &dirName : importDirs) {
+        QSettings meta(rootDir.filePath(dirName + QDir::separator() +
+                                        QStringLiteral(".friction_ora_import.ini")),
+                       QSettings::IniFormat);
+        const QStringList keys = meta.allKeys();
+        for (const QString &key : keys) {
+            if (!key.startsWith(QStringLiteral("ora/sceneParents/"))) {
+                continue;
+            }
+            bool sceneOk = false;
+            const int sceneId = key.mid(QStringLiteral("ora/sceneParents/").size()).toInt(&sceneOk);
+            if (!sceneOk) {
+                continue;
+            }
+            bool parentOk = false;
+            const int parentSceneId = meta.value(key).toInt(&parentOk);
+            gOraSceneParentIds.insert(sceneId, parentOk ? parentSceneId : -1);
+        }
+    }
+}
+
+QList<int> oraSceneNavigationChainIdsForSceneId(const int sceneId)
+{
+    loadOraSceneParentCache();
+    if (!gOraSceneParentIds.contains(sceneId)) {
+        return {};
+    }
+
+    QList<int> chain;
+    QSet<int> visited;
+    int cursor = sceneId;
+    while (cursor >= 0 && !visited.contains(cursor)) {
+        visited.insert(cursor);
+        chain.prepend(cursor);
+        if (!gOraSceneParentIds.contains(cursor)) {
+            break;
+        }
+        cursor = gOraSceneParentIds.value(cursor, -1);
+    }
+    return chain;
 }
 
 QString oraElementName(const QDomElement &element)
@@ -291,7 +356,8 @@ Canvas *createOraSceneTemplate(Canvas * const sceneTemplate,
                                const int canvasWidth,
                                const int canvasHeight,
                                const QString &extractDir,
-                               const bool rootScene = false)
+                               const bool rootScene = false,
+                               Canvas * const parentScene = nullptr)
 {
     if (!sceneTemplate || !Document::sInstance) {
         return nullptr;
@@ -310,7 +376,7 @@ Canvas *createOraSceneTemplate(Canvas * const sceneTemplate,
         bg->setColor(sceneTemplate->getBgColorAnimator()->getColor(
             sceneTemplate->anim_getCurrentAbsFrame()));
     }
-    registerOraSceneMetadata(extractDir, newScene, rootScene);
+    registerOraSceneMetadata(extractDir, newScene, rootScene, parentScene);
     emit Document::sInstance->sceneCreated(newScene);
     return newScene;
 }
@@ -402,7 +468,9 @@ qsptr<BoundingBox> createOraPrecompForStack(const QDomElement &stackElement,
                                             sceneName,
                                             sceneTemplate->getCanvasWidth(),
                                             sceneTemplate->getCanvasHeight(),
-                                            extractDir);
+                                            extractDir,
+                                            false,
+                                            sceneTemplate);
     if (!newScene) {
         return nullptr;
     }
@@ -479,7 +547,8 @@ qsptr<BoundingBox> importOraFileAsPrecomp(const QFileInfo &fileInfo,
                                             widthOk && oraWidth > 0 ? oraWidth : scene->getCanvasWidth(),
                                             heightOk && oraHeight > 0 ? oraHeight : scene->getCanvasHeight(),
                                             extractDir,
-                                            true);
+                                            true,
+                                            nullptr);
     if (!newScene) {
         return importOraFileAsGroup(fileInfo);
     }
@@ -509,6 +578,14 @@ qsptr<BoundingBox> importOraFileAsPrecomp(const QFileInfo &fileInfo,
                                           Canvas * const scene)
 {
     return ::importOraFileAsPrecomp(fileInfo, scene);
+}
+
+QList<int> sceneNavigationChainIds(const Canvas *scene)
+{
+    if (!scene) {
+        return {};
+    }
+    return oraSceneNavigationChainIdsForSceneId(scene->getDocumentId());
 }
 
 }

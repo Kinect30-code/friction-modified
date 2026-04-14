@@ -55,9 +55,14 @@ void BoxRenderData::copyFrom(BoxRenderData *src) {
     fUseRenderTransform = src->fUseRenderTransform;
     fBlendMode = src->fBlendMode;
     fGlobalRect = src->fGlobalRect;
+    fOtherGlobalRects = src->fOtherGlobalRects;
+    fMaxBoundsRect = src->fMaxBoundsRect;
+    fBaseMargin = src->fBaseMargin;
     fOpacity = src->fOpacity;
+    fResolutionOverride = src->fResolutionOverride;
     fResolution = src->fResolution;
     fResolutionScale = src->fResolutionScale;
+    fBlendEffectIdentifier = src->fBlendEffectIdentifier;
     fRenderedImage = src->requestImageCopy();
     fBoxStateId = src->fBoxStateId;
     mState = eTaskState::finished;
@@ -72,7 +77,7 @@ stdsptr<BoxRenderData> BoxRenderData::makeCopy() {
 }
 
 sk_sp<SkImage> BoxRenderData::requestImageCopy() {
-    if(mImageCopies.isEmpty()) return SkiaHelpers::makeCopy(fRenderedImage);
+    if(mImageCopies.isEmpty()) return fRenderedImage;
     else return mImageCopies.takeLast();
 }
 
@@ -104,6 +109,26 @@ void BoxRenderData::drawOnParentLayer(SkCanvas * const canvas,
     paint.setBlendMode(fBlendMode);
     paint.setAntiAlias(fAntiAlias);
     canvas->drawImage(fRenderedImage, fGlobalRect.x(), fGlobalRect.y(), &paint);
+}
+
+void BoxRenderData::drawOnParentLayerRaw(SkCanvas * const canvas,
+                                         SkPaint& paint) {
+    if(isZero4Dec(fOpacity) || !fRenderedImage) return;
+    if(fUseRenderTransform) canvas->concat(toSkMatrix(fRenderTransform));
+    paint.setAlpha(static_cast<U8CPU>(qRound(fOpacity*2.55)));
+    paint.setAntiAlias(fAntiAlias);
+    canvas->drawImage(fRenderedImage, fGlobalRect.x(), fGlobalRect.y(), &paint);
+}
+
+void BoxRenderData::remapToTotalTransform(const QMatrix& totalTransform) {
+    fTotalTransform = totalTransform;
+    updateGlobalRect();
+    if(fUseRenderTransform) {
+        fRenderTransform.reset();
+        fRenderTransform.translate(fRelBoundingRect.x(), fRelBoundingRect.y());
+        fRenderTransform *= fScaledTransform;
+        fRenderTransform.translate(-fGlobalRect.x(), -fGlobalRect.y());
+    }
 }
 
 void BoxRenderData::processGpu(QGL33 * const gl,

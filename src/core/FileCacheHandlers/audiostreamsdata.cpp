@@ -25,6 +25,7 @@
 
 #include "audiostreamsdata.h"
 #include "Sound/soundcomposition.h"
+#include "../ffmpegcompat.h"
 
 AudioStreamsData::AudioStreamsData() {
     connect(eSoundSettings::sInstance, &eSoundSettings::settingsChanged,
@@ -57,9 +58,11 @@ void AudioStreamsData::updateSwrContext() {
 
     if(fSwrContext) swr_free(&fSwrContext);
     fSwrContext = swr_alloc();
-    av_opt_set_int(fSwrContext, "in_channel_count",  audCodecPars->channels, 0);
+    av_opt_set_int(fSwrContext, "in_channel_count",
+                   Friction::FFmpegCompat::codecParametersChannelCount(audCodecPars), 0);
     av_opt_set_int(fSwrContext, "out_channel_count", eSoundSettings::sChannelCount(), 0);
-    av_opt_set_int(fSwrContext, "in_channel_layout",  audCodecPars->channel_layout, 0);
+    av_opt_set_int(fSwrContext, "in_channel_layout",
+                   Friction::FFmpegCompat::codecParametersChannelLayoutMask(audCodecPars), 0);
     av_opt_set_int(fSwrContext, "out_channel_layout", eSoundSettings::sChannelLayout(), 0);
     av_opt_set_int(fSwrContext, "in_sample_rate", audCodecPars->sample_rate, 0);
     av_opt_set_int(fSwrContext, "out_sample_rate", eSoundSettings::sSampleRate(), 0);

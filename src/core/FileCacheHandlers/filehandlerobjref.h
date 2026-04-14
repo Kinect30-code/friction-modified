@@ -63,6 +63,10 @@ public:
         return assign(mGetter(path));
     }
 
+    void clear() {
+        assign(nullptr);
+    }
+
     T* data() const { return mFileHandler; }
     operator T*() const { return data(); }
     T* operator->() const { return mFileHandler; }

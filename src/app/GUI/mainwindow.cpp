@@ -45,9 +45,11 @@
 #include <QHeaderView>
 #include <QTabWidget>
 #include <QLineEdit>
+#include <QAbstractSpinBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QPlainTextEdit>
+#include <QTextEdit>
 #include <QTabBar>
 #include <QVBoxLayout>
 
@@ -72,6 +74,7 @@
 #include "importhandler.h"
 #include "GUI/edialogs.h"
 #include "eimporters.h"
+#include "../../modules/ora/oramodule.h"
 #include "dialogs/exportsvgdialog.h"
 #include "widgets/alignwidget.h"
 #include "widgets/welcomedialog.h"
@@ -97,6 +100,31 @@ MainWindow *MainWindow::sInstance = nullptr;
 
 
 namespace {
+bool isFocusedEditorWidget(QWidget *widget)
+{
+    if (!widget) {
+        return false;
+    }
+
+    return qobject_cast<QLineEdit*>(widget) ||
+           qobject_cast<QAbstractSpinBox*>(widget) ||
+           qobject_cast<QTextEdit*>(widget) ||
+           qobject_cast<QPlainTextEdit*>(widget) ||
+           widget->inherits("QsciScintilla");
+}
+
+QWidget *editorWidgetFromObject(QObject *object)
+{
+    while (object) {
+        auto *widget = qobject_cast<QWidget*>(object);
+        if (widget && isFocusedEditorWidget(widget)) {
+            return widget;
+        }
+        object = object->parent();
+    }
+    return nullptr;
+}
+
 enum class EffectsPresetKind {
     None,
     Raster,
@@ -431,7 +459,7 @@ MainWindow::~MainWindow()
     if (qApp) {
         qApp->removeEventFilter(this);
     }
-    std::cout << "Closing Friction, please wait ... " << std::endl;
+    std::cout << "Closing VECB, please wait ... " << std::endl;
     if (mAutoSaveTimer->isActive()) { mAutoSaveTimer->stop(); }
     writeSettings();
     sInstance = nullptr;
@@ -662,7 +690,7 @@ void MainWindow::askRestoreDefaultUi()
     const auto result = QMessageBox::question(this,
                                               tr("Restore default user interface?"),
                                               tr("Are you sure you want to restore default user interface? "
-                                                 "You must restart Friction to apply."));
+                                                 "You must restart VECB to apply."));
     if (result != QMessageBox::Yes) { return; }
     eSettings::sInstance->fRestoreDefaultUi = true;
 }
@@ -741,7 +769,7 @@ void MainWindow::setupToolBar()
     {
         const auto toolbar = mToolBox->getToolBar(Ui::ToolBox::Main);
         if (toolbar) {
-            toolbar->setAllowedAreas(Qt::TopToolBarArea | Qt::BottomToolBarArea);
+            toolbar->setAllowedAreas(Qt::AllToolBarAreas);
             toolbar->setMovable(true);
             toolbar->setFloatable(true);
             addToolBar(Qt::TopToolBarArea, toolbar);
@@ -751,7 +779,7 @@ void MainWindow::setupToolBar()
     mColorToolBar = new Ui::ColorToolBar(mDocument, this);
     connect(mColorToolBar, &Ui::ColorToolBar::message,
             this, [this](const QString &msg){ statusBar()->showMessage(msg, 500); });
-    mColorToolBar->setAllowedAreas(Qt::TopToolBarArea | Qt::BottomToolBarArea);
+    mColorToolBar->setAllowedAreas(Qt::AllToolBarAreas);
     mColorToolBar->setMovable(true);
     mColorToolBar->setFloatable(true);
     addToolBar(Qt::TopToolBarArea, mColorToolBar);
@@ -759,7 +787,7 @@ void MainWindow::setupToolBar()
     mToolbar = new Ui::ToolBar(tr("Toolbar"),
                                "MainToolBar",
                                this);
-    mToolbar->setAllowedAreas(Qt::TopToolBarArea | Qt::BottomToolBarArea);
+    mToolbar->setAllowedAreas(Qt::AllToolBarAreas);
     mToolbar->setMovable(true);
     mToolbar->setFloatable(true);
     addToolBar(Qt::TopToolBarArea, mToolbar);
@@ -773,12 +801,19 @@ void MainWindow::setupToolBar()
     const auto workspaceLayoutCombo = mLayoutHandler->comboWidget();
     workspaceLayoutCombo->setMaximumWidth(150);
     mCanvasToolBar->addWidget(workspaceLayoutCombo);
-
-    statusBar()->addPermanentWidget(mCanvasToolBar);
+    mCanvasToolBar->setAllowedAreas(Qt::AllToolBarAreas);
+    mCanvasToolBar->setMovable(true);
+    mCanvasToolBar->setFloatable(true);
+    addToolBar(Qt::BottomToolBarArea, mCanvasToolBar);
 
     {
         const auto toolbar = mToolBox->getToolBar(Ui::ToolBox::Interact);
-        if (toolbar) { statusBar()->addPermanentWidget(toolbar); }
+        if (toolbar) {
+            toolbar->setAllowedAreas(Qt::AllToolBarAreas);
+            toolbar->setMovable(true);
+            toolbar->setFloatable(true);
+            addToolBar(Qt::BottomToolBarArea, toolbar);
+        }
     }
 
     connect(&mAudioHandler, &AudioHandler::deviceChanged,
@@ -835,6 +870,7 @@ void MainWindow::setupImporters()
 
     ImportHandler::sInstance->addImporter<eSvgImporter>();
     ImportHandler::sInstance->addImporter<eOraImporter>();
+    ImportHandler::sInstance->addImporter<eGltfImporter>();
 }
 
 void MainWindow::setupAutoSave()
@@ -976,7 +1012,12 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *e)
     if (mEventFilterDisabled) { return QMainWindow::eventFilter(obj, e); }
     const auto type = e->type();
     const auto focusWidget = QApplication::focusWidget();
+    const bool focusedEditor = isFocusedEditorWidget(focusWidget);
+    const bool eventOnEditor = editorWidgetFromObject(obj) != nullptr;
     if (type == QEvent::KeyPress) {
+        if (focusedEditor || eventOnEditor) {
+            return QMainWindow::eventFilter(obj, e);
+        }
         const auto keyEvent = static_cast<QKeyEvent*>(e);
         if (isTimelineInputContext() && mTimeline &&
             mTimeline->processKeyPress(keyEvent)) {
@@ -991,6 +1032,9 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *e)
         }
         return processKeyEvent(keyEvent);
     } else if (type == QEvent::ShortcutOverride) {
+        if (focusedEditor || eventOnEditor) {
+            return QMainWindow::eventFilter(obj, e);
+        }
         const auto keyEvent = static_cast<QKeyEvent*>(e);
         const int key = keyEvent->key();
         if (key == Qt::Key_Tab) {
@@ -1008,12 +1052,15 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *e)
         if (isTimelineInputContext()) {
             const bool plainTimelineKey =
                     !(keyEvent->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) &&
-                    (key == Qt::Key_U || key == Qt::Key_T ||
+                    (key == Qt::Key_A || key == Qt::Key_U || key == Qt::Key_T ||
                      key == Qt::Key_B || key == Qt::Key_N);
+            const bool layerOrderTimelineKey =
+                    keyEvent->modifiers() == Qt::ControlModifier &&
+                    (key == Qt::Key_BracketLeft || key == Qt::Key_BracketRight);
             const bool easeTimelineKey =
                     keyEvent->modifiers() == Qt::ControlModifier &&
                     key == Qt::Key_E;
-            if (plainTimelineKey || easeTimelineKey) {
+            if (plainTimelineKey || easeTimelineKey || layerOrderTimelineKey) {
                 return true;
             }
         }
@@ -1026,6 +1073,9 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *e)
               return processKeyEvent(keyEvent);
         }
     } else if (type == QEvent::KeyRelease) {
+        if (focusedEditor || eventOnEditor) {
+            return QMainWindow::eventFilter(obj, e);
+        }
         const auto keyEvent = static_cast<QKeyEvent*>(e);
         if (processKeyEvent(keyEvent)) { return true; }
         //finishUndoRedoSet();
@@ -1044,6 +1094,12 @@ void MainWindow::closeEvent(QCloseEvent *e)
 bool MainWindow::processKeyEvent(QKeyEvent *event)
 {
     if (isActiveWindow() || (mTimelineWindow && mTimelineWindow->isActiveWindow())) {
+        if ((event->type() == QEvent::KeyPress ||
+             event->type() == QEvent::ShortcutOverride ||
+             event->type() == QEvent::KeyRelease) &&
+            isFocusedEditorWidget(QApplication::focusWidget())) {
+            return false;
+        }
         bool returnBool = false;
         if (event->type() == QEvent::KeyPress ||
             event->type() == QEvent::ShortcutOverride) {
@@ -1052,14 +1108,14 @@ bool MainWindow::processKeyEvent(QKeyEvent *event)
                     !(event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) &&
                     event->key() >= Qt::Key_A && event->key() <= Qt::Key_Z;
 
-            if (timelineContext && mTimeline && mTimeline->processKeyPress(event)) {
+            if (mAeShortcutController &&
+                mAeShortcutController->process(event)) {
+                returnBool = true;
+            } else if (timelineContext && mTimeline && mTimeline->processKeyPress(event)) {
                 returnBool = true;
             } else if (timelineContext && plainLetter) {
                 // When the timeline is active, don't leak single-letter keys
                 // into the viewer/tool shortcut stack.
-                returnBool = true;
-            } else if (mAeShortcutController &&
-                       mAeShortcutController->process(event)) {
                 returnBool = true;
             } else {
                 returnBool = KeyFocusTarget::KFT_handleKeyEvent(event);
@@ -1085,10 +1141,19 @@ bool MainWindow::isTimelineInputContext() const
         return false;
     };
 
-    if (belongsToTimeline(QApplication::focusWidget())) {
+    auto *focusWidget = QApplication::focusWidget();
+    if (isFocusedEditorWidget(focusWidget)) {
+        return false;
+    }
+    if (belongsToTimeline(focusWidget)) {
         return true;
     }
-    if (belongsToTimeline(QApplication::widgetAt(QCursor::pos()))) {
+
+    auto *hoveredWidget = QApplication::widgetAt(QCursor::pos());
+    if (hoveredWidget && isFocusedEditorWidget(hoveredWidget)) {
+        return false;
+    }
+    if (belongsToTimeline(hoveredWidget)) {
         return true;
     }
 
@@ -1135,7 +1200,7 @@ void MainWindow::readSettings(const QString &openProject)
     if (!aeWorkspaceApplied) {
         mUI->applyAeDefaultWorkspace();
         if (mCenterTabs) { mCenterTabs->setCurrentIndex(0); }
-        if (mBottomTabs) { mBottomTabs->setCurrentWidget(mTimeline); }
+        if (*mDocument.fActiveScene) { selectBottomSceneTab(*mDocument.fActiveScene); }
         AppSupport::setSettings("ui", "AeWorkspaceV3Applied", true);
     }
     restoreState(AppSupport::getSettings("ui",
@@ -1177,21 +1242,11 @@ void MainWindow::readSettings(const QString &openProject)
 
     if (mToolBox) {
         if (const auto toolboxBar = mToolBox->getToolBar(Ui::ToolBox::Main)) {
-            removeToolBar(toolboxBar);
-            addToolBar(Qt::TopToolBarArea, toolboxBar);
             toolboxBar->setVisible(true);
         }
         if (const auto controlsToolbar = mToolBox->getToolBar(Ui::ToolBox::Controls)) {
             controlsToolbar->hide();
         }
-    }
-    if (mColorToolBar) {
-        removeToolBar(mColorToolBar);
-        addToolBar(Qt::TopToolBarArea, mColorToolBar);
-    }
-    if (mToolbar) {
-        removeToolBar(mToolbar);
-        addToolBar(Qt::TopToolBarArea, mToolbar);
     }
     if (menuBar()) {
         menuBar()->raise();
@@ -1619,22 +1674,30 @@ QWidget *MainWindow::createEffectsPresetsPanel()
 
 void MainWindow::syncPanelsMenuState()
 {
-    const auto setCheckedFromParent =
-        [](QAction * const action, QWidget * const widget) {
-            if (!action || !widget) { return; }
-            const auto parent = widget->parentWidget();
+    const auto setCheckedFromDock =
+        [this](QAction * const action,
+               const QString &label,
+               QWidget * const fallbackWidget = nullptr) {
+            if (!action) { return; }
+            bool checked = false;
+            if (mUI) {
+                checked = mUI->isDockVisible(label);
+            } else if (fallbackWidget) {
+                const auto parent = fallbackWidget->parentWidget();
+                checked = parent ? parent->isVisible() : fallbackWidget->isVisible();
+            }
             action->blockSignals(true);
-            action->setChecked(parent ? parent->isVisible() : widget->isVisible());
+            action->setChecked(checked);
             action->blockSignals(false);
         };
 
-    setCheckedFromParent(mPanelCompositionAct, mCenterTabs);
-    setCheckedFromParent(mPanelProjectAct, mProjectWidget);
-    setCheckedFromParent(mPanelEffectControlsAct, mPropertiesPanel);
-    setCheckedFromParent(mPanelLayersAct, mBottomTabs);
-    setCheckedFromParent(mPanelEffectsAct, mEffectsPresetsPanel);
-    setCheckedFromParent(mPanelCharacterAct, mCharacterPanel);
-    setCheckedFromParent(mPanelAlignAct, mAlignPanel);
+    setCheckedFromDock(mPanelCompositionAct, tr("Composition"), mCenterTabs);
+    setCheckedFromDock(mPanelProjectAct, tr("Project"), mProjectWidget);
+    setCheckedFromDock(mPanelEffectControlsAct, tr("Effect Controls"), mPropertiesPanel);
+    setCheckedFromDock(mPanelLayersAct, tr("Layers"), mBottomTabs);
+    setCheckedFromDock(mPanelEffectsAct, tr("Effect Presets"), mEffectsPresetsPanel);
+    setCheckedFromDock(mPanelCharacterAct, tr("Character"), mCharacterPanel);
+    setCheckedFromDock(mPanelAlignAct, tr("Align"), mAlignPanel);
 }
 
 void MainWindow::updateWorkspaceTabTitles()
@@ -1789,6 +1852,24 @@ void MainWindow::updateSceneNavigationChain(Canvas *scene)
         return;
     }
 
+    const auto oraChainIds = OraModule::sceneNavigationChainIds(scene);
+    if (!oraChainIds.isEmpty()) {
+        mSceneNavigationChain.clear();
+        for (const int sceneId : oraChainIds) {
+            for (const auto &candidate : mDocument.fScenes) {
+                if (candidate && candidate->getDocumentId() == sceneId) {
+                    mSceneNavigationChain.append(candidate.get());
+                    break;
+                }
+            }
+        }
+        if (mSceneNavigationChain.isEmpty() ||
+            mSceneNavigationChain.last() != scene) {
+            mSceneNavigationChain.append(scene);
+        }
+        return;
+    }
+
     const int existing = mSceneNavigationChain.indexOf(scene);
     if (existing >= 0) {
         while (mSceneNavigationChain.count() > existing + 1) {
@@ -1828,7 +1909,7 @@ void MainWindow::setupLayout()
                      -1,
                      tr("Layers"),
                      mBottomTabs,
-                     true,
+                     false,
                      true,
                      false});
     docks.push_back({UIDock::Position::Right,
@@ -2086,7 +2167,7 @@ void MainWindow::importFile()
 
     const QString title = tr("Import File(s)", "ImportDialog_Title");
     const QString fileType = tr("Files %1", "ImportDialog_FileTypes");
-    const QString fileTypes = "(*.friction *.ev *.svg *.ora " +
+    const QString fileTypes = "(*.friction *.ev *.svg *.ora *.glb *.gltf " +
             FileExtensions::videoFilters() +
             FileExtensions::imageFilters() +
             FileExtensions::soundFilters() + ")";

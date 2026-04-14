@@ -105,8 +105,11 @@ public:
         mUsedRange.clearRange();
     }
 
+    int freeUnusedMemoryOutsideRange(const iValueRange &range,
+                                     int maxToFree = INT_MAX);
+
     auto begin() const { return mConts.begin(); }
-    auto end() const { return mConts.begin(); }
+    auto end() const { return mConts.end(); }
 private:
     RangeMap<stdsptr<Cont>> mConts;
     UsedRange mUsedRange;

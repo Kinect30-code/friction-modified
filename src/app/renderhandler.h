@@ -30,6 +30,8 @@
 #include "smartPointers/ememory.h"
 #include "CacheHandlers/usepointer.h"
 #include "CacheHandlers/cachecontainer.h"
+#include <QElapsedTimer>
+#include <QReadWriteLock>
 
 class Canvas;
 class RenderInstanceSettings;
@@ -37,6 +39,7 @@ class SoundComposition;
 class Document;
 class VideoEncoder;
 class MemoryHandler;
+class SceneFrameContainer;
 
 enum class PreviewState {
     stopped, rendering, playing, paused
@@ -68,7 +71,7 @@ public:
     void setLoop(const bool loop);
 
     PreviewState currentPreviewState() const
-    { return mPreviewState; }
+    { return previewStateValue(); }
 
     static RenderHandler* sInstance;
 signals:
@@ -77,7 +80,44 @@ signals:
     void previewBeingPlayed();
     void previewFinished();
 private:
+    struct PreviewFrameState {
+        int fCurrentFrame;
+        int fMinFrame;
+        int fMaxFrame;
+    };
+
+    struct PreviewTimingState {
+        int fNominalIntervalMs;
+        int fTickIntervalMs;
+        qreal fFrameAccumulator;
+        qreal fPlaybackRate;
+        bool fWaitingForCache;
+        bool fAudioPausedForCache;
+        bool fAudioNeedsRestart;
+        bool fAudioActive;
+        bool fRenderCursorRetargeted;
+        bool fBackgroundCaching;
+        int fBackgroundCacheVisibleFrame;
+        qreal fBaseResolution;
+    };
+
+    bool sceneFrameMatchesCurrentPreview(const SceneFrameContainer *cont) const;
+    int firstMissingUsablePreviewFrameAtOrAfter(int frame, int maxFrame) const;
+    int firstUnreadyPreviewFrameAtOrAfter(int frame, int maxFrame) const;
+    bool previewFrameReady(int frame) const;
+    int previewSteadyBufferFrames() const;
+    int previewBufferedAheadFrames(int anchorFrame, int maxFrames) const;
+    bool previewHasBufferedAhead(int anchorFrame, int targetFrames) const;
+    qreal previewPlaybackRateForBufferedFrames(int bufferedFrames) const;
+    void updatePreviewPlaybackRate(int anchorFrame);
+    void restorePreviewResolution();
+    void trimPreviewCaches(const FrameRange &activeRange);
+    int warmPreviewFramesInMemory(const FrameRange &range, int maxFrames);
+    void activateInteractivePreviewCaching();
+    void suspendInteractivePreviewCaching();
+
     void setFrameAction(const int frame);
+    void setInternalFrameAction(const int frame);
     void setCurrentScene(Canvas * const scene);
 
     void finishEncoding();
@@ -88,12 +128,33 @@ private:
     void nextPreviewFrame();
     void nextCurrentRenderFrame();
     void ensurePreviewWindowQueued(int anchorFrame);
+    bool applyPreviewWindowRange(const FrameRange &range,
+                                 bool scheduleAudio);
     void stopBackgroundCaching();
-    void restoreVisiblePreviewFrame();
 
     void setPreviewState(const PreviewState state);
     void setRenderingPreview(const bool rendering);
     void setPreviewing(const bool previewing);
+    PreviewState previewStateValue() const;
+    int currentPreviewFrameValue() const;
+    PreviewFrameState previewFrameStateValue() const;
+    bool previewingValue() const;
+    bool renderingPreviewValue() const;
+    void setCurrentPreviewFrameValue(int frame);
+    void setPreviewFrameState(int minFrame, int maxFrame, int currentFrame);
+    PreviewTimingState previewTimingStateValue() const;
+    void setPreviewTimingState(const PreviewTimingState &state);
+    FrameRange queuedPreviewWindowValue(bool *valid = nullptr) const;
+    void setQueuedPreviewWindowValue(const FrameRange &range, bool valid);
+    FrameRange pinnedPreviewWindowValue(bool *valid = nullptr) const;
+    void setPinnedPreviewWindowValue(const FrameRange &range, bool valid);
+    FrameRange previewPlayedRangeValue() const;
+    void setPreviewPlayedRangeValue(const FrameRange &range);
+    void appendPreviewPlayedFrameValue(int frame);
+    bool backgroundCachingValue() const;
+    void setBackgroundCachingValue(bool backgroundCaching);
+    bool previewRenderCursorRetargetedValue() const;
+    void setPreviewRenderCursorRetargetedValue(bool retargeted);
 
     void startAudio();
     void audioPushTimerExpired();
@@ -136,12 +197,24 @@ private:
     int mSavedCurrentFrame = 0;
     qreal mSavedResolutionFraction = 100;
     int mPreviewNominalIntervalMs = 0;
+    int mPreviewTickIntervalMs = 16;
+    QElapsedTimer mPreviewTickClock;
+    qreal mPreviewFrameAccumulator = 0;
+    qreal mPreviewPlaybackRate = 1;
     bool mPreviewWaitingForCache = false;
     bool mPreviewAudioPausedForCache = false;
     bool mPreviewAudioNeedsRestart = false;
+    bool mPreviewAudioActive = false;
     bool mPreviewRenderCursorRetargeted = false;
     bool mBackgroundCaching = false;
     int mBackgroundCacheVisibleFrame = 0;
+    FrameRange mQueuedPreviewWindow = {0, -1};
+    bool mQueuedPreviewWindowValid = false;
+    FrameRange mPreviewPlayedRange = {0, -1};
+    FrameRange mPinnedPreviewWindow = {0, -1};
+    bool mPinnedPreviewWindowValid = false;
+    qreal mPreviewBaseResolution = 1;
+    mutable QReadWriteLock mPreviewStateLock;
 };
 
 #endif // RENDERHANDLER_H

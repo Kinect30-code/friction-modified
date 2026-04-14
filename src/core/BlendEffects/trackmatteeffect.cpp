@@ -23,12 +23,25 @@
 
 #include "trackmatteeffect.h"
 
-#include "Boxes/layerboxrenderdata.h"
+#include "trackmattedrawresolver.h"
 #include "Boxes/boundingbox.h"
 #include "skia/skiaincludes.h"
 
+namespace {
+
+SkRect trackMatteCompositeBounds(const QRectF& targetBounds,
+                                 const QRectF& matteBounds) {
+    const QRectF unitedBounds = targetBounds.united(matteBounds);
+    return SkRect::MakeLTRB(unitedBounds.left(),
+                            unitedBounds.top(),
+                            unitedBounds.right(),
+                            unitedBounds.bottom());
+}
+
+}
+
 TrackMatteEffect::TrackMatteEffect() :
-    BlendEffect("track matte", BlendEffectType::targeted) {
+    BlendEffect("track matte", BlendEffectType::trackMatte) {
     const auto modes = QStringList() 
         << "Alpha Matte" 
         << "Alpha Inverted Matte"
@@ -45,8 +58,16 @@ TrackMatteMode TrackMatteEffect::getMode() const {
     return static_cast<TrackMatteMode>(mMode->getCurrentValue());
 }
 
+void TrackMatteEffect::setModeAction(TrackMatteMode mode) {
+    mMode->setCurrentValue(static_cast<int>(mode));
+}
+
 BoundingBox* TrackMatteEffect::matteSource() const {
     return mMatteSource->getTarget();
+}
+
+void TrackMatteEffect::setMatteSourceAction(BoundingBox *source) {
+    mMatteSource->setTargetAction(source);
 }
 
 bool TrackMatteEffect::invert() const {
@@ -60,33 +81,10 @@ void TrackMatteEffect::blendSetup(
         const int index,
         const qreal relFrame,
         QList<ChildRenderData> &delayed) const {
-    Q_UNUSED(index);
-    const auto matte = matteSource();
-    if(!matte) return;
-
-    const auto mode = getMode();
-    const bool isLuma = mode == TrackMatteMode::lumaMatte || 
-                       mode == TrackMatteMode::lumaInvertedMatte;
-    const bool isInverted = invert();
-
-    ChildRenderData iData(data.fData);
-    auto& iClip = iData.fClip;
-    iClip.fTargetBox = matte;
-    iClip.fAbove = false;
-
-    if(isPathValid()) {
-        const auto clipPath = this->clipPath(relFrame);
-        if(isInverted) {
-            data.fClip.fClipOps.append({clipPath, SkClipOp::kDifference, false});
-            iClip.fClipOps.append({clipPath, SkClipOp::kIntersect, false});
-        } else {
-            data.fClip.fClipOps.append({clipPath, SkClipOp::kIntersect, false});
-        }
-    } else {
-        data.fClip.fClipOps.append({SkPath(), SkClipOp::kIntersect, false});
-    }
-
-    delayed << iData;
+    Q_UNUSED(data)
+    Q_UNUSED(index)
+    Q_UNUSED(relFrame)
+    Q_UNUSED(delayed)
 }
 
 void TrackMatteEffect::detachedBlendUISetup(
@@ -94,16 +92,7 @@ void TrackMatteEffect::detachedBlendUISetup(
         QList<UIDelayed> &delayed) {
     Q_UNUSED(relFrame)
     Q_UNUSED(drawId)
-    const auto matte = matteSource();
-    if(!matte) return;
-
-    delayed << [this, matte]
-               (int, BoundingBox* prev, BoundingBox* next) {
-        if(prev == matte || next == matte) {
-            return static_cast<BlendEffect*>(this);
-        }
-        return static_cast<BlendEffect*>(nullptr);
-    };
+    Q_UNUSED(delayed)
 }
 
 void TrackMatteEffect::detachedBlendSetup(
@@ -117,31 +106,51 @@ void TrackMatteEffect::detachedBlendSetup(
     const auto matte = matteSource();
     if(!matte) return;
 
-    const auto mode = getMode();
-    const bool isLuma = mode == TrackMatteMode::lumaMatte || 
-                       mode == TrackMatteMode::lumaInvertedMatte;
     const bool isInverted = invert();
+    delayed << [boxToDraw, matte, relFrame, isInverted, canvas, filter]
+               (int, BoundingBox* prev, BoundingBox* next) {
+        Q_UNUSED(prev)
+        if(next != boxToDraw) return false;
 
-    if(isPathValid()) {
-        const auto clipPath = this->clipPath(relFrame);
-        delayed << [boxToDraw, matte, isLuma, isInverted, clipPath, canvas, filter]
-                   (int, BoundingBox* prev, BoundingBox* next) {
-            if(prev != matte && next != matte) return false;
-
-            canvas->save();
-            if(isInverted) {
-                canvas->clipPath(clipPath, SkClipOp::kDifference, true);
-            } else {
-                canvas->clipPath(clipPath, SkClipOp::kIntersect, true);
-            }
-
+        const qreal absFrame = boxToDraw->prp_relFrameToAbsFrameF(relFrame);
+        const qreal matteRelFrame = matte->prp_absFrameToRelFrameF(absFrame);
+        const auto boxData =
+                boxToDraw->getLatestFinishedRenderData(relFrame);
+        const auto matteData =
+                matte->getLatestFinishedRenderData(matteRelFrame);
+        const auto boxDrawData =
+                TrackMatteDrawResolver::resolve(boxToDraw, relFrame, boxData);
+        const auto matteDrawData =
+                TrackMatteDrawResolver::resolve(matte, matteRelFrame, matteData);
+        if(!boxDrawData || !matteDrawData) {
             return true;
-        };
-    }
+        }
+
+        SkPaint compositePaint;
+        compositePaint.setBlendMode(boxDrawData.fBlendMode);
+        const auto compositeBounds =
+                trackMatteCompositeBounds(boxDrawData.fBounds,
+                                          matteDrawData.fBounds);
+        canvas->saveLayer(&compositeBounds, &compositePaint);
+
+        SkPaint mattePaint;
+        mattePaint.setFilterQuality(filter);
+        matteDrawData.fDrawRaw(canvas, mattePaint);
+
+        SkPaint boxPaint;
+        boxPaint.setFilterQuality(filter);
+        boxPaint.setBlendMode(isInverted ? SkBlendMode::kSrcOut
+                                         : SkBlendMode::kSrcIn);
+        boxDrawData.fDrawRaw(canvas, boxPaint);
+
+        canvas->restore();
+        return true;
+    };
 }
 
 void TrackMatteEffect::drawBlendSetup(const qreal relFrame,
                                     SkCanvas * const canvas) const {
     Q_UNUSED(relFrame)
-    Q_UNUSED(canvas)
+    if(!matteSource()) return;
+    canvas->clipRect(SkRect::MakeEmpty(), SkClipOp::kIntersect, false);
 }

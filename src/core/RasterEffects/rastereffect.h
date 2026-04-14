@@ -41,7 +41,11 @@ enum class RasterEffectType : short {
     BRIGHTNESS_CONTRAST,
     DISPLACEMENT_MAP,
     CORNER_PIN,
-    PUPPET
+    PUPPET,
+    BLINDS,
+    MOTION_TILE,
+    DEEP_GLOW,
+    PARTICLE_SYSTEM
 };
 
 struct BoxRenderData;

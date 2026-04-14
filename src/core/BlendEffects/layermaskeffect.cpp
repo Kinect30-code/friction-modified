@@ -168,7 +168,7 @@ void focusEditableMaskPath(Canvas* const scene,
     if(auto* const editable = firstEditableMaskPath(maskPath)) {
         scene->addToSelectedProps(editable);
     }
-    scene->requestUpdate();
+    scene->scheduleUpdate();
 }
 
 }
@@ -451,7 +451,7 @@ void LayerMaskEffect::syncMaskPathUi(PathBox *oldSource)
         target->prp_afterWholeInfluenceRangeChanged();
         if(auto* const scene = target->getParentScene()) {
             syncMaskSelection(scene, target);
-            scene->requestUpdate();
+            scene->scheduleUpdate();
         }
     }
 }

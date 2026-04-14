@@ -28,6 +28,7 @@
 #include "CacheHandlers/soundcachehandler.h"
 #include "CacheHandlers/soundcachecontainer.h"
 #include "Sound/soundcomposition.h"
+#include "../ffmpegcompat.h"
 
 void SoundReader::beforeProcessing(const Hardware) {
     mOpenedAudio->lock();
@@ -73,7 +74,7 @@ void SoundReader::readFrame() {
     const AVSampleFormat dstSampleFormat = mSettings.fSampleFormat;
     const uint64_t dstChLayout = mSettings.fChannelLayout;
     const uint dstSampleSize = static_cast<uint>(mSettings.bytesPerSample());
-    const int dstChCount = av_get_channel_layout_nb_channels(dstChLayout);
+    const int dstChCount = Friction::FFmpegCompat::channelCountForMask(dstChLayout);
     const bool dstPlanar = mSettings.planarFormat();
 
     const auto formatContext = mOpenedAudio->fFormatContext;
@@ -99,14 +100,17 @@ void SoundReader::readFrame() {
     bool firstFrame = true;
     int currentDstSample = 0;
     uchar ** audioData = nullptr;
+    const int maxSamples = mSampleRange.span();
+    const ulong channelBytes = static_cast<ulong>(maxSamples) * dstSampleSize;
     if(dstPlanar) {
         audioData = new uchar*[static_cast<ulong>(dstChCount)];
         for(int i = 0; i < dstChCount; i++) {
-            audioData[i] = nullptr;
+            audioData[i] = channelBytes > 0 ? new uchar[channelBytes] : nullptr;
         }
     } else {
         audioData = new uchar*[1];
-        audioData[0] = nullptr;
+        const ulong totalBytes = channelBytes * dstChCount;
+        audioData[0] = totalBytes > 0 ? new uchar[totalBytes] : nullptr;
     }
     SampleRange audioDataRange{mSampleRange.fMin, mSampleRange.fMin - 1};
     int nSamples = 0;
@@ -172,11 +176,9 @@ void SoundReader::readFrame() {
             const int nSamplesInRange = neededSampleRange.span();
             if(nSamplesInRange > 0) {
                 const int newNSamples = nSamples + nSamplesInRange;
+                Q_ASSERT(newNSamples <= maxSamples);
                 if(dstPlanar) {
-                    const ulong newAudioDataSize = static_cast<ulong>(newNSamples) * dstSampleSize;
                     for(int i = 0; i < dstChCount; i++) {
-                        void * const audioDataMem = realloc(audioData[i], newAudioDataSize);
-                        audioData[i] = static_cast<uchar*>(audioDataMem);
                         const uint srcDispl = uint(firstRelSample) * dstSampleSize;
                         const auto src = buffer[i] + srcDispl;
                         const uint dstDispl = uint(nSamples) * dstSampleSize;
@@ -184,9 +186,6 @@ void SoundReader::readFrame() {
                         memcpy(dst, src, static_cast<ulong>(nSamplesInRange) * dstSampleSize);
                     }
                 } else {
-                    const ulong newAudioDataSize = static_cast<ulong>(newNSamples * dstChCount) * dstSampleSize;
-                    void * const audioDataMem = realloc(audioData[0], newAudioDataSize);
-                    audioData[0] = static_cast<uchar*>(audioDataMem);
                     const uint srcDispl = uint(firstRelSample*dstChCount) * dstSampleSize;
                     const auto src = buffer[0] + srcDispl;
                     const uint dstDispl = uint(nSamples*dstChCount) * dstSampleSize;

@@ -1,6 +1,7 @@
 #include "webmalphapolicy.h"
 
 #include "../../core/FileCacheHandlers/videostreamsdata.h"
+#include "../../core/pluginmanager.h"
 
 #include <QFileInfo>
 
@@ -8,6 +9,9 @@ namespace WebmAlphaPolicy {
 
 bool shouldNormalizeTransparentEdges(const VideoStreamsData& openedVideo,
                                      const bool srcHasAlpha) {
+    if(!PluginManager::isEnabled(PluginFeature::webmAlphaPolicy)) {
+        return false;
+    }
     if(!srcHasAlpha) {
         return false;
     }

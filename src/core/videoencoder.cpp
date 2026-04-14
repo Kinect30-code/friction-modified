@@ -28,6 +28,7 @@
 #include "Boxes/boxrendercontainer.h"
 #include "CacheHandlers/sceneframecontainer.h"
 #include "canvas.h"
+#include "skia/skiahelpers.h"
 
 #define AV_RuntimeThrow(errId, message) \
 { \
@@ -44,6 +45,134 @@
 using namespace Friction::Core;
 
 VideoEncoder *VideoEncoder::sInstance = nullptr;
+
+namespace {
+
+static bool sampleFormatSupported(const AVCodec *codec,
+                                  const AVSampleFormat format)
+{
+    if (!codec || format == AV_SAMPLE_FMT_NONE) { return false; }
+    if (!codec->sample_fmts) { return true; }
+    for (const AVSampleFormat *it = codec->sample_fmts; *it != AV_SAMPLE_FMT_NONE; ++it) {
+        if (*it == format) { return true; }
+    }
+    return false;
+}
+
+static AVSampleFormat chooseSupportedSampleFormat(const AVCodec *codec,
+                                                  const AVSampleFormat requested)
+{
+    if (!codec) { return requested; }
+    if (sampleFormatSupported(codec, requested)) { return requested; }
+    if (!codec->sample_fmts) { return requested; }
+
+    const AVSampleFormat preferred[] = {
+        AV_SAMPLE_FMT_FLTP,
+        AV_SAMPLE_FMT_S16P,
+        AV_SAMPLE_FMT_S16,
+        AV_SAMPLE_FMT_S32P,
+        AV_SAMPLE_FMT_S32
+    };
+    for (const auto format : preferred) {
+        if (sampleFormatSupported(codec, format)) { return format; }
+    }
+    return codec->sample_fmts[0];
+}
+
+static bool sampleRateSupported(const AVCodec *codec,
+                                const int rate)
+{
+    if (!codec || rate <= 0) { return false; }
+    if (!codec->supported_samplerates) { return true; }
+    for (const int *it = codec->supported_samplerates; *it != 0; ++it) {
+        if (*it == rate) { return true; }
+    }
+    return false;
+}
+
+static int chooseSupportedSampleRate(const AVCodec *codec,
+                                     const int requested)
+{
+    if (!codec) { return requested; }
+    if (sampleRateSupported(codec, requested)) { return requested; }
+    if (!codec->supported_samplerates) {
+        return requested > 0 ? requested : 48000;
+    }
+
+    const int preferredRates[] = {48000, 44100, 32000};
+    for (const auto rate : preferredRates) {
+        if (sampleRateSupported(codec, rate)) { return rate; }
+    }
+    return codec->supported_samplerates[0];
+}
+
+static bool channelLayoutSupported(const AVCodec *codec,
+                                   const uint64_t layout)
+{
+    if (!codec || layout == 0) { return false; }
+#if FRICTION_HAS_AVCHANNEL_LAYOUT
+    const auto *layouts = Friction::FFmpegCompat::codecChannelLayouts(codec);
+    if (!layouts) { return true; }
+
+    AVChannelLayout requestedLayout{};
+    if (!Friction::FFmpegCompat::setChannelLayoutFromMask(&requestedLayout, layout)) {
+        return false;
+    }
+
+    bool supported = false;
+    for (const AVChannelLayout *it = layouts; it && it->nb_channels > 0; ++it) {
+        if (av_channel_layout_compare(&requestedLayout, it) == 0) {
+            supported = true;
+            break;
+        }
+    }
+    av_channel_layout_uninit(&requestedLayout);
+    return supported;
+#else
+    const auto *layouts = Friction::FFmpegCompat::codecChannelLayouts(codec);
+    if (!layouts) { return true; }
+    for (const uint64_t *it = layouts; *it != 0; ++it) {
+        if (*it == layout) { return true; }
+    }
+    return false;
+#endif
+}
+
+static uint64_t chooseSupportedChannelLayout(const AVCodec *codec,
+                                             const uint64_t requested)
+{
+    if (!codec) { return requested; }
+    if (channelLayoutSupported(codec, requested)) { return requested; }
+    const auto *layouts = Friction::FFmpegCompat::codecChannelLayouts(codec);
+    if (!layouts) {
+        return requested != 0 ? requested : AV_CH_LAYOUT_STEREO;
+    }
+    if (channelLayoutSupported(codec, AV_CH_LAYOUT_STEREO)) { return AV_CH_LAYOUT_STEREO; }
+#if FRICTION_HAS_AVCHANNEL_LAYOUT
+    return Friction::FFmpegCompat::channelLayoutMask(layouts[0]);
+#else
+    return layouts[0];
+#endif
+}
+
+static void sanitizeAudioSettings(OutputSettings &settings)
+{
+    const AVCodec * const codec = settings.fAudioCodec;
+    if (!codec) { return; }
+
+    settings.fAudioSampleFormat =
+        chooseSupportedSampleFormat(codec, settings.fAudioSampleFormat);
+    settings.fAudioSampleRate =
+        chooseSupportedSampleRate(codec, settings.fAudioSampleRate);
+    settings.fAudioChannelsLayout =
+        chooseSupportedChannelLayout(codec, settings.fAudioChannelsLayout);
+
+    if (settings.fAudioBitrate <= 0) {
+        settings.fAudioBitrate = 192000;
+    }
+}
+
+}
 
 VideoEncoder::VideoEncoder() {
     Q_ASSERT(!sInstance);
@@ -173,9 +302,6 @@ static void openVideo(const AVCodec * const codec, OutputStream * const ost) {
         ost->fStream->r_frame_rate = fps;
         c->framerate = fps;
     }
-    if(c->ticks_per_frame <= 0) {
-        c->ticks_per_frame = 1;
-    }
 
     /* Allocate the encoded raw picture. */
     ost->fDstFrame = allocPicture(c->pix_fmt, c->width, c->height);
@@ -226,7 +352,6 @@ static void addVideoStream(OutputStream * const ost,
         ost->fStream->r_frame_rate = targetFps;
         c->framerate = targetFps;
     }
-    c->ticks_per_frame = 1;
 
     c->time_base       = ost->fStream->time_base;
 
@@ -276,25 +401,37 @@ static void addVideoStream(OutputStream * const ost,
 static AVFrame *getVideoFrame(OutputStream * const ost,
                               const sk_sp<SkImage> &image) {
     AVCodecContext *c = ost->fCodec;
+    if(!image) RuntimeThrow("No image available for video encoding");
 
     /* check if we want to generate more frames */
 //    if(av_compare_ts(ost->next_pts, c->time_base,
 //                      STREAM_DURATION, (AVRational) { 1, 1 }) >= 0)
 //        return nullptr;
 
+    auto rasterImage = image;
+    SkPixmap pixmap;
+    if(!rasterImage->peekPixels(&pixmap)) {
+        rasterImage = rasterImage->makeRasterImage();
+        if(!rasterImage || !rasterImage->peekPixels(&pixmap)) {
+            RuntimeThrow("Could not access rendered image pixels");
+        }
+    }
+
+    const int srcWidth = pixmap.width();
+    const int srcHeight = pixmap.height();
+    if(srcWidth <= 0 || srcHeight <= 0) {
+        RuntimeThrow("Rendered image has invalid size");
+    }
+
     /* as we only generate a rgba picture, we must convert it
      * to the codec pixel format if needed */
-    if(!ost->fSwsCtx) {
-        ost->fSwsCtx = sws_getContext(c->width, c->height,
-                                      AV_PIX_FMT_RGBA,
-                                      c->width, c->height,
-                                      c->pix_fmt, SWS_BICUBIC,
-                                      nullptr, nullptr, nullptr);
-        if(!ost->fSwsCtx)
-            RuntimeThrow("Cannot initialize the conversion context");
-    }
-    SkPixmap pixmap;
-    image->peekPixels(&pixmap);
+    ost->fSwsCtx = sws_getCachedContext(ost->fSwsCtx,
+                                        srcWidth, srcHeight,
+                                        AV_PIX_FMT_RGBA,
+                                        c->width, c->height,
+                                        c->pix_fmt, SWS_BICUBIC,
+                                        nullptr, nullptr, nullptr);
+    if(!ost->fSwsCtx) RuntimeThrow("Cannot initialize the conversion context");
 
     // check if we need to convert to "unpremultiplied"
     const bool unpremul = c->codec_id == AV_CODEC_ID_PNG; // for now only check for PNG
@@ -306,23 +443,28 @@ static AVFrame *getVideoFrame(OutputStream * const ost,
                                                      pixmap.info().refColorSpace());
         SkBitmap unpremulBitmap;
         if (unpremulBitmap.tryAllocPixels(unpremulInfo)) {
-            const bool converted = image->readPixels(unpremulInfo,
-                                                     unpremulBitmap.getPixels(),
-                                                     unpremulBitmap.rowBytes(),
-                                                     0, 0);
+            const bool converted = rasterImage->readPixels(unpremulInfo,
+                                                           unpremulBitmap.getPixels(),
+                                                           unpremulBitmap.rowBytes(),
+                                                           0, 0);
             if (converted) { unpremulBitmap.peekPixels(&pixmap); }
         }
     }
 
-    const uint8_t * const dstSk[] = {static_cast<uint8_t*>(pixmap.writable_addr())};
-    int linesizesSk[4];
-
-    av_image_fill_linesizes(linesizesSk, AV_PIX_FMT_RGBA, image->width());
+    const uint8_t * const dstSk[] = {
+        static_cast<const uint8_t*>(pixmap.addr())
+    };
+    int linesizesSk[4] = {
+        static_cast<int>(pixmap.rowBytes()),
+        0,
+        0,
+        0
+    };
     const int ret = av_frame_make_writable(ost->fDstFrame) ;
     if(ret < 0) AV_RuntimeThrow(ret, "Could not make AVFrame writable")
 
     sws_scale(ost->fSwsCtx, dstSk,
-              linesizesSk, 0, c->height, ost->fDstFrame->data,
+              linesizesSk, 0, srcHeight, ost->fDstFrame->data,
               ost->fDstFrame->linesize);
 
     ost->fDstFrame->pts = ost->fNextPts++;
@@ -346,11 +488,19 @@ static void writeVideoFrame(AVFormatContext * const oc,
 
     // encode the image
     const int ret = avcodec_send_frame(c, frame);
-    if(ret < 0) AV_RuntimeThrow(ret, "Error submitting a frame for encoding")
+    if(ret < 0) {
+        qWarning() << "writeVideoFrame failed"
+                   << "codec" << (c && c->codec ? c->codec->name : "null")
+                   << "pix_fmt" << av_get_pix_fmt_name(c->pix_fmt)
+                   << "size" << c->width << "x" << c->height
+                   << "frame_pts" << frame->pts
+                   << "time_base" << c->time_base.num << "/" << c->time_base.den
+                   << "bit_rate" << c->bit_rate;
+        AV_RuntimeThrow(ret, "Error submitting a frame for encoding")
+    }
 
     while(ret >= 0) {
-        AVPacket pkt;
-        av_init_packet(&pkt);
+        AVPacket pkt = {};
 
         const int recRet = avcodec_receive_packet(c, &pkt);
         if(recRet >= 0) {
@@ -372,7 +522,7 @@ static void writeVideoFrame(AVFormatContext * const oc,
             const int interRet = av_interleaved_write_frame(oc, &pkt);
             if(interRet < 0) AV_RuntimeThrow(interRet, "Error while writing video frame")
         } else if(recRet == AVERROR(EAGAIN) || recRet == AVERROR_EOF) {
-            *encodeVideo = ret != AVERROR_EOF;
+            *encodeVideo = recRet != AVERROR_EOF;
             break;
         } else {
             AV_RuntimeThrow(recRet, "Error encoding a video frame")
@@ -405,8 +555,10 @@ static void addAudioStream(OutputStream * const ost,
     /* put sample parameters */
     c->sample_fmt     = settings.fAudioSampleFormat;
     c->sample_rate    = settings.fAudioSampleRate;
-    c->channel_layout = settings.fAudioChannelsLayout;
-    c->channels       = av_get_channel_layout_nb_channels(c->channel_layout);
+    if (!Friction::FFmpegCompat::setCodecContextChannelLayoutMask(c,
+                                                                  settings.fAudioChannelsLayout)) {
+        RuntimeThrow("Could not set audio channel layout");
+    }
     c->bit_rate       = settings.fAudioBitrate;
     c->time_base      = { 1, c->sample_rate };
 
@@ -426,9 +578,11 @@ static void addAudioStream(OutputStream * const ost,
     ost->fSwrCtx = swr_alloc();
     if(!ost->fSwrCtx) RuntimeThrow("Error allocating the resampling context");
     av_opt_set_int(ost->fSwrCtx, "in_channel_count",  inSound.channelCount(), 0);
-    av_opt_set_int(ost->fSwrCtx, "out_channel_count", c->channels, 0);
+    av_opt_set_int(ost->fSwrCtx, "out_channel_count",
+                   Friction::FFmpegCompat::codecContextChannelCount(c), 0);
     av_opt_set_int(ost->fSwrCtx, "in_channel_layout",  inSound.fChannelLayout, 0);
-    av_opt_set_int(ost->fSwrCtx, "out_channel_layout", c->channel_layout, 0);
+    av_opt_set_int(ost->fSwrCtx, "out_channel_layout",
+                   Friction::FFmpegCompat::codecContextChannelLayoutMask(c), 0);
     av_opt_set_int(ost->fSwrCtx, "in_sample_rate", inSound.fSampleRate, 0);
     av_opt_set_int(ost->fSwrCtx, "out_sample_rate", c->sample_rate, 0);
     av_opt_set_sample_fmt(ost->fSwrCtx, "in_sample_fmt", inSound.fSampleFormat, 0);
@@ -441,9 +595,9 @@ static void addAudioStream(OutputStream * const ost,
 #ifdef QT_DEBUG
     qDebug() << "name" << "src" << "output";
     qDebug() << "channels" << inSound.channelCount() <<
-                              c->channels;
+                              Friction::FFmpegCompat::codecContextChannelCount(c);
     qDebug() << "channel layout" << inSound.fChannelLayout <<
-                                    c->channel_layout;
+                                    Friction::FFmpegCompat::codecContextChannelLayoutMask(c);
     qDebug() << "sample rate" << inSound.fSampleRate <<
                                  c->sample_rate;
     qDebug() << "sample format" << av_get_sample_fmt_name(inSound.fSampleFormat) <<
@@ -456,13 +610,15 @@ static AVFrame *allocAudioFrame(enum AVSampleFormat sample_fmt,
                                 const uint64_t& channel_layout,
                                 const int sample_rate,
                                 const int nb_samples) {
-    AVFrame * const frame = av_frame_alloc();
+    AVFrame *frame = av_frame_alloc();
 
     if(!frame) RuntimeThrow("Error allocating an audio frame");
 
     frame->format = sample_fmt;
-    frame->channel_layout = channel_layout;
-    frame->channels = av_get_channel_layout_nb_channels(channel_layout);
+    if (!Friction::FFmpegCompat::setFrameChannelLayoutMask(frame, channel_layout)) {
+        av_frame_free(&frame);
+        RuntimeThrow("Could not set frame audio channel layout");
+    }
     frame->sample_rate = sample_rate;
     frame->nb_samples = nb_samples;
 
@@ -481,14 +637,29 @@ static void openAudio(const AVCodec * const codec, OutputStream * const ost,
     /* open it */
 
     const int ret = avcodec_open2(c, codec, nullptr);
-    if(ret < 0) AV_RuntimeThrow(ret, "Could not open codec")
+    if(ret < 0) {
+        qWarning() << "openAudio failed"
+                   << "codec" << (codec ? codec->name : "null")
+                   << "sample_fmt" << av_get_sample_fmt_name(c->sample_fmt)
+                   << "sample_rate" << c->sample_rate
+                   << "channel_layout" << Qt::hex
+                   << Friction::FFmpegCompat::codecContextChannelLayoutMask(c) << Qt::dec
+                   << "channels" << Friction::FFmpegCompat::codecContextChannelCount(c)
+                   << "bit_rate" << c->bit_rate
+                   << "input_sample_fmt" << av_get_sample_fmt_name(inSound.fSampleFormat)
+                   << "input_sample_rate" << inSound.fSampleRate
+                   << "input_channel_layout" << Qt::hex << inSound.fChannelLayout << Qt::dec
+                   << "input_channels" << inSound.channelCount();
+        AV_RuntimeThrow(ret, "Could not open codec")
+    }
 
     ost->fNextPts = 0;
 
     const bool varFS = c->codec->capabilities & AV_CODEC_CAP_VARIABLE_FRAME_SIZE;
     const int nb_samples = varFS ? 10000 : c->frame_size;
 
-    ost->fDstFrame = allocAudioFrame(c->sample_fmt, c->channel_layout,
+    ost->fDstFrame = allocAudioFrame(c->sample_fmt,
+                                     Friction::FFmpegCompat::codecContextChannelLayoutMask(c),
                                      c->sample_rate, nb_samples);
     if(!ost->fDstFrame) RuntimeThrow("Could not alloc audio frame");
 
@@ -514,8 +685,7 @@ static void encodeAudioFrame(AVFormatContext * const oc,
     if(ret < 0) AV_RuntimeThrow(ret, "Error submitting a frame for encoding")
 
     while(true) {
-        AVPacket pkt;
-        av_init_packet(&pkt);
+        AVPacket pkt = {};
 
         const int recRet = avcodec_receive_packet(ost->fCodec, &pkt);
         if(recRet >= 0) {
@@ -526,11 +696,14 @@ static void encodeAudioFrame(AVFormatContext * const oc,
             const int interRet = av_interleaved_write_frame(oc, &pkt);
             if(interRet < 0) AV_RuntimeThrow(interRet, "Error while writing audio frame")
         } else if(recRet == AVERROR(EAGAIN) || recRet == AVERROR_EOF) {
+            av_packet_unref(&pkt);
             *encodeAudio = recRet == AVERROR(EAGAIN);
             break;
         } else {
+            av_packet_unref(&pkt);
             AV_RuntimeThrow(recRet, "Error encoding an audio frame")
         }
+        av_packet_unref(&pkt);
     }
 }
 
@@ -597,6 +770,7 @@ void VideoEncoder::startEncodingNow() {
     const auto soundComp = scene->getSoundComposition();
     if(mOutputFormat->audio_codec != AV_CODEC_ID_NONE &&
        mOutputSettings.fAudioEnabled && soundComp->hasAnySounds()) {
+        sanitizeAudioSettings(mOutputSettings);
         eSoundSettings::sSave();
         eSoundSettings::sSetSampleRate(mOutputSettings.fAudioSampleRate);
         eSoundSettings::sSetSampleFormat(mOutputSettings.fAudioSampleFormat);
@@ -685,17 +859,35 @@ static void flushStream(OutputStream * const ost,
                         AVFormatContext * const formatCtx) {
     if(!ost) return;
     if(!ost->fCodec) return;
-    AVPacket pkt;
-    av_init_packet(&pkt);
+    qWarning() << "flushStream begin"
+               << "codec" << (ost->fCodec->codec ? ost->fCodec->codec->name : "null")
+               << "next_pts" << ost->fNextPts;
     int ret = avcodec_send_frame(ost->fCodec, nullptr);
+    if(ret == AVERROR_EOF) {
+        qWarning() << "flushStream already drained"
+                   << "codec" << (ost->fCodec->codec ? ost->fCodec->codec->name : "null");
+        return;
+    }
+    if(ret < 0) {
+        qWarning() << "flushStream send null frame failed"
+                   << "codec" << (ost->fCodec->codec ? ost->fCodec->codec->name : "null")
+                   << "ret" << ret;
+        return;
+    }
     while(ret >= 0) {
+        AVPacket pkt = {};
         ret = avcodec_receive_packet(ost->fCodec, &pkt);
         if(ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
-            // Write packet
-            avcodec_flush_buffers(ost->fCodec);
+            av_packet_unref(&pkt);
+            qWarning() << "flushStream end"
+                       << "codec" << (ost->fCodec->codec ? ost->fCodec->codec->name : "null")
+                       << "ret" << ret;
             break;
         }
-        if(ret < 0) AV_RuntimeThrow(ret, "Error encoding a video frame during flush");
+        if(ret < 0) {
+            av_packet_unref(&pkt);
+            AV_RuntimeThrow(ret, "Error encoding a video frame during flush")
+        }
 
         if(pkt.pts != AV_NOPTS_VALUE)
             pkt.pts = av_rescale_q(pkt.pts, ost->fCodec->time_base,
@@ -717,6 +909,10 @@ static void flushStream(OutputStream * const ost,
         pkt.duration = ost->fFrameDuration;
         pkt.stream_index = ost->fStream->index;
         ret = av_interleaved_write_frame(formatCtx, &pkt);
+        av_packet_unref(&pkt);
+        if(ret < 0) {
+            AV_RuntimeThrow(ret, "Error while writing packet during flush")
+        }
     }
 }
 
@@ -736,6 +932,11 @@ static void closeStream(OutputStream * const ost) {
 void VideoEncoder::finishEncodingNow() {
     if(!mCurrentlyEncoding) return;
 
+    qWarning() << "finishEncodingNow begin"
+               << "video" << mEncodeVideo
+               << "audio" << mEncodeAudio
+               << "success" << mEncodingSuccesfull;
+
     if(mEncodeVideo) flushStream(&mVideoStream, mFormatContext);
     if(mEncodeAudio) flushStream(&mAudioStream, mFormatContext);
 
@@ -749,7 +950,11 @@ void VideoEncoder::finishEncodingNow() {
         }
     }
 
-    if(mEncodingSuccesfull) av_write_trailer(mFormatContext);
+    if(mEncodingSuccesfull) {
+        qWarning() << "av_write_trailer begin";
+        const int trailerRet = av_write_trailer(mFormatContext);
+        qWarning() << "av_write_trailer end" << trailerRet;
+    }
 
     /* Close each codec. */
     if(mEncodeVideo) closeStream(&mVideoStream);
@@ -776,6 +981,7 @@ void VideoEncoder::finishEncodingNow() {
     clearContainers();
 
     eSoundSettings::sRestore();
+    qWarning() << "finishEncodingNow end";
 }
 
 void VideoEncoder::clearContainers() {
@@ -809,7 +1015,6 @@ void VideoEncoder::process() {
             try {
                 writeVideoFrame(mFormatContext, &mVideoStream,
                                 cacheCont->getImage(), &hasVideo);
-                avcodec_flush_buffers(mVideoStream.fCodec);
             } catch(...) {
                 RuntimeThrow("Failed to write video frame");
             }
@@ -831,7 +1036,6 @@ void VideoEncoder::process() {
             try {
                 processAudioStream(mFormatContext, &mAudioStream,
                                    mSoundIterator, &hasAudio);
-                avcodec_flush_buffers(mAudioStream.fCodec);
             } catch(...) {
                 RuntimeThrow("Failed to process audio stream");
             }

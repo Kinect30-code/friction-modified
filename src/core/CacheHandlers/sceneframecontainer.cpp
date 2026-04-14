@@ -40,7 +40,11 @@ SceneFrameContainer::SceneFrameContainer(
 stdsptr<eHddTask> SceneFrameContainer::createTmpFileDataLoader() {
     const ImgLoader::Func func = [this](sk_sp<SkImage> img) {
         setDataLoadedFromTmpFile(img);
-        if(mScene) mScene->setSceneFrame(ref<SceneFrameContainer>());
+        if(mScene &&
+           (mScene->loadingSceneFrame() == this ||
+            mScene->sceneFrame() == this)) {
+            mScene->setSceneFrame(ref<SceneFrameContainer>());
+        }
     };
     return enve::make_shared<ImgLoader>(mTmpFile, this, func);
 }

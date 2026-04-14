@@ -26,11 +26,114 @@
 #include "videostreamsdata.h"
 #include "Private/esettings.h"
 
+namespace {
+AVRational resolveVideoFrameRate(AVFormatContext *formatContext,
+                                 AVStream *videoStream)
+{
+    if (!videoStream) {
+        return {0, 0};
+    }
+
+    const AVRational guessed = av_guess_frame_rate(formatContext, videoStream, nullptr);
+    if (guessed.num > 0 && guessed.den > 0) {
+        return guessed;
+    }
+
+    if (videoStream->avg_frame_rate.num > 0 &&
+        videoStream->avg_frame_rate.den > 0) {
+        return videoStream->avg_frame_rate;
+    }
+
+    if (videoStream->r_frame_rate.num > 0 &&
+        videoStream->r_frame_rate.den > 0) {
+        return videoStream->r_frame_rate;
+    }
+
+    if (videoStream->time_base.num > 0 &&
+        videoStream->time_base.den > 0) {
+        return av_inv_q(videoStream->time_base);
+    }
+
+    return {0, 0};
+}
+
+VideoStreamsData::SourceInfo collectVideoSourceInfo(AVFormatContext *formatContext) {
+    VideoStreamsData::SourceInfo info;
+    AVStream *videoStream = nullptr;
+    for(uint i = 0; i < formatContext->nb_streams; i++) {
+        AVStream * const stream = formatContext->streams[i];
+        const AVCodecParameters * const codecPars = stream->codecpar;
+        if(codecPars->codec_type == AVMEDIA_TYPE_VIDEO && !videoStream) {
+            videoStream = stream;
+            const AVRational frameRate =
+                    resolveVideoFrameRate(formatContext, videoStream);
+            info.fTimeBaseNum = frameRate.num;
+            info.fTimeBaseDen = frameRate.den;
+            if(info.fTimeBaseNum <= 0 || info.fTimeBaseDen <= 0) {
+                RuntimeThrow(QObject::tr("Could not determine a valid video frame rate"));
+            }
+            info.fFps = static_cast<qreal>(info.fTimeBaseNum)/info.fTimeBaseDen;
+            info.fWidth = codecPars->width;
+            info.fHeight = codecPars->height;
+            if(videoStream->nb_frames > 0) {
+                info.fFrameCount = static_cast<int>(videoStream->nb_frames);
+            } else {
+                const int64_t duration = formatContext->duration +
+                        (formatContext->duration <= INT64_MAX - 5000 ? 5000 : 0);
+                info.fFrameCount = qFloor(duration*info.fFps/AV_TIME_BASE);
+            }
+        } else if(codecPars->codec_type == AVMEDIA_TYPE_AUDIO) {
+            info.fHasAudio = true;
+        }
+    }
+
+    if(!videoStream) {
+        RuntimeThrow(QObject::tr("Could not retrieve video stream"));
+    }
+    return info;
+}
+
+VideoStreamsData::SourceInfo inspectVideoSource(const QString& path) {
+    AVFormatContext *formatContext = avformat_alloc_context();
+    if(!formatContext) {
+        RuntimeThrow(QObject::tr("Error allocating AVFormatContext"));
+    }
+
+    const QByteArray pathUtf8 = path.toUtf8();
+    const char * const rawPath = pathUtf8.constData();
+    auto closeInput = [&formatContext]() {
+        if(formatContext) {
+            avformat_close_input(&formatContext);
+        }
+    };
+
+    try {
+        if(avformat_open_input(&formatContext, rawPath, nullptr, nullptr) != 0) {
+            RuntimeThrow(QObject::tr("Could not open file"));
+        }
+        if(avformat_find_stream_info(formatContext, nullptr) < 0) {
+            RuntimeThrow(QObject::tr("Could not retrieve stream info"));
+        }
+
+        const auto info = collectVideoSourceInfo(formatContext);
+        closeInput();
+        return info;
+    } catch(...) {
+        closeInput();
+        throw;
+    }
+}
+}
+
 stdsptr<VideoStreamsData> VideoStreamsData::sOpen(const QString &path) {
     const auto result = std::shared_ptr<VideoStreamsData>(
                 new VideoStreamsData, VideoStreamsData::sDestroy);
     result->open(path);
     return result;
+}
+
+VideoStreamsData::SourceInfo VideoStreamsData::sInspect(const QString &path) {
+    return inspectVideoSource(path);
 }
 
 
@@ -105,20 +208,14 @@ void VideoStreamsData::open(const char * const path)
             vidCodecPars = iCodecPars;
             vidCodec = avcodec_find_decoder(vidCodecPars->codec_id);
             fVideoStream = fFormatContext->streams[fVideoStreamIndex];
-            fTimeBaseDen = fVideoStream->avg_frame_rate.den;
-            fTimeBaseNum = fVideoStream->avg_frame_rate.num;
-
-            if (fTimeBaseDen == 0) {
-                RuntimeThrow(QObject::tr("Invalid video frame rate denominator (0)"));
-            }
-            fFps = static_cast<qreal>(fTimeBaseNum)/fTimeBaseDen;
-            if (fVideoStream->nb_frames > 0) {
-                fFrameCount = static_cast<int>(fVideoStream->nb_frames);
-            } else {
-                const int64_t duration = fFormatContext->duration +
-                        (fFormatContext->duration <= INT64_MAX - 5000 ? 5000 : 0);
-                fFrameCount = qFloor(duration*fFps/AV_TIME_BASE);
-            }
+            const auto info = collectVideoSourceInfo(fFormatContext);
+            fTimeBaseNum = info.fTimeBaseNum;
+            fTimeBaseDen = info.fTimeBaseDen;
+            fFps = info.fFps;
+            fFrameCount = info.fFrameCount;
+            fWidth = info.fWidth;
+            fHeight = info.fHeight;
+            fHasAudio = info.fHasAudio;
             break;
         } else if (iMediaType == AVMEDIA_TYPE_AUDIO) { hasAudio = true; }
     }
@@ -161,6 +258,7 @@ void VideoStreamsData::open(const char * const path)
     }
     fWidth = fCodecContext->width;
     fHeight = fCodecContext->height;
+    fHasAudio = hasAudio;
     
     // Check if source format has alpha channel
     const AVPixelFormat srcFormat = fCodecContext->pix_fmt;
@@ -192,5 +290,4 @@ void VideoStreamsData::open(const char * const path)
 
     fOpened = true;
 
-    if (hasAudio) { fAudioData = AudioStreamsData::sOpen(fPath); }
 }

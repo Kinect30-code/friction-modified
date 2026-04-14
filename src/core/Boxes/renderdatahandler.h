@@ -26,11 +26,12 @@
 #ifndef RENDERDATAHANDLER_H
 #define RENDERDATAHANDLER_H
 #include "boxrenderdata.h"
-#include <map>
+#include <QHash>
+#include <QReadWriteLock>
 
 class CORE_EXPORT RenderDataHandler {
 public:
-    void clear() { mFrameToData.clear(); }
+    void clear();
     bool removeItem(const stdsptr<BoxRenderData> &item);
     bool removeItemAtRelFrame(const qreal frame);
     BoxRenderData *getItemAtRelFrame(const qreal frame) const;
@@ -40,7 +41,8 @@ private:
         return qRound(frame*1000);
     }
 
-    std::map<int, stdsptr<BoxRenderData>> mFrameToData;
+    mutable QReadWriteLock mFrameToDataLock;
+    QHash<int, stdsptr<BoxRenderData>> mFrameToData;
 };
 
 #endif // RENDERDATAHANDLER_H

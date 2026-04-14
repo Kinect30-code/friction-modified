@@ -10,13 +10,13 @@
 #include "../../core/Boxes/smartvectorpath.h"
 #include "../../core/Private/document.h"
 #include "../../core/Private/esettings.h"
+#include "../../core/pluginmanager.h"
 
 #include <QSignalBlocker>
 
 namespace {
 
 constexpr const char* kAeMaskStorageName = "Masks";
-constexpr const char* kAeLegacyMaskStorageName = "__AE_LAYER_MASKS__";
 
 LayerMaskEffect* findLayerMaskEffectForPath(BoundingBox* const target,
                                             PathBox* const path) {
@@ -125,6 +125,9 @@ void prepareMaskSource(PathBox* const maskPath) {
 namespace AeMaskModule {
 
 bool isDrawableTarget(BoundingBox* const box) {
+    if(!PluginManager::isEnabled(PluginFeature::aeMasks)) {
+        return false;
+    }
     if(!box || !box->getFirstParentLayerOrSelf()) {
         return false;
     }
@@ -133,6 +136,9 @@ bool isDrawableTarget(BoundingBox* const box) {
 
 QString nextMaskName(BoundingBox* const target,
                      ContainerBox* const parent) {
+    if(!PluginManager::isEnabled(PluginFeature::aeMasks)) {
+        return QStringLiteral("Mask 1");
+    }
     if(!target) return QStringLiteral("Mask 1");
     const QString prefix = target->prp_getName() + " Mask ";
     int maxIndex = 0;
@@ -162,6 +168,9 @@ QString nextMaskName(BoundingBox* const target,
 
 void syncSelection(Canvas* const scene,
                    BoundingBox* const target) {
+    if(!PluginManager::isEnabled(PluginFeature::aeMasks)) {
+        return;
+    }
     if(!scene || !target) {
         return;
     }
@@ -208,6 +217,9 @@ void syncSelection(Canvas* const scene,
 
 void attachLayerMaskEffect(BoundingBox* const target,
                            PathBox* const maskPath) {
+    if(!PluginManager::isEnabled(PluginFeature::aeMasks)) {
+        return;
+    }
     if(!target || !maskPath) return;
 
     ContainerBox* maskStorage = nullptr;
@@ -269,6 +281,9 @@ void attachLayerMaskEffect(BoundingBox* const target,
 
 void finalizeShapePath(Canvas* const scene,
                        PathBox* const maskPath) {
+    if(!PluginManager::isEnabled(PluginFeature::aeMasks)) {
+        return;
+    }
     if(!scene || !maskPath) return;
     if(enve_cast<SmartVectorPath*>(maskPath)) return;
 
@@ -299,6 +314,9 @@ void finalizeShapePath(Canvas* const scene,
 
 BoundingBox* resolveTarget(BoundingBox* const currentBox,
                            const ConnContextObjList<BoundingBox*>& selectedBoxes) {
+    if(!PluginManager::isEnabled(PluginFeature::aeMasks)) {
+        return nullptr;
+    }
     const auto toMaskTarget = [](BoundingBox* const box) -> BoundingBox* {
         if(!box) return nullptr;
         if(box->prp_getName() == QString::fromLatin1(kAeMaskStorageName)) {

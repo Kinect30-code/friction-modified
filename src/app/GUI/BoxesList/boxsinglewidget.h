@@ -48,6 +48,8 @@ class ColorAnimator;
 class ColorAnimatorButton;
 class BoxScroller;
 class eComboBox;
+class EnumAnimator;
+class ParticleOverLifeWidget;
 
 class BoxSingleWidget : public SingleWidget {
 public:
@@ -57,6 +59,8 @@ public:
     bool isPropertyRowSelected() const;
     bool isLayerRowSelected() const;
     Property *targetProperty() const;
+    bool isTimelineLayerBackgroundRow() const;
+    bool hasExpandedTimelineContent() const;
 
     static QPixmap* VISIBLE_ICON;
     static QPixmap* INVISIBLE_ICON;
@@ -155,6 +159,7 @@ private:
     ColorAnimator* getColorTarget() const;
 
     void setComboProperty(ComboBoxProperty * const combo);
+    void setComboProperty(EnumAnimator * const combo);
 
     void handlePropertySelectedChanged(const Property *prop);
 
@@ -182,6 +187,7 @@ private:
     QHBoxLayout *mMainLayout;
     QrealAnimatorValueSlider *mValueSlider;
     QrealAnimatorValueSlider *mSecondValueSlider;
+    ParticleOverLifeWidget *mOverLifeWidget;
     QLabel *mPointValueLabel;
 
     PixmapActionButton *mPromoteToLayerButton;

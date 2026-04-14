@@ -43,6 +43,7 @@ public:
             const QPointer<const QObject>& ctxt,
             const Func& func);
     static SimpleTask *sSchedule(const Func& func);
+    static bool sHasTasks();
     static void sProcessAll();
 private:
     void process();

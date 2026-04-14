@@ -26,7 +26,28 @@
 #include "internallinkcanvas.h"
 #include "linkcanvasrenderdata.h"
 #include "Animators/transformanimator.h"
+#include "CacheHandlers/sceneframecontainer.h"
 #include "canvas.h"
+#include "pointhelpers.h"
+
+namespace {
+
+bool sceneFrameMatches(const SceneFrameContainer * const cont,
+                       const Canvas * const canvasTarget,
+                       const qreal resolution) {
+    return cont &&
+           canvasTarget &&
+           cont->storesDataInMemory() &&
+           cont->fBoxState == canvasTarget->currentStateId() &&
+           isZero6Dec(cont->fResolution - resolution);
+}
+
+bool sceneFrameCoversTarget(const SceneFrameContainer * const cont,
+                            const int targetFrame) {
+    return cont && cont->getRange().inRange(targetFrame);
+}
+
+}
 
 InternalLinkCanvas::InternalLinkCanvas(ContainerBox * const linkTarget,
                                        const bool innerLink) :
@@ -72,7 +93,51 @@ void InternalLinkCanvas::setupRenderData(const qreal relFrame,
         BoundingBox::setupRenderData(relFrame, parentM, data, scene);
         const qreal remapped = mFrameRemapping->frame(relFrame);
         const auto thisM = getTotalTransformAtFrame(relFrame);
-        processChildrenData(remapped, thisM, data, scene);
+        const auto canvasData = static_cast<LinkCanvasRenderData*>(data);
+        ContainerBox* finalTarget = getFinalTarget();
+        const auto canvasTarget = static_cast<Canvas*>(finalTarget);
+        if(getParentGroup()->isLink()) {
+            const auto ilc = static_cast<InternalLinkCanvas*>(getLinkTarget());
+            canvasData->fClipToCanvas = ilc->clipToCanvas();
+        } else {
+            canvasData->fClipToCanvas = mClipToCanvas->getValue();
+        }
+        if(canvasTarget) {
+            const auto targetFrame = qRound(remapped);
+            const auto cachedFrame =
+                    canvasTarget->getSceneFramesHandler().
+                    sharedAtFrame<SceneFrameContainer>(targetFrame);
+            const bool exactCacheUsable =
+                    sceneFrameMatches(cachedFrame.get(), canvasTarget, data->fResolution);
+            SceneFrameContainer *reusableFrame = nullptr;
+            if(canvasData->fClipToCanvas) {
+                const auto currentFrame = canvasTarget->sceneFrame();
+                if(sceneFrameMatches(currentFrame, canvasTarget, data->fResolution) &&
+                   sceneFrameCoversTarget(currentFrame, targetFrame)) {
+                    reusableFrame = currentFrame;
+                } else if(exactCacheUsable) {
+                    reusableFrame = cachedFrame.get();
+                }
+            }
+            if(reusableFrame) {
+                canvasData->setCachedSceneFrame(reusableFrame);
+            } else {
+                if(cachedFrame && !cachedFrame->storesDataInMemory()) {
+                    cachedFrame->scheduleLoadFromTmpFile();
+                }
+                const auto loadingFrame = canvasTarget->loadingSceneFrame();
+                if(loadingFrame &&
+                   sceneFrameCoversTarget(loadingFrame, targetFrame) &&
+                   !loadingFrame->storesDataInMemory()) {
+                    loadingFrame->scheduleLoadFromTmpFile();
+                }
+                processChildrenData(remapped, thisM, data, scene,
+                                    data->fResolution);
+            }
+        } else {
+            processChildrenData(remapped, thisM, data, scene,
+                                data->fResolution);
+        }
     }
 
     ContainerBox* finalTarget = getFinalTarget();
@@ -83,12 +148,6 @@ void InternalLinkCanvas::setupRenderData(const qreal relFrame,
     //qreal res = mParentScene->getResolution();
     canvasData->fCanvasHeight = canvasTarget->getCanvasHeight();//*res;
     canvasData->fCanvasWidth = canvasTarget->getCanvasWidth();//*res;
-    if(getParentGroup()->isLink()) {
-        const auto ilc = static_cast<InternalLinkCanvas*>(getLinkTarget());
-        canvasData->fClipToCanvas = ilc->clipToCanvas();
-    } else {
-        canvasData->fClipToCanvas = mClipToCanvas->getValue();
-    }
 }
 
 bool InternalLinkCanvas::clipToCanvas() {

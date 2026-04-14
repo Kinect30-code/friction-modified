@@ -25,7 +25,6 @@
 
 #include "boxrendercontainer.h"
 #include "boxrenderdata.h"
-#include "skia/skiahelpers.h"
 
 void RenderContainer::drawSk(SkCanvas * const canvas,
                              const SkFilterQuality filter) const {
@@ -38,27 +37,35 @@ void RenderContainer::drawSk(SkCanvas * const canvas,
     canvas->restore();
 }
 
+void RenderContainer::drawSkRaw(SkCanvas * const canvas,
+                                SkPaint& paint) const {
+    if(!mSrcRenderData) return;
+    canvas->save();
+    canvas->concat(mPaintTransform);
+    mSrcRenderData->drawOnParentLayerRaw(canvas, paint);
+    canvas->restore();
+}
+
 void RenderContainer::updatePaintTransformGivenNewTotalTransform(
                                     const QMatrix &totalTransform) {
     QMatrix paintTransform = mTransform.inverted()*totalTransform;
     const qreal invRes = 1/mResolutionFraction;
     paintTransform.scale(invRes, invRes);
+    mPaintTransformQt = paintTransform;
     mPaintTransform = toSkMatrix(paintTransform);
 }
 
 void RenderContainer::clear() {
-    mImageSk.reset();
     mSrcRenderData.reset();
 }
 
 void RenderContainer::setSrcRenderData(BoxRenderData * const data) {
     mTransform = data->fTotalTransform;
     mResolutionFraction = data->fResolution;
-    mImageSk = data->fRenderedImage;
     mGlobalRect = data->fGlobalRect;
-    mAntiAlias = data->fAntiAlias;
     QMatrix paintTransform;
     paintTransform.scale(1/mResolutionFraction, 1/mResolutionFraction);
+    mPaintTransformQt = paintTransform;
     mPaintTransform = toSkMatrix(paintTransform);
     mSrcRenderData = data->ref<BoxRenderData>();
 }

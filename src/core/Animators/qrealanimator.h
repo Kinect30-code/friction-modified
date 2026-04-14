@@ -44,67 +44,67 @@ protected:
                   const qreal prefferdStep,
                   const QString& name);
 
-    QDomElement prp_writePropertyXEV_impl(const XevExporter& exp) const;
-    void prp_readPropertyXEV_impl(const QDomElement& ele, const XevImporter& imp);
+    QDomElement prp_writePropertyXEV_impl(const XevExporter& exp) const override;
+    void prp_readPropertyXEV_impl(const QDomElement& ele, const XevImporter& imp) override;
 public:
     bool SWT_shouldBeVisible(const SWT_RulesCollection &rules,
                              const bool parentSatisfies,
                              const bool parentMainTarget) const override;
 
-    QJSValue prp_getBaseJSValue(QJSEngine& e) const {
+    QJSValue prp_getBaseJSValue(QJSEngine& e) const override {
         Q_UNUSED(e)
         return getCurrentBaseValue();
     }
 
-    QJSValue prp_getBaseJSValue(QJSEngine& e, const qreal relFrame) const {
+    QJSValue prp_getBaseJSValue(QJSEngine& e, const qreal relFrame) const override {
         Q_UNUSED(e)
         return getBaseValue(relFrame);
     }
 
-    QJSValue prp_getEffectiveJSValue(QJSEngine& e) const {
+    QJSValue prp_getEffectiveJSValue(QJSEngine& e) const override {
         Q_UNUSED(e)
         return getEffectiveValue();
     }
 
-    QJSValue prp_getEffectiveJSValue(QJSEngine& e, const qreal relFrame) const {
+    QJSValue prp_getEffectiveJSValue(QJSEngine& e, const qreal relFrame) const override {
         Q_UNUSED(e)
         return getEffectiveValue(relFrame);
     }
 
-    void prp_setupTreeViewMenu(PropertyMenu * const menu);
+    void prp_setupTreeViewMenu(PropertyMenu * const menu) override;
 
-    void prp_startTransform();
-    void prp_finishTransform();
-    void prp_cancelTransform();
+    void prp_startTransform() override;
+    void prp_finishTransform() override;
+    void prp_cancelTransform() override;
 
-    FrameRange prp_getIdenticalRelRange(const int relFrame) const;
-    FrameRange prp_nextNonUnaryIdenticalRelRange(const int relFrame) const;
+    FrameRange prp_getIdenticalRelRange(const int relFrame) const override;
+    FrameRange prp_nextNonUnaryIdenticalRelRange(const int relFrame) const override;
 
     void prp_afterChangedAbsRange(const FrameRange& range,
-                                  const bool clip = true);
+                                  const bool clip = true) override;
     void prp_afterFrameShiftChanged(const FrameRange &oldAbsRange,
-                                    const FrameRange &newAbsRange);
+                                    const FrameRange &newAbsRange) override;
 
-    void anim_setAbsFrame(const int frame);
-    void anim_removeAllKeys();
-    void anim_addKeyAtRelFrame(const int relFrame);
+    void anim_setAbsFrame(const int frame) override;
+    void anim_removeAllKeys() override;
+    void anim_addKeyAtRelFrame(const int relFrame) override;
 
     QPainterPath graph_getPathForSegment(
             const GraphKey * const prevKey,
-            const GraphKey * const nextKey) const;
+            const GraphKey * const nextKey) const override;
 
-    qValueRange graph_getMinAndMaxValues() const;
+    qValueRange graph_getMinAndMaxValues() const override;
     qValueRange graph_getMinAndMaxValuesBetweenFrames(
-            const int startFrame, const int endFrame) const;
+            const int startFrame, const int endFrame) const override;
 
-    qreal graph_clampGraphValue(const qreal value);
+    qreal graph_clampGraphValue(const qreal value) override;
 
-    void prp_writeProperty_impl(eWriteStream& dst) const;
-    void prp_readProperty_impl(eReadStream& src);
-    stdsptr<Key> anim_createKey();
+    void prp_writeProperty_impl(eWriteStream& dst) const override;
+    void prp_readProperty_impl(eReadStream& src) override;
+    stdsptr<Key> anim_createKey() override;
 protected:
     void graph_getValueConstraints(GraphKey *key, const QrealPointType type,
-                                   qreal &minMoveValue, qreal &maxMoveValue) const;
+                                   qreal &minMoveValue, qreal &maxMoveValue) const override;
 public:
     QrealSnapshot makeSnapshot(const qreal frameMultiplier = 1,
                           const qreal valueMultiplier = 1) const;
@@ -161,7 +161,7 @@ public:
         return anim;
     }
 
-    bool prp_dependsOn(const Property* const prop) const;
+    bool prp_dependsOn(const Property* const prop) const override;
     bool hasValidExpression() const;
     bool hasExpression() const { return mExpression; }
     void clearExpressionAction() { setExpressionAction(nullptr); }
@@ -206,13 +206,40 @@ public:
                       const bool motionRotate = false,
                       const QString & motionPath = QString());
 private:
+    struct BaseValueCache {
+        bool valid = false;
+        bool constant = true;
+        qreal minFrame = 0;
+        qreal maxFrame = 0;
+        qreal value = 0;
+        qCubicSegment1D segment;
+        qreal p0y = 0;
+        qreal p1y = 0;
+        qreal p2y = 0;
+        qreal p3y = 0;
+    };
+
     qreal calculateBaseValueAtRelFrame(const qreal frame) const;
+    void invalidateBaseValueCache() const;
+    bool tryGetCachedBaseValue(const qreal frame, qreal& value) const;
+    void cacheConstantBaseValue(const qreal minFrame,
+                                const qreal maxFrame,
+                                const qreal value) const;
+    void cacheSegmentBaseValue(const qreal minFrame,
+                               const qreal maxFrame,
+                               const qCubicSegment1D& segment,
+                               const qreal p0y,
+                               const qreal p1y,
+                               const qreal p2y,
+                               const qreal p3y) const;
     void startBaseValueTransform();
     void finishBaseValueTransform();
     bool updateExpressionRelFrame();
     bool updateCurrentBaseValue();
     bool updateCurrentEffectiveValue();
     bool assignCurrentBaseValue(const qreal newValue);
+    bool shouldOffsetSelectedKeys(const QrealKey *currentKey) const;
+    void clearSelectedKeyValueTransforms();
 
     void applyExpressionSub(const FrameRange& relRange,
                             const int sampleInc,
@@ -230,10 +257,13 @@ private:
     qreal mCurrentEffectiveValue = 0;
     qreal mCurrentBaseValue = 0;
     qreal mSavedCurrentValue = 0;
+    QList<QrealKey*> mSelectedKeyValueTransforms;
+    QList<qreal> mSelectedKeySavedValues;
 
     ConnContextQSPtr<Expression> mExpression;
 
     qreal mPrefferedValueStep = 1;
+    mutable BaseValueCache mBaseValueCache;
 signals:
     void expressionChanged();
     void effectiveValueChanged(qreal);

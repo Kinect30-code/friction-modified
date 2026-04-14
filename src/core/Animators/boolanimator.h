@@ -30,8 +30,8 @@
 
 class CORE_EXPORT BoolAnimator : public IntAnimator {
     e_OBJECT
-    BoolAnimator(const QString& name);
 public:
+    BoolAnimator(const QString& name);
     bool getBoolValue();
     void setCurrentBoolValue(const bool value);
     bool getBoolValue(const qreal relFrame);

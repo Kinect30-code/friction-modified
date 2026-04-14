@@ -65,12 +65,18 @@ stdsptr<Samples> Samples::sRead(eReadStream& src) {
     if(planar) {
         data = new uchar*[nChannels];
         for(uint i = 0; i < nChannels; i++) {
-            src.read(data[i], static_cast<qint64>(bytes));
+            data[i] = bytes > 0 ? new uchar[bytes] : nullptr;
+            if(bytes > 0) {
+                src.read(data[i], static_cast<qint64>(bytes));
+            }
         }
     } else {
         data = new uchar*[1];
         const auto totBytes = bytes * nChannels;
-        src.read(data[0], static_cast<qint64>(totBytes));
+        data[0] = totBytes > 0 ? new uchar[totBytes] : nullptr;
+        if(totBytes > 0) {
+            src.read(data[0], static_cast<qint64>(totBytes));
+        }
     }
 
     return enve::make_shared<Samples>(data, sampleRange, sampleRate,

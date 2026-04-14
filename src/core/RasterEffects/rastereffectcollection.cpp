@@ -159,8 +159,12 @@ qsptr<RasterEffect> createRasterEffectForNonCustomType(const RasterEffectType ty
             return enve::make_shared<ShadowEffect>();
         case(RasterEffectType::MOTION_BLUR):
             return enve::make_shared<MotionBlurEffect>();
+        case(RasterEffectType::DEEP_GLOW):
+            return enve::make_shared<DeepGlowEffect>();
         case(RasterEffectType::WIPE):
             return enve::make_shared<WipeEffect>();
+        case(RasterEffectType::BLINDS):
+            return enve::make_shared<BlindsEffect>();
         case(RasterEffectType::NOISE_FADE):
             return enve::make_shared<NoiseFadeEffect>();
         case(RasterEffectType::COLORIZE):
@@ -171,8 +175,12 @@ qsptr<RasterEffect> createRasterEffectForNonCustomType(const RasterEffectType ty
             return enve::make_shared<DisplacementMapEffect>();
         case(RasterEffectType::CORNER_PIN):
             return enve::make_shared<CornerPinEffect>();
+        case(RasterEffectType::MOTION_TILE):
+            return enve::make_shared<MotionTileEffect>();
         case(RasterEffectType::PUPPET):
             return enve::make_shared<PuppetEffect>();
+        case(RasterEffectType::PARTICLE_SYSTEM):
+            return enve::make_shared<ParticleSystemEffect>();
         default: return nullptr;
     }
 }

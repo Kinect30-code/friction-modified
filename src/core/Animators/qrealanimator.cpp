@@ -440,6 +440,11 @@ void QrealAnimator::setExpression(const qsptr<Expression>& expression) {
 
 qreal QrealAnimator::calculateBaseValueAtRelFrame(const qreal frame) const {
     if(!anim_hasKeys()) return mCurrentBaseValue;
+    qreal cachedValue = 0;
+    if(tryGetCachedBaseValue(frame, cachedValue)) {
+        return cachedValue;
+    }
+
     const auto pn = anim_getPrevAndNextKeyIdF(frame);
     const int prevId = pn.first;
     const int nextId = pn.second;
@@ -447,7 +452,12 @@ qreal QrealAnimator::calculateBaseValueAtRelFrame(const qreal frame) const {
     const bool adjKeys = nextId - prevId == 1;
     const auto keyAtRelFrame = adjKeys ? nullptr :
                                anim_getKeyAtIndex<QrealKey>(prevId + 1);
-    if(keyAtRelFrame) return keyAtRelFrame->getValue();
+    if(keyAtRelFrame) {
+        const qreal value = keyAtRelFrame->getValue();
+        const qreal keyFrame = keyAtRelFrame->getRelFrame();
+        cacheConstantBaseValue(keyFrame, keyFrame, value);
+        return value;
+    }
     const auto prevKey = anim_getKeyAtIndex<QrealKey>(prevId);
     const auto nextKey = anim_getKeyAtIndex<QrealKey>(nextId);
 
@@ -461,14 +471,74 @@ qreal QrealAnimator::calculateBaseValueAtRelFrame(const qreal frame) const {
         const qreal p1y = prevKey->getC1Value();
         const qreal p2y = nextKey->getC0Value();
         const qreal p3y = nextKey->getValue();
+        cacheSegmentBaseValue(prevKey->getRelFrame(),
+                              nextKey->getRelFrame(),
+                              seg, p0y, p1y, p2y, p3y);
         return clamp(gCubicValueAtT({p0y, p1y, p2y, p3y}, t),
                      mClampMin, mClampMax);
     } else if(prevKey) {
-        return prevKey->getValue();
+        const qreal value = prevKey->getValue();
+        cacheConstantBaseValue(prevKey->getRelFrame(), FrameRange::EMAX, value);
+        return value;
     } else if(nextKey) {
-        return nextKey->getValue();
+        const qreal value = nextKey->getValue();
+        cacheConstantBaseValue(FrameRange::EMIN, nextKey->getRelFrame(), value);
+        return value;
     }
     return mCurrentBaseValue;
+}
+
+void QrealAnimator::invalidateBaseValueCache() const {
+    mBaseValueCache.valid = false;
+}
+
+bool QrealAnimator::tryGetCachedBaseValue(const qreal frame, qreal& value) const {
+    if(!mBaseValueCache.valid) {
+        return false;
+    }
+    if(frame < mBaseValueCache.minFrame || frame > mBaseValueCache.maxFrame) {
+        return false;
+    }
+    if(mBaseValueCache.constant) {
+        value = clamp(mBaseValueCache.value, mClampMin, mClampMax);
+        return true;
+    }
+
+    const qreal t = gTFromX(mBaseValueCache.segment, frame);
+    value = clamp(gCubicValueAtT({mBaseValueCache.p0y,
+                                  mBaseValueCache.p1y,
+                                  mBaseValueCache.p2y,
+                                  mBaseValueCache.p3y}, t),
+                  mClampMin, mClampMax);
+    return true;
+}
+
+void QrealAnimator::cacheConstantBaseValue(const qreal minFrame,
+                                           const qreal maxFrame,
+                                           const qreal value) const {
+    mBaseValueCache.valid = true;
+    mBaseValueCache.constant = true;
+    mBaseValueCache.minFrame = minFrame;
+    mBaseValueCache.maxFrame = maxFrame;
+    mBaseValueCache.value = value;
+}
+
+void QrealAnimator::cacheSegmentBaseValue(const qreal minFrame,
+                                          const qreal maxFrame,
+                                          const qCubicSegment1D& segment,
+                                          const qreal p0y,
+                                          const qreal p1y,
+                                          const qreal p2y,
+                                          const qreal p3y) const {
+    mBaseValueCache.valid = true;
+    mBaseValueCache.constant = false;
+    mBaseValueCache.minFrame = minFrame;
+    mBaseValueCache.maxFrame = maxFrame;
+    mBaseValueCache.segment = segment;
+    mBaseValueCache.p0y = p0y;
+    mBaseValueCache.p1y = p1y;
+    mBaseValueCache.p2y = p2y;
+    mBaseValueCache.p3y = p3y;
 }
 
 qreal QrealAnimator::getBaseValue(const qreal relFrame) const {
@@ -508,8 +578,21 @@ bool QrealAnimator::assignCurrentBaseValue(const qreal newValue) {
 void QrealAnimator::setCurrentBaseValue(const qreal newValue) {
     if(assignCurrentBaseValue(clamped(newValue))) {
         const auto currKey = anim_getKeyOnCurrentFrame<QrealKey>();
-        if(currKey) currKey->setValue(mCurrentBaseValue);
-        else prp_afterWholeInfluenceRangeChanged();
+        if(currKey) {
+            currKey->setValue(mCurrentBaseValue);
+            if(!mSelectedKeyValueTransforms.isEmpty()) {
+                const qreal delta = mCurrentBaseValue - mSavedCurrentValue;
+                const int count = qMin(mSelectedKeyValueTransforms.count(),
+                                       mSelectedKeySavedValues.count());
+                for(int i = 0; i < count; ++i) {
+                    auto * const key = mSelectedKeyValueTransforms.at(i);
+                    if(!key) {
+                        continue;
+                    }
+                    key->setValue(clamped(mSelectedKeySavedValues.at(i) + delta));
+                }
+            }
+        } else prp_afterWholeInfluenceRangeChanged();
     }
 }
 
@@ -547,6 +630,7 @@ bool QrealAnimator::updateExpressionRelFrame() {
 
 void QrealAnimator::prp_afterFrameShiftChanged(const FrameRange &oldAbsRange,
                                                const FrameRange &newAbsRange) {
+    invalidateBaseValueCache();
     GraphAnimator::prp_afterFrameShiftChanged(oldAbsRange, newAbsRange);
     updateExpressionRelFrame();
 }
@@ -691,6 +775,18 @@ void QrealAnimator::prp_startTransform() {
     }
     if(const auto key = anim_getKeyOnCurrentFrame<QrealKey>()) {
         key->startValueTransform();
+        if(shouldOffsetSelectedKeys(key)) {
+            const auto &selectedKeys = anim_getSelectedKeys();
+            for(const auto &selectedKey : selectedKeys) {
+                auto * const qrealKey = static_cast<QrealKey*>(selectedKey);
+                if(!qrealKey || qrealKey == key) {
+                    continue;
+                }
+                qrealKey->startValueTransform();
+                mSelectedKeyValueTransforms.append(qrealKey);
+                mSelectedKeySavedValues.append(qrealKey->getValue());
+            }
+        }
     }
     startBaseValueTransform();
 }
@@ -701,6 +797,12 @@ void QrealAnimator::prp_finishTransform() {
         if(!mTransformed) return;
         mTransformed = false;
         key->finishValueTransform();
+        for(auto * const selectedKey : mSelectedKeyValueTransforms) {
+            if(selectedKey) {
+                selectedKey->finishValueTransform();
+            }
+        }
+        clearSelectedKeyValueTransforms();
     } else {
         finishBaseValueTransform();
     }
@@ -735,9 +837,26 @@ void QrealAnimator::prp_cancelTransform() {
 
     if(const auto key = anim_getKeyOnCurrentFrame<QrealKey>()) {
         key->cancelValueTransform();
+        for(auto * const selectedKey : mSelectedKeyValueTransforms) {
+            if(selectedKey) {
+                selectedKey->cancelValueTransform();
+            }
+        }
+        clearSelectedKeyValueTransforms();
     } else {
         setCurrentBaseValue(mSavedCurrentValue);
     }
+}
+
+bool QrealAnimator::shouldOffsetSelectedKeys(const QrealKey *currentKey) const {
+    return currentKey &&
+           currentKey->isSelected() &&
+           anim_getSelectedKeys().count() > 1;
+}
+
+void QrealAnimator::clearSelectedKeyValueTransforms() {
+    mSelectedKeyValueTransforms.clear();
+    mSelectedKeySavedValues.clear();
 }
 
 FrameRange QrealAnimator::prp_getIdenticalRelRange(const int relFrame) const {
@@ -779,6 +898,7 @@ FrameRange QrealAnimator::prp_nextNonUnaryIdenticalRelRange(const int relFrame) 
 
 void QrealAnimator::prp_afterChangedAbsRange(const FrameRange &range,
                                              const bool clip) {
+    invalidateBaseValueCache();
     if(range.inRange(anim_getCurrentAbsFrame()))
         updateCurrentBaseValue();
     GraphAnimator::prp_afterChangedAbsRange(range, clip);

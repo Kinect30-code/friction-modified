@@ -208,6 +208,10 @@ public:
                               const UpdateFuncs &updateFuncs,
                               const int visiblePartWidgetId);
 private:
+    void processScheduledSimpleTasks();
+    void queueVisibleSceneTasks();
+    void scheduleVisibleSceneUpdates();
+    void handleQueuedTasksFinished();
     void readDocumentXEV(const QDomDocument& doc,
                          QList<Canvas*>& scenes);
 

@@ -36,6 +36,7 @@
 #include "framerange.h"
 #include "CacheHandlers/samples.h"
 #include "Sound/esoundsettings.h"
+#include "ffmpegcompat.h"
 
 extern "C" {
     #include <libavcodec/avcodec.h>
@@ -55,14 +56,14 @@ public:
     SoundIterator() {}
 
     bool hasValue() const {
-        return !mSamples.isEmpty();
+        return mSampleCursor < mSamples.count();
     }
 
     bool hasSamples(const int samples) const {
-        if(mSamples.isEmpty()) return false;
+        if(!hasValue()) return false;
         int rem = samples - (mEndSample - mCurrentSample);
         if(rem <= 0) return true;
-        for(int i = 1 ; i < mSamples.count(); i++) {
+        for(int i = mSampleCursor + 1; i < mSamples.count(); i++) {
             rem -= mSamples.at(i)->fSampleRange.span();
             if(rem <= 0) return true;
         }
@@ -70,7 +71,8 @@ public:
     }
 
     void fillFrame(AVFrame* const frame) {
-        Q_ASSERT(frame->channel_layout == mCurrentSamples->fChannelLayout);
+        Q_ASSERT(Friction::FFmpegCompat::frameChannelLayoutMask(frame) ==
+                 mCurrentSamples->fChannelLayout);
         Q_ASSERT(frame->format == mCurrentSamples->fFormat);
         Q_ASSERT(frame->sample_rate == mCurrentSamples->fSampleRate);
         const int nChannels = static_cast<int>(mCurrentSamples->fNChannels);
@@ -119,31 +121,35 @@ public:
     }
 
     bool next() {
-        if(mSamples.isEmpty()) return false;
-        mSamples.removeFirst();
-        if(!updateCurrent()) return false;
-        return true;
+        if(!hasValue()) return false;
+        mSampleCursor++;
+        if(mSampleCursor > 32 && mSampleCursor*2 >= mSamples.count()) {
+            mSamples = mSamples.mid(mSampleCursor);
+            mSampleCursor = 0;
+        }
+        return updateCurrent();
     }
 
     void add(const stdsptr<Samples>& sound) {
         mSamples << sound;
-        if(mSamples.count() == 1) updateCurrent();
+        if(!mCurrentSamples) updateCurrent();
     }
 
     void clear() {
         mSamples.clear();
+        mSampleCursor = 0;
         updateCurrent();
     }
 private:
     bool updateCurrent() {
-        if(mSamples.isEmpty()) {
+        if(!hasValue()) {
             mCurrentSamples = nullptr;
             mCurrentData = nullptr;
             mCurrentSample = 0;
             mEndSample = 0;
             return false;
         }
-        mCurrentSamples = mSamples.first().get();
+        mCurrentSamples = mSamples.at(mSampleCursor).get();
         mCurrentData = mCurrentSamples->fData;
         const auto samplesRange = mCurrentSamples->fSampleRange;
         mCurrentSample = 0;
@@ -153,6 +159,7 @@ private:
 
     int mCurrentSample = 0;
     int mEndSample = 0;
+    int mSampleCursor = 0;
     uchar** mCurrentData = nullptr;
     Samples* mCurrentSamples = nullptr;
     QList<stdsptr<Samples>> mSamples;

@@ -56,6 +56,7 @@ class AnimatedSurface;
 class TextBox;
 class Circle;
 class RectangleBox;
+class PolygonBox;
 class PathPivot;
 class SoundComposition;
 class SkCanvas;
@@ -108,7 +109,10 @@ public:
     void selectOnlyLastPressedPoint();
 
     void repaintIfNeeded();
+    void scheduleUpdate();
+    void scheduleOverlayUpdate();
     void setCanvasMode(const CanvasMode mode);
+    bool adjustActivePolygonSidesBy(const int delta);
     void startSelectionAtPoint(const QPointF &pos);
     void moveSecondSelectionPoint(const QPointF &pos);
     void setPointCtrlsMode(const CtrlsMode mode);
@@ -269,7 +273,7 @@ public:
 
     void mousePressEvent(const eMouseEvent &e);
     void mouseReleaseEvent(const eMouseEvent &e);
-    void mouseMoveEvent(const eMouseEvent &e);
+    bool mouseMoveEvent(const eMouseEvent &e);
     void mouseDoubleClickEvent(const eMouseEvent &e);
 
     struct TabletEvent
@@ -471,6 +475,7 @@ protected:
 
 signals:
     void requestUpdate();
+    void requestOverlayUpdate();
     void newFrameRange(FrameRange);
     void currentBoxChanged(BoundingBox*);
     void selectedPaintSettingsChanged();
@@ -547,6 +552,8 @@ public:
     void setSceneFrame(const int relFrame);
     void setSceneFrame(const stdsptr<SceneFrameContainer> &cont);
     void setLoadingSceneFrame(const stdsptr<SceneFrameContainer> &cont);
+    SceneFrameContainer *sceneFrame() const { return mSceneFrame.get(); }
+    SceneFrameContainer *loadingSceneFrame() const { return mLoadingSceneFrame.get(); }
 
     void setRenderingPreview(const bool bT);
 
@@ -723,6 +730,12 @@ public:
         mSceneFramesHandler.clearUseRange();
     }
 
+    int freeUnusedSceneFramesOutsideRange(const FrameRange &range,
+                                          int maxToFree = INT_MAX)
+    {
+        return mSceneFramesHandler.freeUnusedMemoryOutsideRange(range, maxToFree);
+    }
+
     void setGizmosSuppressed(bool suppressed);
 
     //! Used for clip to canvas, when frames are not really changed.
@@ -863,6 +876,8 @@ protected:
     QPointF mCreationPressPos;
 
     bool mDrawnSinceQue = true;
+    bool mUpdateSignalQueued = false;
+    bool mOverlayUpdateSignalQueued = false;
 
     qsptr<UndoRedoStack> mUndoRedoStack;
 
@@ -892,6 +907,7 @@ protected:
     qptr<BoundingBox> mCurrentBox;
     qptr<Circle> mCurrentCircle;
     qptr<RectangleBox> mCurrentRectangle;
+    qptr<PolygonBox> mCurrentPolygon;
     qptr<TextBox> mCurrentTextBox;
     qptr<ContainerBox> mCurrentContainer;
 

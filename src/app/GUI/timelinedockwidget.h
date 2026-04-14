@@ -86,6 +86,7 @@ public:
 
     void stopPreview();
     bool applyAeRevealPreset(BoxScrollWidget::AeRevealPreset preset);
+    bool revealSelectedMasks();
 
     void setIn();
     void setOut();

@@ -28,11 +28,13 @@
 #include "Boxes/textbox.h"
 #include "Boxes/rectangle.h"
 #include "Boxes/circle.h"
+#include "Boxes/polygonbox.h"
 #include "Boxes/internallinkcanvas.h"
 #include "Boxes/smartvectorpath.h"
 #include "Private/document.h"
 #include "MovablePoints/pathpivot.h"
 #include "eevent.h"
+#include "pointhelpers.h"
 #include <QApplication>
 
 /*void Canvas::newPaintBox(const QPointF &pos) {
@@ -72,27 +74,53 @@ void Canvas::mousePressEvent(const eMouseEvent &e) {
     }
 }
 
-void Canvas::mouseMoveEvent(const eMouseEvent &e)
+bool Canvas::mouseMoveEvent(const eMouseEvent &e)
 {
-    if (mStylusDrawing) { return; }
-    if (isPreviewingOrRendering()) { return; }
+    if (mStylusDrawing) { return false; }
+    if (isPreviewingOrRendering()) { return false; }
 
     const bool leftPressed = e.fButtons & Qt::LeftButton;
 
     if (!leftPressed && !e.fMouseGrabbing) {
+        const bool lastRotateHovered = mGizmos.fState.rotateHandleHovered;
+        const bool lastAxisXHovered = mGizmos.fState.axisXHovered;
+        const bool lastAxisYHovered = mGizmos.fState.axisYHovered;
+        const bool lastAxisUniformHovered = mGizmos.fState.axisUniformHovered;
+        const bool lastScaleXHovered = mGizmos.fState.scaleXHovered;
+        const bool lastScaleYHovered = mGizmos.fState.scaleYHovered;
+        const bool lastScaleUniformHovered = mGizmos.fState.scaleUniformHovered;
+        const bool lastShearXHovered = mGizmos.fState.shearXHovered;
+        const bool lastShearYHovered = mGizmos.fState.shearYHovered;
         const qreal invScaleUi = (qApp ? qApp->devicePixelRatio() : 1.0) * (1 / e.fScale);
         updateRotateHandleHover(e.fPos, invScaleUi);
+        const bool gizmoHoverChanged =
+                lastRotateHovered != mGizmos.fState.rotateHandleHovered ||
+                lastAxisXHovered != mGizmos.fState.axisXHovered ||
+                lastAxisYHovered != mGizmos.fState.axisYHovered ||
+                lastAxisUniformHovered != mGizmos.fState.axisUniformHovered ||
+                lastScaleXHovered != mGizmos.fState.scaleXHovered ||
+                lastScaleYHovered != mGizmos.fState.scaleYHovered ||
+                lastScaleUniformHovered != mGizmos.fState.scaleUniformHovered ||
+                lastShearXHovered != mGizmos.fState.shearXHovered ||
+                lastShearYHovered != mGizmos.fState.shearYHovered;
         if (mCurrentMode == CanvasMode::pickFillStroke ||
             mCurrentMode == CanvasMode::pickFillStrokeEvent) {
             emit currentHoverColor(pickPixelColor(e.fGlobalPos));
-            return;
+            return false;
         }
         const auto lastHoveredBox = mHoveredBox;
         const auto lastHoveredPoint = mHoveredPoint_d;
         const auto lastNSegment = mHoveredNormalSegment;
 
         updateHovered(e);
-        return;
+        const bool hoverChanged =
+                lastHoveredBox != mHoveredBox ||
+                lastHoveredPoint != mHoveredPoint_d ||
+                lastNSegment != mHoveredNormalSegment;
+        if (gizmoHoverChanged || hoverChanged) {
+            scheduleOverlayUpdate();
+        }
+        return false;
     }
 
     /*if(mCurrentMode == CanvasMode::paint && leftPressed) {
@@ -113,7 +141,7 @@ void Canvas::mouseMoveEvent(const eMouseEvent &e)
     if (leftPressed || e.fMouseGrabbing) {
         if (mMovesToSkip > 0) {
             mMovesToSkip--;
-            return;
+            return false;
         }
         if (mStartTransform &&
             leftPressed &&
@@ -172,6 +200,18 @@ void Canvas::mouseMoveEvent(const eMouseEvent &e)
             } else {
                 mCurrentRectangle->moveSizePointByAbs(trans);
             }
+        } else if (mCurrentMode == CanvasMode::polygonCreate) {
+            const QPointF anchor = mHasCreationPressPos ? mCreationPressPos : snapPosToGrid(e.fLastPressPos,
+                                                                                            e.fModifiers,
+                                                                                            false);
+            const QPointF current = snapEventPos(e, false);
+            const QPointF delta = current - anchor;
+            if (e.shiftMod()) {
+                const qreal lenR = pointToLen(delta);
+                mCurrentPolygon->moveRadiusesByAbs({lenR, lenR});
+            } else {
+                mCurrentPolygon->moveRadiusesByAbs(delta);
+            }
         }
     }
     mStartTransform = false;
@@ -179,6 +219,7 @@ void Canvas::mouseMoveEvent(const eMouseEvent &e)
     if (!mSelecting && !e.fMouseGrabbing && leftPressed) {
         e.fGrabMouse();
     }
+    return leftPressed || e.fMouseGrabbing;
 }
 
 void Canvas::mouseReleaseEvent(const eMouseEvent &e)
@@ -194,6 +235,7 @@ void Canvas::mouseReleaseEvent(const eMouseEvent &e)
             break;
         case CanvasMode::circleCreate:
         case CanvasMode::rectCreate:
+        case CanvasMode::polygonCreate:
             clearSelectionAction();
             break;
         case CanvasMode::pickFillStroke:

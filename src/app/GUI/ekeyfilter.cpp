@@ -27,41 +27,6 @@
 #include "mainwindow.h"
 #include "misc/keyfocustarget.h"
 
-namespace {
-bool belongsToTimelineWidget(QObject *obj)
-{
-    auto *widget = qobject_cast<QWidget*>(obj);
-    while (widget) {
-        if (widget->objectName() == QStringLiteral("AeTimelineWidget")) {
-            return true;
-        }
-        widget = widget->parentWidget();
-    }
-    return false;
-}
-
-bool isAeTimelineShortcut(const QKeyEvent *event)
-{
-    if (!event) { return false; }
-    if (event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) {
-        return false;
-    }
-    switch (event->key()) {
-    case Qt::Key_A:
-    case Qt::Key_B:
-    case Qt::Key_N:
-    case Qt::Key_P:
-    case Qt::Key_R:
-    case Qt::Key_S:
-    case Qt::Key_T:
-    case Qt::Key_U:
-        return true;
-    default:
-        return false;
-    }
-}
-}
-
 eKeyFilter::eKeyFilter(MainWindow * const window) :
     QObject(window), mMainWindow(window) {}
 
@@ -99,14 +64,11 @@ eKeyFilter *eKeyFilter::sCreateNumberFilter(MainWindow * const window) {
 }
 
 bool eKeyFilter::eventFilter(QObject *watched, QEvent *event) {
+    Q_UNUSED(watched)
     if(event->type() == QEvent::KeyPress ||
        event->type() == QEvent::KeyRelease ||
        event->type() == QEvent::ShortcutOverride) {
         const auto kEvent = static_cast<QKeyEvent*>(event);
-        if (belongsToTimelineWidget(watched) && isAeTimelineShortcut(kEvent)) {
-            if (mMainWindow->processKeyEvent(kEvent)) { return true; }
-            return false;
-        }
         if(mAllow(kEvent->key())) return false;
         if(mMainWindow->processKeyEvent(kEvent)) return true;
         return false;

@@ -294,9 +294,9 @@ static double FitCubic(Point2* const d,
 {
     double minError = DBL_MAX;
     int minErrorSplitPoint = 0;
-    BezierCurve minErrorBez = (Point2 *)malloc(4 * sizeof(Point2));
+    BezierCurve minErrorBez = (Point2 *)calloc(4, sizeof(Point2));
 
-    BezierCurve bez = (Point2 *)malloc(4 * sizeof(Point2));
+    BezierCurve bez = (Point2 *)calloc(4, sizeof(Point2));
 
     qreal r1Min = 0;
     qreal r1Max = 2*M_PI;

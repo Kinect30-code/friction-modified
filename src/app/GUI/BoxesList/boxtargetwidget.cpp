@@ -27,15 +27,104 @@
 #include <QMimeData>
 #include <QPainter>
 #include <QMenu>
-#include "Boxes/containerbox.h"
+#include <QAction>
+#include "canvas.h"
 #include "Properties/boxtargetproperty.h"
 #include "GUI/mainwindow.h"
+#include "Private/document.h"
 #include "Properties/emimedata.h"
 #include "themesupport.h"
 
+namespace {
+
+struct TargetMenuEntry {
+    BoundingBox *box = nullptr;
+    QString label;
+};
+
+QString displayNameForTarget(BoundingBox *box, Canvas *scene)
+{
+    if (!box) {
+        return QString();
+    }
+
+    QStringList parts;
+    parts.append(box->prp_getName());
+    auto *current = box->getParentGroup();
+    while (current && current != scene) {
+        parts.prepend(current->prp_getName());
+        current = current->getParentGroup();
+    }
+    return parts.join(QStringLiteral(" / "));
+}
+
+QList<TargetMenuEntry> collectTargetEntries(Document *document,
+                                            Canvas *currentScene)
+{
+    QList<TargetMenuEntry> entries;
+    if (!document || !currentScene) {
+        return entries;
+    }
+
+    entries.append({
+                       currentScene,
+                       QStringLiteral("[Scene] %1").arg(currentScene->prp_getName())
+                   });
+
+    const auto &boxes = currentScene->getContainedBoxes();
+    for (auto *box : boxes) {
+        if (!box) {
+            continue;
+        }
+        entries.append({box, box->prp_getName()});
+    }
+
+    return entries;
+}
+
+void configureActionState(QAction *action,
+                          BoundingBox *currentTarget,
+                          BoundingBox *entryTarget)
+{
+    if (!action || currentTarget != entryTarget) {
+        return;
+    }
+    action->setCheckable(true);
+    action->setChecked(true);
+    action->setDisabled(true);
+}
+
+QAction *addTargetAction(QMenu *menu,
+                         const TargetMenuEntry &entry,
+                         BoundingBox *currentTarget,
+                         const std::function<void(BoundingBox*)> &onSelect)
+{
+    if (!menu) {
+        return nullptr;
+    }
+    auto *action = menu->addAction(entry.label);
+    QObject::connect(action, &QAction::triggered, menu, [entry, onSelect]() {
+        onSelect(entry.box);
+    });
+    configureActionState(action, currentTarget, entry.box);
+    return action;
+}
+
+}
+
 BoxTargetWidget::BoxTargetWidget(QWidget *parent) : QWidget(parent) {
     setAcceptDrops(true);
-    setMaximumWidth(150);
+    setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Fixed);
+    setMinimumWidth(110);
+    setMaximumWidth(QWIDGETSIZE_MAX);
+}
+
+QSize BoxTargetWidget::sizeHint() const {
+    return {220, qMax(22, height())};
+}
+
+QSize BoxTargetWidget::minimumSizeHint() const {
+    return {110, 22};
 }
 
 void BoxTargetWidget::setTargetProperty(BoxTargetProperty *property) {
@@ -79,9 +168,9 @@ void BoxTargetWidget::mousePressEvent(QMouseEvent *event) {
     if(event->button() == Qt::LeftButton) {
         const auto parentBox = mProperty->getFirstAncestor<BoundingBox>();
         if(!parentBox) return;
-        const auto srcGroup = parentBox->getParentGroup();
-        if(!srcGroup) return;
-        const auto& boxes = srcGroup->getContainedBoxes();
+        auto *scene = parentBox->getParentScene();
+        if(!scene) return;
+        const auto entries = collectTargetEntries(Document::sInstance, scene);
         QMenu menu(this);
 
         const auto currentTarget = mProperty->getTarget();
@@ -91,25 +180,35 @@ void BoxTargetWidget::mousePressEvent(QMouseEvent *event) {
                 mProperty->setTargetAction(nullptr);
                 Document::sInstance->actionFinished();
             });
-            if(!currentTarget) {
-                act->setCheckable(true);
-                act->setChecked(true);
-                act->setDisabled(true);
-            }
+            configureActionState(act, currentTarget, nullptr);
         }
-        for(const auto& box : boxes) {
+        menu.addSeparator();
+
+        QMenu *currentSceneMenu = nullptr;
+        QMenu *sceneMenu = nullptr;
+        QHash<Canvas*, QMenu*> otherSceneMenus;
+
+        const auto selectTarget = [this](BoundingBox *box) {
+            mProperty->setTargetAction(box);
+            Document::sInstance->actionFinished();
+        };
+
+        for (const auto &entry : entries) {
+            auto *box = entry.box;
             if(box == parentBox) continue;
             const auto& validator = mProperty->validator();
             if(validator && !validator(box)) continue;
-            const auto act = menu.addAction(box->prp_getName());
-            connect(act, &QAction::triggered, this, [this, box]() {
-                mProperty->setTargetAction(box);
-                Document::sInstance->actionFinished();
-            });
-            if(currentTarget == box) {
-                act->setCheckable(true);
-                act->setChecked(true);
-                act->setDisabled(true);
+
+            if (enve_cast<Canvas*>(box)) {
+                if (!sceneMenu) {
+                    sceneMenu = menu.addMenu(tr("Scene"));
+                }
+                addTargetAction(sceneMenu, entry, currentTarget, selectTarget);
+            } else {
+                if (!currentSceneMenu) {
+                    currentSceneMenu = menu.addMenu(tr("Layers"));
+                }
+                addTargetAction(currentSceneMenu, entry, currentTarget, selectTarget);
             }
         }
         menu.exec(mapToGlobal(QPoint(0, height())));
@@ -133,10 +232,21 @@ void BoxTargetWidget::paintEvent(QPaintEvent *) {
 
     p.setPen(Qt::white);
     const auto target = mProperty->getTarget();
+    QString text = target ? target->prp_getName() : QStringLiteral("-none-");
+    if (const auto targetScene = enve_cast<Canvas*>(target)) {
+        text = QStringLiteral("[Scene] %1").arg(targetScene->prp_getName());
+    } else if (target) {
+        text = displayNameForTarget(target, target->getParentScene());
+    }
     if(!target) {
-        p.drawText(rect(), Qt::AlignCenter, "-none-");
+        p.drawText(rect().adjusted(8, 0, -8, 0),
+                   Qt::AlignVCenter | Qt::AlignLeft,
+                   text);
     } else {
-        p.drawText(rect(), Qt::AlignCenter, target->prp_getName());
+        p.drawText(rect().adjusted(8, 0, -8, 0),
+                   Qt::AlignVCenter | Qt::AlignLeft,
+                   QFontMetrics(font()).elidedText(text, Qt::ElideRight,
+                                                   qMax(20, width() - 16)));
     }
 
     p.end();

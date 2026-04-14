@@ -45,7 +45,7 @@ SettingsDialog::SettingsDialog(QWidget * const parent)
     addSettingsWidget(timeline, tr("Layers"));
 
     const auto plugins = new PluginsSettingsWidget(this);
-    addSettingsWidget(plugins, tr("Shaders"));
+    addSettingsWidget(plugins, tr("Plugins"));
 
     const auto presets = new PresetSettingsWidget(this);
     addSettingsWidget(presets, tr("Presets"));
@@ -103,9 +103,8 @@ SettingsDialog::SettingsDialog(QWidget * const parent)
         for (const auto widget : mSettingWidgets) {
             widget->applySettings();
         }
-        ThemeSupport::setThemeVariant(eSettings::sInstance->fUiTheme == eSettings::UiThemeLight
-                                          ? ThemeSupport::ThemeVariant::light
-                                          : ThemeSupport::ThemeVariant::dark);
+        ThemeSupport::setThemeVariant(
+            ThemeSupport::themeVariantFromSetting(eSettings::sInstance->fUiTheme));
         ThemeSupport::setupTheme(eSizesUI::widget);
         emit eSettings::sInstance->settingsChanged();
         try {

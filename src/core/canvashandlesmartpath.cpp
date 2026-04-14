@@ -73,7 +73,7 @@ void configureMaskPathAnimatorForCanvas(SmartVectorPath* const maskPath) {
 
 void syncAeMaskSelection(Canvas* const scene, BoundingBox* const target) {
     AeMaskModule::syncSelection(scene, target);
-    if(scene) scene->requestUpdate();
+    if(scene) scene->scheduleUpdate();
 }
 }
 
@@ -96,7 +96,7 @@ void Canvas::handleAddSmartPointMousePress(const eMouseEvent &e) {
             mPressedPoint = nullptr;
             mStartTransform = false;
             clearHovered();
-            emit requestUpdate();
+            scheduleUpdate();
             return;
         }
     }
@@ -110,7 +110,7 @@ void Canvas::handleAddSmartPointMousePress(const eMouseEvent &e) {
         }
         mStartTransform = false;
         clearHovered();
-        emit requestUpdate();
+        scheduleUpdate();
         return;
     }
 

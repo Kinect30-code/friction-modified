@@ -85,8 +85,11 @@ public:
     bool waitTakeFirst(T& t, const std::atomic<bool>& stop) {
         std::unique_lock<std::mutex> lk(mMutex);
         while(QList<T>::isEmpty()) {
-            mCv.wait_for(lk, std::chrono::seconds(1));
-            if(stop) return false;
+            if(stop.load()) return false;
+            mCv.wait(lk, [this, &stop]() {
+                return stop.load() || !QList<T>::isEmpty();
+            });
+            if(stop.load() && QList<T>::isEmpty()) return false;
         }
         t = QList<T>::takeFirst();
         return true;

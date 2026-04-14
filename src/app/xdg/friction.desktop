@@ -1,13 +1,13 @@
 [Desktop Entry]
 Version=1.0
-Name=Friction
+Name=VECB
 Exec=__FRICTION__ %f
 Icon=graphics.friction.Friction
 Comment=Motion graphics and animation
-GenericName=Friction Graphics
+GenericName=VECB Graphics
 StartupNotify=true
 Terminal=false
 Type=Application
 Categories=Graphics;
 MimeType=application/x-graphics.friction.Friction;
-StartupWMClass=friction
+StartupWMClass=vecb

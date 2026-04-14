@@ -82,6 +82,26 @@ void PathBoxRenderData::drawOnParentLayer(SkCanvas * const canvas,
     }
 }
 
+void PathBoxRenderData::drawOnParentLayerRaw(SkCanvas * const canvas,
+                                             SkPaint& paint)
+{
+    if (!mDirectDraw) { return BoxRenderData::drawOnParentLayerRaw(canvas, paint); }
+    if (isZero4Dec(fOpacity)) { return; }
+    canvas->concat(toSkMatrix(fScaledTransform));
+    paint.setAntiAlias(true);
+    paint.setStyle(SkPaint::kFill_Style);
+
+    if (!fFillPath.isEmpty()) {
+        fPaintSettings.applyPainterSettingsSk(paint, fOpacity*0.01f);
+        canvas->drawPath(fFillPath, paint);
+    }
+    if (!fOutlinePath.isEmpty()) {
+        paint.setShader(nullptr);
+        fStrokeSettings.applyPainterSettingsSk(paint, fOpacity*0.01f);
+        canvas->drawPath(fOutlinePath, paint);
+    }
+}
+
 void PathBoxRenderData::updateRelBoundingRect()
 {
     SkPath totalPath;

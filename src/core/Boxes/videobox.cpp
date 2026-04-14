@@ -71,18 +71,23 @@ VideoBox::VideoBox() : AnimationBox("Video", eBoxType::video),
 void VideoBox::fileHandlerConnector(ConnContext &conn, VideoFileHandler *obj) {
     const auto newDataHandler = obj ? obj->getFrameHandler() : nullptr;
     if(newDataHandler) {
-        const auto frameHandler = enve::make_shared<VideoFrameHandler>(newDataHandler);
-        setAnimationFramesHandler(frameHandler);
-        const auto cacheHandler = &newDataHandler->getCacheHandler();
-        getAnimationDurationRect()->setRasterCacheHandler(cacheHandler);
         conn << connect(obj, &VideoFileHandler::pathChanged,
                         this, [this, obj]() {
             fileHandlerAfterAssigned(obj);
         });
         conn << connect(obj, &VideoFileHandler::reloaded,
-                        this, &ImageBox::prp_afterWholeInfluenceRangeChanged);
+                        this, [this]() {
+            soundDataChanged();
+            animationDataChanged();
+            prp_afterWholeInfluenceRangeChanged();
+        });
         conn << connect(newDataHandler, &VideoDataHandler::frameCountUpdated,
                         this, &VideoBox::updateAnimationRange);
+        conn << connect(newDataHandler, &VideoDataHandler::sourceInfoUpdated,
+                        this, [this]() {
+            soundDataChanged();
+            animationDataChanged();
+        });
     }
 }
 

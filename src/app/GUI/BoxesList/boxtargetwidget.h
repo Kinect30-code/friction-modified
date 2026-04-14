@@ -36,14 +36,17 @@ class BoxTargetWidget : public QWidget {
 public:
     explicit BoxTargetWidget(QWidget *parent = nullptr);
 
+    QSize sizeHint() const override;
+    QSize minimumSizeHint() const override;
+
     void setTargetProperty(BoxTargetProperty *property);
 protected:
-    void dropEvent(QDropEvent *event);
-    void dragEnterEvent(QDragEnterEvent *event);
-    void paintEvent(QPaintEvent *);
-    void dragLeaveEvent(QDragLeaveEvent *event);
-    void mousePressEvent(QMouseEvent *event);
-    void dragMoveEvent(QDragMoveEvent *event);
+    void dropEvent(QDropEvent *event) override;
+    void dragEnterEvent(QDragEnterEvent *event) override;
+    void paintEvent(QPaintEvent *) override;
+    void dragLeaveEvent(QDragLeaveEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void dragMoveEvent(QDragMoveEvent *event) override;
 private:
     bool mDragging = false;
     ConnContextQPtr<BoxTargetProperty> mProperty;

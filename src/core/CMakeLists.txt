@@ -70,6 +70,7 @@ set(
     Animators/coloranimator.cpp
     Animators/complexkey.cpp
     Animators/customproperties.cpp
+    Animators/enumanimator.cpp
     Animators/eboxorsound.cpp
     Animators/eeffect.cpp
     Animators/gradient.cpp
@@ -93,6 +94,14 @@ set(
     BlendEffects/blendeffectmenucreator.cpp
     BlendEffects/layermaskeffect.cpp
     ../modules/ae_masks/aemaskmodule.cpp
+    ../modules/gltf/glbbox.cpp
+    ../modules/gltf/glbcliptrack.cpp
+    ../modules/gltf/glbfilecachehandler.cpp
+    ../modules/gltf/glbmetadata.cpp
+    ../modules/gltf/gltfrenderer.cpp
+    ../modules/gltf/gltfscene.cpp
+    ../modules/gltf/gltfmodule.cpp
+    ../modules/particles/particlesystemeffect.cpp
     ../modules/puppet/puppettoolmodule.cpp
     ../modules/webm/webmalphapolicy.cpp
     Boxes/animationbox.cpp
@@ -118,6 +127,7 @@ set(
     Boxes/pathbox.cpp
     Boxes/pathboxrenderdata.cpp
     Boxes/patheffectsmenu.cpp
+    Boxes/polygonbox.cpp
     Boxes/rectangle.cpp
     Boxes/renderdatahandler.cpp
     Boxes/smartvectorpath.cpp
@@ -200,11 +210,14 @@ set(
     Properties/boolpropertycontainer.cpp
     Properties/boxtargetproperty.cpp
     RasterEffects/blureffect.cpp
+    RasterEffects/blindseffect.cpp
     RasterEffects/brightnesscontrasteffect.cpp
+    RasterEffects/deepgloweffect.cpp
     RasterEffects/colorizeeffect.cpp
     RasterEffects/cornerpineffect.cpp
     RasterEffects/customrastereffect.cpp
     RasterEffects/displacementmapeffect.cpp
+    RasterEffects/motiontileeffect.cpp
     RasterEffects/motionblureffect.cpp
     RasterEffects/noisefadeeffect.cpp
     RasterEffects/openglrastereffectcaller.cpp
@@ -286,6 +299,7 @@ set(
     memorydatahandler.cpp
     namefixer.cpp
     paintsettingsapplier.cpp
+    pluginmanager.cpp
     pathoperations.cpp
     randomgrid.cpp
     simpletask.cpp
@@ -474,6 +488,7 @@ set(
     FileCacheHandlers/videocachehandler.h
     FileCacheHandlers/videoframeloader.h
     FileCacheHandlers/videostreamsdata.h
+    ../modules/gltf/glbfilecachehandler.h
     GUI/boxeslistactionbutton.h
     GUI/coloranimatorbutton.h
     GUI/dialogsinterface.h
@@ -524,6 +539,7 @@ set(
     Properties/newproperty.h
     RasterEffects/blureffect.h
     RasterEffects/brightnesscontrasteffect.h
+    RasterEffects/deepgloweffect.h
     RasterEffects/colorizeeffect.h
     RasterEffects/cornerpineffect.h
     RasterEffects/customrastereffect.h
@@ -620,6 +636,7 @@ set(
     namefixer.h
     paintsettings.h
     paintsettingsapplier.h
+    pluginmanager.h
     pathoperations.h
     randomgrid.h
     rangemap.h
@@ -676,6 +693,12 @@ set(
     Animators/graphkeyt.h
     Animators/basedanimatort.h
     Animators/graphanimatort.h
+    ../modules/gltf/glbbox.h
+    ../modules/gltf/glbcliptrack.h
+    ../modules/gltf/glbmetadata.h
+    ../modules/gltf/gltfrenderer.h
+    ../modules/gltf/gltfscene.h
+    ../modules/gltf/gltfmodule.h
     Animators/SmartPath/node.h
     Animators/SmartPath/nodelist.h
     Animators/SmartPath/smartpathanimator.h

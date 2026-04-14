@@ -32,6 +32,12 @@ HddCachableCont::~HddCachableCont() {
 }
 
 int HddCachableCont::free_RAM_k() {
+    if(!storesDataInMemory()) return 0;
+    // Queue a tmp-file save before releasing RAM so reclaim behaves like
+    // cache spill instead of permanently dropping reusable frame/audio data.
+    if(!mTmpFile && !mTmpSaveTask) {
+        scheduleSaveToTmpFile();
+    }
     const int bytes = clearMemory();
     setDataInMemory(false);
     if(!mTmpFile && !mTmpSaveTask) noDataLeft_k();

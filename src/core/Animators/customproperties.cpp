@@ -27,11 +27,14 @@
 
 #include "qrealanimator.h"
 #include "qpointfanimator.h"
+#include "../../modules/gltf/glbcliptrack.h"
 
 #include "typemenu.h"
 
 enum class PropertyType {
-    QrealAnimator, QPointFAnimator
+    QrealAnimator,
+    QPointFAnimator,
+    GlbClipTrackList
 };
 
 template <typename T>
@@ -93,6 +96,9 @@ qsptr<Animator> createCProperty(const PropertyType type) {
     case PropertyType::QPointFAnimator:
         return enve::make_shared<NamedProperty<QPointFAnimator>>("");
         break;
+    case PropertyType::GlbClipTrackList:
+        return enve::make_shared<GlbClipTrackList>();
+        break;
     }
     RuntimeThrow("Read invalid property type.");
 }
@@ -115,6 +121,8 @@ PropertyType cPropertyType(Animator * const obj) {
         type = PropertyType::QrealAnimator;
     } else if(enve_cast<QPointFAnimator*>(obj)) {
         type = PropertyType::QPointFAnimator;
+    } else if(enve_cast<GlbClipTrackList*>(obj)) {
+        type = PropertyType::GlbClipTrackList;
     } else RuntimeThrow("Unsupported Type");
     return type;
 }

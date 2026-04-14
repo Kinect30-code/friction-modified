@@ -42,6 +42,14 @@ public:
     virtual void graph_getValueConstraints(
             GraphKey *key, const QrealPointType type,
             qreal &minMoveValue, qreal &maxMoveValue) const = 0;
+    virtual bool graph_usesNormalizedFrameDomain() const
+    { return false; }
+    virtual qreal graph_frameDisplayValue(const qreal frame) const
+    { return frame; }
+    virtual int graph_frameDisplayPrecision() const
+    { return 0; }
+    virtual FrameRange graph_preferredViewFrameRange() const
+    { return {0, 100}; }
     virtual qValueRange graph_getMinAndMaxValues() const;
     virtual qValueRange graph_getMinAndMaxValuesBetweenFrames(
             const int startFrame, const int endFrame) const;

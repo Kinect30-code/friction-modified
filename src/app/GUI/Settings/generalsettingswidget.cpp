@@ -118,7 +118,7 @@ GeneralSettingsWidget::GeneralSettingsWidget(QWidget *parent)
     mScaleContainerLayout->addWidget(mDefaultInterfaceScaling);
 
     const auto infoLabel = new QLabel(this);
-    infoLabel->setText(tr("Changes here will require a restart of Friction."));
+    infoLabel->setText(tr("Changes here will require a restart of VECB."));
     mScaleLayout->addWidget(infoLabel);
 
     const auto mThemeWidget = new QWidget(this);
@@ -126,10 +126,13 @@ GeneralSettingsWidget::GeneralSettingsWidget(QWidget *parent)
     const auto mThemeLayout = new QHBoxLayout(mThemeWidget);
     mThemeLayout->setContentsMargins(0, 0, 0, 0);
     mThemeLayout->setMargin(0);
-    const auto mThemeLabel = new QLabel(tr("Theme"), this);
+    const auto mThemeLabel = new QLabel(tr("UI Style"), this);
     mTheme = new QComboBox(this);
     mTheme->addItem(tr("Dark"), eSettings::UiThemeDark);
+    mTheme->addItem(tr("Slate"), eSettings::UiThemeSlate);
     mTheme->addItem(tr("Light"), eSettings::UiThemeLight);
+    mTheme->addItem(tr("Paper"), eSettings::UiThemePaper);
+    mTheme->setToolTip(tr("Fusion-based UI presets with different palettes."));
     mThemeLayout->addWidget(mThemeLabel);
     mThemeLayout->addStretch();
     mThemeLayout->addWidget(mTheme);

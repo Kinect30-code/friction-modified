@@ -390,41 +390,40 @@ void KeysView::graphMakeSegmentsSmoothAction() {
 void KeysView::graphPaint(QPainter *p) {
     p->setBrush(Qt::NoBrush);
 
-    /*qreal maxX = width();
-    int currAlpha = 75;
-    qreal lineWidth = 1.;
-    QList<int> incFrameList = { 1, 5, 10, 100 };
-    for(int incFrame : incFrameList) {
-        if(mPixelsPerFrame*incFrame < 15.) continue;
-        bool drawText = mPixelsPerFrame*incFrame > 30.;
-        p->setPen(QPen(QColor(0, 0, 0, currAlpha), lineWidth));
-        int frameL = (mStartFrame >= 0) ? -(mStartFrame%incFrame) :
-                                        -mStartFrame;
-        int currFrame = mStartFrame + frameL;
-        qreal xL = frameL*mPixelsPerFrame;
-        qreal inc = incFrame*mPixelsPerFrame;
-        while(xL < 40) {
-            xL += inc;
-            currFrame += incFrame;
-        }
-        while(xL < maxX) {
-            if(drawText) {
-                p->drawText(QRectF(xL - inc, 0, 2*inc, 20),
-                            Qt::AlignCenter, QString::number(currFrame));
+    if(graphUsesNormalizedFrameDomain()) {
+        const qreal maxX = width();
+        const QList<int> incFrameList = {100, 50, 25, 10, 5, 1};
+        int alpha = 24;
+        qreal lineWidth = 1.;
+        for(const int incFrame : incFrameList) {
+            if(mPixelsPerFrame*incFrame < 14.) continue;
+            const bool drawText = mPixelsPerFrame*incFrame > 48.;
+            QColor lineColor = ThemeSupport::getThemeTimelineColor();
+            lineColor.setAlpha(alpha);
+            p->setPen(QPen(lineColor, lineWidth));
+            int frameL = (mMinViewedFrame >= 0) ? -(mMinViewedFrame%incFrame) :
+                                                -mMinViewedFrame;
+            int currFrame = mMinViewedFrame + frameL;
+            qreal xL = frameL*mPixelsPerFrame;
+            const qreal inc = incFrame*mPixelsPerFrame;
+            while(xL < 0) {
+                xL += inc;
+                currFrame += incFrame;
             }
-            p->drawLine(xL, 20, xL, height());
-            xL += inc;
-            currFrame += incFrame;
+            while(xL < maxX) {
+                if(drawText) {
+                    p->drawText(QRectF(xL - inc*0.5, 0, inc, 18),
+                                Qt::AlignCenter,
+                                graphFormatFrameLabel(currFrame));
+                }
+                p->drawLine(xL, 18, xL, height());
+                xL += inc;
+                currFrame += incFrame;
+            }
+            alpha = qMin(alpha + 20, 96);
+            lineWidth += 0.1;
         }
-        currAlpha *= 1.5;
-        lineWidth *= 1.5;
     }
-
-    p->setPen(QPen(Qt::green, 2.));
-    qreal xL = (mCurrentFrame - mStartFrame)*mPixelsPerFrame;
-    //p->drawText(QRectF(xL - 20, 0, 40, 20),
-    //            Qt::AlignCenter, QString::number(mCurrentFrame));
-    p->drawLine(xL, 20, xL, height());*/
     if(graph_mValueLinesVisible) {
         p->setPen(QColor(255, 255, 255));
         const qreal incY = mValueInc*mPixelsPerValUnit;
@@ -513,6 +512,37 @@ void KeysView::graphGetAnimatorsMinMaxValue(qreal &minVal, qreal &maxVal) {
     const qreal valRange = maxVal - minVal;
     maxVal += valRange*0.05;
     minVal -= valRange*0.05;
+}
+
+GraphAnimator *KeysView::graphPrimaryAnimator() const {
+    if(mGraphAnimators.isEmpty()) return nullptr;
+    return mGraphAnimators.first();
+}
+
+bool KeysView::graphUsesNormalizedFrameDomain() const {
+    if(mGraphAnimators.isEmpty()) return false;
+    for(const auto& anim : mGraphAnimators) {
+        if(!anim->graph_usesNormalizedFrameDomain()) return false;
+    }
+    return true;
+}
+
+void KeysView::graphResetHorizontalRangeIfNeeded() {
+    if(!graphUsesNormalizedFrameDomain()) return;
+    const auto anim = graphPrimaryAnimator();
+    if(!anim) return;
+    const auto range = anim->graph_preferredViewFrameRange();
+    if(mMinViewedFrame == range.fMin && mMaxViewedFrame == range.fMax) return;
+    setFramesRange(range);
+    emit changedViewedFrames(range);
+}
+
+QString KeysView::graphFormatFrameLabel(const qreal frame) const {
+    const auto anim = graphPrimaryAnimator();
+    if(!anim) return QString::number(frame);
+    return QString::number(anim->graph_frameDisplayValue(frame),
+                           'f',
+                           anim->graph_frameDisplayPrecision());
 }
 
 void KeysView::graphUpdateDimensions() {
@@ -714,10 +744,7 @@ void KeysView::graphWheelEvent(QWheelEvent *event,
 bool KeysView::graphProcessFilteredKeyEvent(QKeyEvent *event) {
     const auto key = event->key();
 
-    if(key == Qt::Key_0 &&
-       event->modifiers() & Qt::KeypadModifier) {
-        graphResetValueScaleAndMinShownAction();
-    } else if(key == Qt::Key_X && mMovingKeys) {
+    if(key == Qt::Key_X && mMovingKeys) {
         mValueInput.switchXOnlyMode();
         handleMouseMove(mapFromGlobal(QCursor::pos()),
                         Qt::LeftButton);
@@ -732,6 +759,7 @@ bool KeysView::graphProcessFilteredKeyEvent(QKeyEvent *event) {
 }
 
 void KeysView::graphResetValueScaleAndMinShownAction() {
+    graphResetHorizontalRangeIfNeeded();
     graphResetValueScaleAndMinShown();
     update();
 }
@@ -785,6 +813,7 @@ void KeysView::graphUpdateVisible()
         }
     }
     graphUpdateDimensions();
+    graphResetHorizontalRangeIfNeeded();
     graphResetValueScaleAndMinShown();
     update();
 }
@@ -796,6 +825,7 @@ void KeysView::graphAddViewedAnimator(GraphAnimator * const animator) {
     if(graphValidateVisible(animator)) {
         graphAddToViewedAnimatorList(animator);
         graphUpdateDimensions();
+        graphResetHorizontalRangeIfNeeded();
         graphResetValueScaleAndMinShown();
         update();
     }
@@ -808,6 +838,7 @@ void KeysView::graphRemoveViewedAnimator(GraphAnimator * const animator) {
     mCurrentScene->removeSelectedForGraph(id, animator);
     if(mGraphAnimators.removeObj(animator)) {
         graphUpdateDimensions();
+        graphResetHorizontalRangeIfNeeded();
         graphResetValueScaleAndMinShown();
         update();
     }
@@ -833,6 +864,11 @@ void KeysView::graphUpdateAfterKeysChanged() {
 void KeysView::keyframeZoomHorizontalAction()
 {
     if (!mCurrentScene) { return; }
+    if (graphUsesNormalizedFrameDomain()) {
+        graphResetHorizontalRangeIfNeeded();
+        update();
+        return;
+    }
     
     FrameRange range;
     if (!mSelectedKeysAnimators.isEmpty()) {

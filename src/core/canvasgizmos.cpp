@@ -447,7 +447,7 @@ void Canvas::setGizmoVisibility(const Gizmos::Interact &ti,
     }
 
     if (!visibility) { setGizmosSuppressed(false); }
-    emit requestUpdate();
+    scheduleOverlayUpdate();
 }
 
 bool Canvas::getGizmoVisibility(const Gizmos::Interact &ti)
@@ -540,7 +540,7 @@ void Canvas::setRotateHandleHover(bool hovered)
 {
     if (mGizmos.fState.rotateHandleHovered == hovered) { return; }
     mGizmos.fState.rotateHandleHovered = hovered;
-    emit requestUpdate();
+    scheduleOverlayUpdate();
 }
 
 bool Canvas::shouldShowXLineGizmo() const
@@ -611,7 +611,7 @@ void Canvas::setGizmosSuppressed(bool suppressed)
 {
     if (mGizmos.fState.gizmosSuppressed == suppressed) {
         if (updateLineGizmoVisibility()) {
-            emit requestUpdate();
+            scheduleOverlayUpdate();
         }
         return;
     }
@@ -631,7 +631,7 @@ void Canvas::setGizmosSuppressed(bool suppressed)
         mGizmos.fState.shearYHovered = false;
     }
 
-    emit requestUpdate();
+    scheduleOverlayUpdate();
 }
 
 void Canvas::updateRotateHandleGeometry(qreal invScale)
@@ -1297,7 +1297,7 @@ void Canvas::setScaleGizmoHover(Gizmos::ScaleHandle handle,
 
     if (*target == hovered) { return; }
     *target = hovered;
-    emit requestUpdate();
+    scheduleOverlayUpdate();
 }
 
 void Canvas::setShearGizmoHover(Gizmos::ShearHandle handle,
@@ -1318,7 +1318,7 @@ void Canvas::setShearGizmoHover(Gizmos::ShearHandle handle,
 
     if (*target == hovered) { return; }
     *target = hovered;
-    emit requestUpdate();
+    scheduleOverlayUpdate();
 }
 
 void Canvas::setAxisGizmoHover(Gizmos::AxisConstraint axis,
@@ -1342,7 +1342,7 @@ void Canvas::setAxisGizmoHover(Gizmos::AxisConstraint axis,
 
     if (*target == hovered) { return; }
     *target = hovered;
-    emit requestUpdate();
+    scheduleOverlayUpdate();
 }
 
 void Canvas::handleLeftMouseGizmos()

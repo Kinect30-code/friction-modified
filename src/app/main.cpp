@@ -225,9 +225,7 @@ int main(int argc, char *argv[])
     try { settings.loadFromFile(); }
     catch(const std::exception& e) { gPrintExceptionCritical(e); }
 
-    ThemeSupport::setThemeVariant(settings.fUiTheme == eSettings::UiThemeLight
-                                      ? ThemeSupport::ThemeVariant::light
-                                      : ThemeSupport::ThemeVariant::dark);
+    ThemeSupport::setThemeVariant(ThemeSupport::themeVariantFromSetting(settings.fUiTheme));
     ThemeSupport::setupTheme(eSizesUI::widget);
 
     // init handlers

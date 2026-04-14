@@ -39,6 +39,16 @@ private:
         delete p;
     }
 public:
+    struct SourceInfo {
+        qreal fFps = 0;
+        int fTimeBaseNum = 0;
+        int fTimeBaseDen = 1;
+        int fFrameCount = 0;
+        int fWidth = 0;
+        int fHeight = 0;
+        bool fHasAudio = false;
+    };
+
     QString fPath;
     bool fOpened = false;
     qreal fFps = 0;
@@ -55,10 +65,10 @@ public:
     int fLastFrame = 0;
     int fWidth = 0;
     int fHeight = 0;
-
-    stdsptr<const AudioStreamsData> fAudioData;
+    bool fHasAudio = false;
 
     static stdsptr<VideoStreamsData> sOpen(const QString& path);
+    static SourceInfo sInspect(const QString& path);
 private:
     void open(const QString& path);
     void open();

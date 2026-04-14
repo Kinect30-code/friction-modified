@@ -109,6 +109,7 @@ private:
     bool shouldQueMoreCpuTasks() const;
     bool shouldQueMoreHddTasks() const;
     bool overflowed() const;
+    int maxGpuQueuedTasks() const;
 
     void callAllTasksFinishedFunc() const;
 

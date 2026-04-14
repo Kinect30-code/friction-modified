@@ -19,16 +19,17 @@
 # See 'README.md' for more information.
 #
 
-set(FRICTION_NAME "friction")
-set(FRICTION_NAME_GENERIC "Friction Graphics")
-set(FRICTION_DISPLAY_NAME "Friction")
+set(FRICTION_NAME "vecb")
+set(FRICTION_NAME_GENERIC "VECB Graphics")
+set(FRICTION_DISPLAY_NAME "VECB")
 set(PROJECT_COPYRIGHT "Friction contributors")
 set(PROJECT_IDENTIFIER "graphics.friction")
 set(PROJECT_SUMMARY "Motion graphics and animation")
 set(PROJECT_DESCRIPTION "Powerful and versatile motion graphics and animation application that allows you to create vector and raster animations for web and video.")
 set(PROJECT_LICENSE "GPLv3")
 set(PROJECT_HOMEPAGE_URL "https://friction.graphics")
-set(PROJECT_FREEDESKTOP "${PROJECT_IDENTIFIER}.${FRICTION_DISPLAY_NAME}")
+# Keep the freedesktop id stable so existing icon/resource lookups continue to work.
+set(PROJECT_FREEDESKTOP "graphics.friction.Friction")
 set(PROJECT_BUGTRACKER_URL "https://github.com/friction2d/friction/issues")
 set(PROJECT_HELP_URL "https://friction.graphics/documentation/")
 set(PROJECT_FAQ_URL "https://friction.graphics/documentation/faq.html")

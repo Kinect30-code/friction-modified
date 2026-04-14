@@ -30,6 +30,8 @@
 #include <QSplitter>
 #include <QVBoxLayout>
 #include <QHash>
+#include <QList>
+#include <QTabWidget>
 #include <vector>
 
 class UI_EXPORT UIDock : public QWidget
@@ -60,7 +62,9 @@ public:
     const QString getId();
     void addWidget(QWidget *widget);
     void setFloating(bool floating);
+    void setCollapsed(bool collapsed);
     bool isFloating() const { return mFloating; }
+    bool isCollapsed() const { return mCollapsed; }
 
 signals:
     void changePosition(const Position &pos,
@@ -73,11 +77,23 @@ signals:
 
 private:
     QVBoxLayout *mLayout;
+    QWidget *mHeaderWidget = nullptr;
+    QWidget *mContentWidget = nullptr;
+    QVBoxLayout *mContentLayout = nullptr;
+    QWidget *mCollapseButton = nullptr;
+    QWidget *mDockLabel = nullptr;
+    QList<QWidget*> mSideCollapseWidgets;
     QString mLabel;
     Position mPos;
     int mIndex;
     bool mFloating = false;
+    bool mCollapsed = false;
+    int mExpandedExtent = -1;
     void writeSettings();
+    void updateCollapseUi();
+    void applyCollapseState(bool adjustSplitter);
+    int currentExtent() const;
+    int collapsedExtent() const;
 };
 
 class UI_EXPORT UILayout : public QSplitter
@@ -111,6 +127,7 @@ public:
                          bool floating,
                          int targetPos = -1);
     bool isDockFloating(const QString &label) const;
+    bool isDockVisible(const QString &label) const;
     void addDockWidget(const QString &label,
                        QWidget *widget);
 
@@ -121,12 +138,14 @@ signals:
                           QWidget *widget);
 
 private:
+    QSplitter *mColumns;
     QSplitter *mLeft;
     QSplitter *mMiddle;
     QSplitter *mRight;
     QSplitter *mTop;
-    QSplitter *mBottom;
+    QTabWidget *mBottomTabs;
     QHash<QString, UIDock*> mDocks;
+    QHash<QString, bool> mDockVisibility;
     QHash<QString, QWidget*> mFloatingWindows;
     QHash<QString, QPoint> mFloatingDragOffsets;
     void addDock(const Item &item);
@@ -138,6 +157,9 @@ private:
     void insertDock(UIDock *dock,
                     const UIDock::Position &pos,
                     int index = -1);
+    void setDockPageVisible(UIDock *dock,
+                            bool visible);
+    void updateBottomTabsVisibility();
 };
 
 #endif // UILAYOUT_H

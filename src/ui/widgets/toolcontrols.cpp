@@ -25,6 +25,7 @@
 #include "Animators/transformanimator.h"
 #include "Private/document.h"
 #include "Boxes/circle.h"
+#include "Boxes/polygonbox.h"
 #include "Boxes/rectangle.h"
 
 using namespace Friction::Ui;
@@ -44,6 +45,7 @@ ToolControls::ToolControls(QWidget *parent)
     , mTransformPX(nullptr)
     , mTransformPY(nullptr)
     , mTransformOX(nullptr)
+    , mTransformSidesValue(nullptr)
     , mTransformMove(nullptr)
     , mTransformRotate(nullptr)
     , mTransformScale(nullptr)
@@ -51,10 +53,12 @@ ToolControls::ToolControls(QWidget *parent)
     , mTransformBottomRight(nullptr)
     , mTransformPivot(nullptr)
     , mTransformOpacity(nullptr)
+    , mTransformSides(nullptr)
 {
     setToolButtonStyle(Qt::ToolButtonIconOnly);
     setContextMenuPolicy(Qt::NoContextMenu);
-    setAllowedAreas(Qt::TopToolBarArea | Qt::BottomToolBarArea);
+    setAllowedAreas(Qt::AllToolBarAreas);
+    setFloatable(true);
     setWindowTitle(tr("Tool Controls"));
 
     setupWidgets();
@@ -89,10 +93,13 @@ void ToolControls::setCanvasMode(const CanvasMode &mode)
 
     const bool hasRadius = mTransformRX->hasTarget() && mTransformRY->hasTarget();
     const bool hasRectangle = mTransformBX->hasTarget() && mTransformBY->hasTarget();
+    const bool hasSides = mTransformSidesValue->hasTarget();
 
     const bool showRectangle = isBoxOrPointMode || mode == CanvasMode::rectCreate;
 
-    bool showRadius = showRectangle || mode == CanvasMode::circleCreate;
+    bool showRadius = showRectangle ||
+                      mode == CanvasMode::circleCreate ||
+                      mode == CanvasMode::polygonCreate;
 
     // we don't want to show radius in 'point' mode for rectangle
     if (showRadius && hasRectangle && mode == CanvasMode::pointTransform) {
@@ -103,6 +110,8 @@ void ToolControls::setCanvasMode(const CanvasMode &mode)
     mTransformOpacity->setVisible(hasOpacity && isBoxMode);
     mTransformRadius->setVisible(hasRadius && showRadius);
     mTransformBottomRight->setVisible(hasRectangle && showRectangle);
+    mTransformSides->setVisible(hasSides && (isBoxOrPointMode ||
+                                             mode == CanvasMode::polygonCreate));
 }
 
 void ToolControls::setTransform(BoundingBox * const target)
@@ -150,21 +159,26 @@ void ToolControls::setTransform(BoundingBox * const target)
     mTransformOpacity->setEnabled(opacity);
 
     const auto circle = enve_cast<Circle*>(target);
+    const auto polygon = enve_cast<PolygonBox*>(target);
     const auto rectangle = enve_cast<RectangleBox*>(target);
 
     mTransformRX->setTarget(circle ?
                                 circle->getHRadiusAnimator()->getXAnimator() :
-                                (rectangle ? rectangle->getRadiusAnimator()->getXAnimator() : nullptr));
+                                (polygon ? polygon->getHRadiusAnimator()->getXAnimator() :
+                                           (rectangle ? rectangle->getRadiusAnimator()->getXAnimator() : nullptr)));
     mTransformRY->setTarget(circle ?
                                 circle->getVRadiusAnimator()->getYAnimator() :
-                                (rectangle ? rectangle->getRadiusAnimator()->getYAnimator() : nullptr));
+                                (polygon ? polygon->getVRadiusAnimator()->getYAnimator() :
+                                           (rectangle ? rectangle->getRadiusAnimator()->getYAnimator() : nullptr)));
 
     mTransformBX->setTarget(rectangle ? rectangle->getBottomRightAnimator()->getXAnimator() : nullptr);
     mTransformBY->setTarget(rectangle ? rectangle->getBottomRightAnimator()->getYAnimator() : nullptr);
+    mTransformSidesValue->setTarget(polygon ? polygon->getSidesAnimator() : nullptr);
 
-    const bool hasRadius = (circle || rectangle);
+    const bool hasRadius = (circle || polygon || rectangle);
     mTransformRadius->setEnabled(hasRadius);
     mTransformBottomRight->setEnabled(rectangle);
+    mTransformSides->setEnabled(polygon);
 
     setCanvasMode(mCanvasMode);
 }
@@ -183,6 +197,7 @@ void ToolControls::resetWidgets()
     mTransformPX->setTarget(nullptr);
     mTransformPY->setTarget(nullptr);
     mTransformOX->setTarget(nullptr);
+    mTransformSidesValue->setTarget(nullptr);
 
     mTransformMove->setEnabled(false);
     mTransformRotate->setEnabled(false);
@@ -191,11 +206,13 @@ void ToolControls::resetWidgets()
     mTransformBottomRight->setEnabled(false);
     mTransformPivot->setEnabled(false);
     mTransformOpacity->setEnabled(false);
+    mTransformSides->setEnabled(false);
 
     mTransformRadius->setVisible(false);
     mTransformBottomRight->setVisible(false);
     mTransformPivot->setVisible(false);
     mTransformOpacity->setVisible(false);
+    mTransformSides->setVisible(false);
 }
 
 void ToolControls::setupWidgets()
@@ -207,6 +224,7 @@ void ToolControls::setupWidgets()
     mTransformBottomRight = new QActionGroup(this);
     mTransformPivot = new QActionGroup(this);
     mTransformOpacity = new QActionGroup(this);
+    mTransformSides = new QActionGroup(this);
 
     setupTransform();
 }
@@ -225,6 +243,7 @@ void ToolControls::setupTransform()
     mTransformPX = new QrealAnimatorValueSlider(nullptr, this);
     mTransformPY = new QrealAnimatorValueSlider(nullptr, this);
     mTransformOX = new QrealAnimatorValueSlider(nullptr, this);
+    mTransformSidesValue = new QrealAnimatorValueSlider(nullptr, this);
 
     mTransformMove->addAction(addSpacer(true, true));
     mTransformMove->addAction(addAction(QIcon::fromTheme("transform_translate"),
@@ -271,6 +290,14 @@ void ToolControls::setupTransform()
     mTransformRadius->addAction(addSeparator());
     mTransformRadius->addAction(addWidget(mTransformRY));
 
+    mTransformSides->addAction(addSpacer(true, true));
+    mTransformSides->addAction(addAction(QIcon::fromTheme("polygonCreate",
+                                                          QIcon::fromTheme("draw-polygon",
+                                                                           QIcon::fromTheme("shape-polygon",
+                                                                                            QIcon::fromTheme("rectCreate")))),
+                                         tr("Sides")));
+    mTransformSides->addAction(addWidget(mTransformSidesValue));
+
     resetWidgets();
 
     mTransformX->setValueRange(0, 1);
@@ -297,4 +324,6 @@ void ToolControls::setupTransform()
     mTransformPY->setDisplayedValue(0);
     mTransformOX->setValueRange(0, 100);
     mTransformOX->setDisplayedValue(100);
+    mTransformSidesValue->setValueRange(3, 32);
+    mTransformSidesValue->setDisplayedValue(5);
 }

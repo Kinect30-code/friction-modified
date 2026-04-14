@@ -39,7 +39,8 @@ ToolInteract::ToolInteract(QWidget *parent)
 {
     setToolButtonStyle(Qt::ToolButtonIconOnly);
     setContextMenuPolicy(Qt::NoContextMenu);
-    setAllowedAreas(Qt::TopToolBarArea | Qt::BottomToolBarArea);
+    setAllowedAreas(Qt::AllToolBarAreas);
+    setFloatable(true);
     setWindowTitle(tr("Tool Interact"));
 
     setupGizmoButton();

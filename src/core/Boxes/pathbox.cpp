@@ -75,7 +75,7 @@ void focusConvertedVectorPath(Canvas* const scene,
     if(auto* const editable = firstEditableVectorPathProperty(vectorPath)) {
         scene->addToSelectedProps(editable);
     }
-    scene->requestUpdate();
+    scene->scheduleUpdate();
 }
 
 void configureConvertedVectorPath(PathBox* const source,
@@ -146,6 +146,7 @@ PathBox::PathBox(const QString &name,
     switch (type) {
     case eBoxType::circle:
     case eBoxType::rectangle:
+    case eBoxType::polygon:
         mFillSettings->setPaintType(fillFlat ?
                                     PaintType::FLATPAINT : PaintType::NOPAINT);
         mStrokeSettings->setPaintType(strokeFlat ?
@@ -178,6 +179,7 @@ PathBox::PathBox(const QString &name,
         switch (getBoxType()) {
         case eBoxType::circle:
         case eBoxType::rectangle:
+        case eBoxType::polygon:
             eSettings::sInstance->fLastFillFlatEnabled = (type == PaintType::FLATPAINT);
             break;
         default:;
@@ -189,6 +191,7 @@ PathBox::PathBox(const QString &name,
         switch (getBoxType()) {
         case eBoxType::circle:
         case eBoxType::rectangle:
+        case eBoxType::polygon:
             eSettings::sInstance->fLastStrokeFlatEnabled = (type == PaintType::FLATPAINT);
             break;
         default:;

@@ -25,7 +25,6 @@
 #define FRICTION_AESHORTCUTCONTROLLER_H
 
 #include <QObject>
-#include <QTimer>
 
 #include "Private/document.h"
 #include "actions.h"
@@ -64,7 +63,6 @@ private:
     MainWindow &mMainWindow;
     Document &mDocument;
     Actions &mActions;
-    QTimer mPendingUTimer;
     CanvasMode mShapeMode = CanvasMode::rectCreate;
 };
 

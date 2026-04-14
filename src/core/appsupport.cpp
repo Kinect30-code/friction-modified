@@ -147,12 +147,12 @@ void AppSupport::setSettings(QSettings *settings,
 
 const QString AppSupport::getAppName()
 {
-    return QString::fromUtf8("friction");
+    return QString::fromUtf8("vecb");
 }
 
 const QString AppSupport::getAppDisplayName()
 {
-    return QString::fromUtf8("Friction");
+    return QString::fromUtf8("VECB");
 }
 
 const QString AppSupport::getAppDomain()
@@ -932,17 +932,18 @@ void AppSupport::initXDGDesktop(const bool &isRenderer)
 {
     if ((!isAppPortable() && !isAppImage()) || isRenderer) { return; }
     if (AppSupport::hasXDGDesktopIntegration()) { return; }
-    QString appPath("friction");
+    QString appPath(getAppName());
     const QString appimage = AppSupport::getAppImagePath().simplified();
     if (!appimage.isEmpty()) { appPath = appimage.split("/").takeLast(); }
     const auto ask = QMessageBox::question(nullptr,
                                            QObject::tr("Setup Desktop Integration"),
                                            QObject::tr("Would you like to setup desktop integration?"
-                                                       " This will add Friction to your application launcher"
+                                                       " This will add %2 to your application launcher"
                                                        " and add required mime types.<br><br>"
                                                        "You also can manage the desktop integration with:"
                                                        "<br><br><code>%1 --xdg-install</code>"
-                                                       "<br><code>%1 --xdg-remove</code>").arg(appPath));
+                                                       "<br><code>%1 --xdg-remove</code>")
+                                               .arg(appPath, getAppDisplayName()));
     if (ask == QMessageBox::Yes) {
         if (!AppSupport::setupXDGDesktopIntegration()) {
             QMessageBox::warning(nullptr,
@@ -971,11 +972,13 @@ void AppSupport::checkPerms(const bool &isRenderer)
     const auto perms = hasWriteAccess();
     if (perms.second) { return; }
     if (isRenderer) {
-        qWarning() << QObject::tr("Friction needs read/write access to:\n- %1").arg(perms.first.join("\n- "));
+        qWarning() << QObject::tr("%1 needs read/write access to:\n- %2")
+                          .arg(getAppDisplayName(), perms.first.join("\n- "));
     } else {
         QMessageBox::warning(nullptr,
                              QObject::tr("Permission issue"),
-                             QObject::tr("Friction needs read/write access to:<br><br>- %1").arg(perms.first.join("<br>- ")));
+                             QObject::tr("%1 needs read/write access to:<br><br>- %2")
+                                 .arg(getAppDisplayName(), perms.first.join("<br>- ")));
     }
 }
 
@@ -987,10 +990,12 @@ void AppSupport::checkFFmpeg(const bool &isRenderer)
     qWarning() << "Using FFmpeg" << info << version;
 #ifndef QT_DEBUG
     if (info.contains("friction")) { return; }
-    const QString warning = QObject::tr("Friction is using an unsupported FFmpeg version, "
+    const QString warning = QObject::tr("%1 is using an unsupported FFmpeg version, "
                                         "video and/or image export will not work properly. "
-                                        "Use at own risk and don't report any issues upstream.");
-    if (version < 3600000 || version >= 3700000) {
+                                        "Use at own risk and don't report any issues upstream.")
+                                .arg(getAppDisplayName());
+    // Ubuntu 24.04 ships FFmpeg 6.1.x (libavutil 58.x), which this build links against.
+    if (version < 3800000 || version >= 3900000) {
         if (isRenderer) { qWarning() << warning; }
         else {
             QMessageBox::critical(nullptr,

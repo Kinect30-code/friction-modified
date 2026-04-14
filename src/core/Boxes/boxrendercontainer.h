@@ -28,8 +28,6 @@
 #include "smartPointers/ememory.h"
 #include "skia/skqtconversions.h"
 #include "skia/skiaincludes.h"
-#include "smartPointers/ememory.h"
-#include "framerange.h"
 
 struct BoxRenderData;
 
@@ -39,6 +37,8 @@ public:
 
     void drawSk(SkCanvas * const canvas,
                 const SkFilterQuality filter) const;
+    void drawSkRaw(SkCanvas * const canvas,
+                   SkPaint& paint) const;
 
     void updatePaintTransformGivenNewTotalTransform(
             const QMatrix &totalTransform);
@@ -50,6 +50,10 @@ public:
         return mSrcRenderData.get();
     }
 
+    QRectF mappedGlobalRect() const {
+        return mPaintTransformQt.mapRect(QRectF(mGlobalRect));
+    }
+
     bool isExpired() const {
         return mExpired;
     }
@@ -59,13 +63,12 @@ public:
     }
 protected:
     bool mExpired = false;
-    bool mAntiAlias = false;
     qreal mResolutionFraction;
     QRect mGlobalRect;
     QMatrix mTransform;
+    QMatrix mPaintTransformQt;
     SkMatrix mPaintTransform;
     stdsptr<BoxRenderData> mSrcRenderData;
-    sk_sp<SkImage> mImageSk;
 };
 
 #endif // RENDERCONTAINER_H

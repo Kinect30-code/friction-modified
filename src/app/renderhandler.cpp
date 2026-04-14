@@ -32,8 +32,16 @@
 #include "CacheHandlers/soundcachecontainer.h"
 #include "CacheHandlers/sceneframecontainer.h"
 #include "Private/document.h"
+#include "simpletask.h"
 
 #include <QSignalBlocker>
+
+namespace {
+
+constexpr int kPreviewCacheTrimMaxFramesPerPass = 24;
+constexpr qreal kPreviewSteadyBufferSeconds = 0.75;
+
+}
 
 RenderHandler* RenderHandler::sInstance = nullptr;
 
@@ -80,7 +88,7 @@ void RenderHandler::renderFromSettings(RenderInstanceSettings * const settings) 
 
         mCurrentRenderSettings = settings;
         const auto &renderSettings = settings->getRenderSettings();
-        setFrameAction(renderSettings.fMinFrame);
+        setInternalFrameAction(renderSettings.fMinFrame);
 
         const qreal resolutionFraction = renderSettings.fResolution;
         mMinRenderFrame = renderSettings.fMinFrame;
@@ -124,7 +132,7 @@ void RenderHandler::renderFromSettings(RenderInstanceSettings * const settings) 
 
 void RenderHandler::setPreviewFrame(const int &frame)
 {
-    mCurrentPreviewFrame = frame;
+    setCurrentPreviewFrameValue(frame);
 }
 
 void RenderHandler::cacheAroundFrame(const int frame)
@@ -134,7 +142,7 @@ void RenderHandler::cacheAroundFrame(const int frame)
     setCurrentScene(mDocument.fActiveScene);
     if(!mCurrentScene) return;
 
-    const auto state = mPreviewState;
+    const auto state = previewStateValue();
     if(state == PreviewState::playing || state == PreviewState::rendering) {
         return;
     }
@@ -143,6 +151,8 @@ void RenderHandler::cacheAroundFrame(const int frame)
         ensurePreviewWindowQueued(frame);
         return;
     }
+
+    auto timingState = previewTimingStateValue();
 
     const auto fIn = mCurrentScene->getFrameIn();
     const auto fOut = mCurrentScene->getFrameOut();
@@ -160,29 +170,27 @@ void RenderHandler::cacheAroundFrame(const int frame)
     }
     if(maxFrame < minFrame) return;
 
-    const auto &cacheHandler = mCurrentScene->getSceneFramesHandler();
-    const int firstMissing = cacheHandler.firstEmptyFrameAtOrAfter(minFrame);
-    mBackgroundCacheVisibleFrame = frame;
+    const int firstMissing = firstMissingUsablePreviewFrameAtOrAfter(minFrame, maxFrame);
+    timingState.fBackgroundCacheVisibleFrame = frame;
 
     if(firstMissing > maxFrame) {
-        mCurrentScene->setMinFrameUseRange(minFrame);
-        mCurrentScene->setMaxFrameUseRange(maxFrame);
-        if(mCurrentSoundComposition) {
-            mCurrentSoundComposition->setMinFrameUseRange(minFrame);
-            mCurrentSoundComposition->setMaxFrameUseRange(maxFrame);
-        }
+        setPreviewTimingState(timingState);
+        applyPreviewWindowRange({minFrame, maxFrame}, false);
         stopBackgroundCaching();
         return;
     }
 
-    if(!mBackgroundCaching) {
+    if(!timingState.fBackgroundCaching) {
         const auto nextFrameFunc = [this]() {
             nextPreviewRenderFrame();
         };
         TaskScheduler::sSetTaskUnderflowFunc(nextFrameFunc);
         TaskScheduler::sSetAllTasksFinishedFunc(nextFrameFunc);
-        mBackgroundCaching = true;
+        timingState.fBackgroundCaching = true;
+        setPreviewTimingState(timingState);
         setRenderingPreview(true);
+    } else {
+        setPreviewTimingState(timingState);
     }
 
     mMinRenderFrame = minFrame;
@@ -206,15 +214,52 @@ void RenderHandler::setFrameAction(const int frame) {
     mDocument.actionFinished();
 }
 
+void RenderHandler::setInternalFrameAction(const int frame) {
+    if(!mCurrentScene) return;
+    mCurrentScene->anim_setAbsFrame(frame);
+    SimpleTask::sProcessAll();
+    TaskScheduler::instance()->queTasks();
+}
+
 void RenderHandler::setCurrentScene(Canvas * const scene) {
+    if(mCurrentScene != scene) {
+        setQueuedPreviewWindowValue({0, -1}, false);
+        setPinnedPreviewWindowValue({0, -1}, false);
+        setPreviewPlayedRangeValue({0, -1});
+    }
     mCurrentScene = scene;
     mCurrentSoundComposition = scene ? scene->getSoundComposition() : nullptr;
 }
 
+bool RenderHandler::applyPreviewWindowRange(const FrameRange &range,
+                                            bool scheduleAudio)
+{
+    if(!mCurrentScene || !range.isValid()) return false;
+    bool queuedPreviewWindowValid = false;
+    const FrameRange queuedPreviewWindow =
+            queuedPreviewWindowValue(&queuedPreviewWindowValid);
+    if(queuedPreviewWindowValid && queuedPreviewWindow == range) {
+        return false;
+    }
+
+    mCurrentScene->setMinFrameUseRange(range.fMin);
+    mCurrentScene->setMaxFrameUseRange(range.fMax);
+    if(mCurrentSoundComposition) {
+        mCurrentSoundComposition->setMinFrameUseRange(range.fMin);
+        mCurrentSoundComposition->setMaxFrameUseRange(range.fMax);
+        if(scheduleAudio) {
+            mCurrentSoundComposition->scheduleFrameRange(range);
+        }
+    }
+
+    setQueuedPreviewWindowValue(range, true);
+    trimPreviewCaches(range);
+    return true;
+}
+
 void RenderHandler::nextCurrentRenderFrame() {
-    auto& cacheHandler = mCurrentScene->getSceneFramesHandler();
-    int newCurrentRenderFrame = cacheHandler.
-            firstEmptyFrameAtOrAfter(mCurrentRenderFrame + 1);
+    int newCurrentRenderFrame = firstMissingUsablePreviewFrameAtOrAfter(
+                mCurrentRenderFrame + 1, mMaxRenderFrame);
     const bool allDone = newCurrentRenderFrame > mMaxRenderFrame;
     newCurrentRenderFrame = qMin(mMaxRenderFrame, newCurrentRenderFrame);
     const FrameRange newSoundRange = {mCurrentRenderFrame, newCurrentRenderFrame};
@@ -224,46 +269,56 @@ void RenderHandler::nextCurrentRenderFrame() {
 
     mCurrentRenderFrame = newCurrentRenderFrame;
     mCurrRenderRange.fMax = mCurrentRenderFrame;
-    if(allDone) Document::sInstance->actionFinished();
+    if(allDone) {
+        SimpleTask::sProcessAll();
+        TaskScheduler::instance()->queTasks();
+    }
     else {
+        const auto state = previewStateValue();
+        const auto timingState = previewTimingStateValue();
         const bool keepVisiblePreviewFrame =
-                mPreviewState == PreviewState::playing ||
-                mPreviewState == PreviewState::paused ||
-                mBackgroundCaching;
+                state == PreviewState::playing ||
+                state == PreviewState::paused ||
+                timingState.fBackgroundCaching;
         if(keepVisiblePreviewFrame) {
             const int visibleFrame =
-                    mPreviewState == PreviewState::playing ||
-                    mPreviewState == PreviewState::paused ?
-                        mCurrentPreviewFrame :
-                        mBackgroundCacheVisibleFrame;
+                    state == PreviewState::playing ||
+                    state == PreviewState::paused ?
+                        currentPreviewFrameValue() :
+                        timingState.fBackgroundCacheVisibleFrame;
             const QSignalBlocker blocker(mCurrentScene);
-            setFrameAction(mCurrentRenderFrame);
+            setInternalFrameAction(mCurrentRenderFrame);
             const auto visibleCont =
                     mCurrentScene->getSceneFramesHandler().
                     sharedAtFrame<SceneFrameContainer>(visibleFrame);
             mCurrentScene->anim_setAbsFrame(visibleFrame);
-            if(visibleCont) {
+            if(visibleCont && visibleCont->storesDataInMemory()) {
                 mCurrentScene->setSceneFrame(visibleCont);
+            } else {
+                mCurrentScene->scheduleUpdate();
             }
-            emit mCurrentScene->requestUpdate();
         } else {
-            setFrameAction(mCurrentRenderFrame);
+            setInternalFrameAction(mCurrentRenderFrame);
         }
     }
 }
 
 void RenderHandler::setPreviewState(const PreviewState state)
 {
-    if (mPreviewState == state) { return; }
+    const auto currentState = previewStateValue();
+    if (currentState == state) { return; }
     const bool keepBackgroundPreviewRendering =
             (state == PreviewState::playing ||
              state == PreviewState::paused) &&
             eSettings::instance().fPreviewCache &&
-            mRenderingPreview;
+            renderingPreviewValue();
     setRenderingPreview(state == PreviewState::rendering ||
                         keepBackgroundPreviewRendering);
     setPreviewing(state == PreviewState::playing);
-    mPreviewState = state;
+    {
+        QWriteLocker locker(&mPreviewStateLock);
+        mPreviewState = state;
+    }
 }
 
 void RenderHandler::renderPreview() {
@@ -276,6 +331,9 @@ void RenderHandler::renderPreview() {
     TaskScheduler::sSetAllTasksFinishedFunc(nextFrameFunc);
 
     mSavedCurrentFrame = mCurrentScene->getCurrentFrame();
+    auto timingState = previewTimingStateValue();
+    timingState.fBaseResolution = mCurrentScene->getResolution();
+    setPreviewTimingState(timingState);
 
     const auto fIn = mCurrentScene->getFrameIn();
     const auto fOut = mCurrentScene->getFrameOut();
@@ -295,21 +353,23 @@ void RenderHandler::renderPreview() {
     emit previewBeingRendered();
 
     if(TaskScheduler::sAllQuedCpuTasksFinished()) {
-        nextPreviewRenderFrame();
+        QTimer::singleShot(0, this, [this]() {
+            nextPreviewRenderFrame();
+        });
     }
 }
 
 void RenderHandler::interruptPreview() {
-    if(mRenderingPreview) interruptPreviewRendering();
-    else if(mPreviewState == PreviewState::playing ||
-            mPreviewState == PreviewState::paused) {
+    if(renderingPreviewValue()) interruptPreviewRendering();
+    else if(previewStateValue() == PreviewState::playing ||
+            previewStateValue() == PreviewState::paused) {
         stopPreview();
     }
 }
 
 void RenderHandler::outOfMemory() {
-    if(mRenderingPreview) {
-        if(mBackgroundCaching) {
+    if(renderingPreviewValue()) {
+        if(backgroundCachingValue()) {
             stopBackgroundCaching();
             return;
         }
@@ -318,19 +378,33 @@ void RenderHandler::outOfMemory() {
 }
 
 void RenderHandler::setRenderingPreview(const bool rendering) {
-    mRenderingPreview = rendering;
-    if(mCurrentScene) mCurrentScene->setRenderingPreview(rendering);
-    TaskScheduler::instance()->setAlwaysQue(rendering);
+    {
+        QWriteLocker locker(&mPreviewStateLock);
+        mRenderingPreview = rendering;
+    }
+    const bool backgroundCaching = backgroundCachingValue();
+    const bool interactivePreviewState =
+            previewStateValue() == PreviewState::playing ||
+            previewStateValue() == PreviewState::paused;
+    const bool blockCanvasEditing =
+            rendering && !backgroundCaching && !interactivePreviewState;
+    if(mCurrentScene) mCurrentScene->setRenderingPreview(blockCanvasEditing);
+    const bool aggressiveQueueing =
+            rendering && !interactivePreviewState && !backgroundCaching;
+    TaskScheduler::instance()->setAlwaysQue(aggressiveQueueing);
 }
 
 void RenderHandler::setPreviewing(const bool previewing) {
-    mPreviewing = previewing;
+    {
+        QWriteLocker locker(&mPreviewStateLock);
+        mPreviewing = previewing;
+    }
     if(mCurrentScene) mCurrentScene->setPreviewing(previewing);
 }
 
 void RenderHandler::interruptPreviewRendering() {
     TaskScheduler::sClearAllFinishedFuncs();
-    if(mBackgroundCaching) {
+    if(backgroundCachingValue()) {
         stopBackgroundCaching();
         return;
     }
@@ -346,38 +420,79 @@ void RenderHandler::interruptOutputRendering() {
 
 void RenderHandler::stopPreview() {
     if(mCurrentScene) {
-        mCurrentScene->clearUseRange();
+        bool queuedPreviewWindowValid = false;
+        const FrameRange queuedPreviewWindow =
+                queuedPreviewWindowValue(&queuedPreviewWindowValid);
+        const FrameRange previewPlayedRange = previewPlayedRangeValue();
+        if(eSettings::instance().fPreviewCache && queuedPreviewWindowValid) {
+            FrameRange pinnedWindow = queuedPreviewWindow;
+            if(previewPlayedRange.isValid()) {
+                pinnedWindow += previewPlayedRange;
+            }
+            setPinnedPreviewWindowValue(pinnedWindow, true);
+            mCurrentScene->setMinFrameUseRange(pinnedWindow.fMin);
+            mCurrentScene->setMaxFrameUseRange(pinnedWindow.fMax);
+            if(mCurrentSoundComposition) {
+                mCurrentSoundComposition->setMinFrameUseRange(pinnedWindow.fMin);
+                mCurrentSoundComposition->setMaxFrameUseRange(pinnedWindow.fMax);
+            }
+        } else {
+            mCurrentScene->clearUseRange();
+            if(mCurrentSoundComposition) {
+                mCurrentSoundComposition->clearUseRange();
+            }
+            setPinnedPreviewWindowValue({0, -1}, false);
+        }
+        setQueuedPreviewWindowValue({0, -1}, false);
+        setPreviewPlayedRangeValue({0, -1});
         int targetFrame = mSavedCurrentFrame;
-        if (mPreviewState == PreviewState::playing ||
-            mPreviewState == PreviewState::paused) {
-            targetFrame = qBound(mMinPreviewFrame,
-                                 mCurrentPreviewFrame,
-                                 mMaxPreviewFrame);
+        const auto frameState = previewFrameStateValue();
+        if (previewStateValue() == PreviewState::playing ||
+            previewStateValue() == PreviewState::paused) {
+            targetFrame = qBound(frameState.fMinFrame,
+                                 frameState.fCurrentFrame,
+                                 frameState.fMaxFrame);
         }
         setFrameAction(targetFrame);
-        mCurrentScene->setSceneFrame(targetFrame);
-        emit mCurrentScene->currentFrameChanged(targetFrame);
-        emit mCurrentScene->requestUpdate();
+        mCurrentScene->scheduleUpdate();
     }
 
     mPreviewFPSTimer->stop();
+    mPreviewTickClock.invalidate();
     stopAudio();
+    auto timingState = previewTimingStateValue();
+    timingState.fFrameAccumulator = 0;
+    timingState.fPlaybackRate = 1;
+    timingState.fWaitingForCache = false;
+    timingState.fAudioNeedsRestart = false;
+    setPreviewTimingState(timingState);
+    if(!mCurrentRenderSettings) {
+        restorePreviewResolution();
+    }
     emit previewFinished();
     setPreviewState(PreviewState::stopped);
 }
 
 void RenderHandler::pausePreview() {
-    if(mPreviewState == PreviewState::playing) {
+    if(previewStateValue() == PreviewState::playing) {
         stopAudio();
         mPreviewFPSTimer->stop();
+        mPreviewTickClock.invalidate();
         emit previewPaused();
         setPreviewState(PreviewState::paused);
     }
 }
 
 void RenderHandler::resumePreview() {
-    if(mPreviewState == PreviewState::paused) {
+    if(previewStateValue() == PreviewState::paused) {
         startAudio();
+        mPreviewTickClock.invalidate();
+        // Clear any stale waiting-for-cache flag from before the pause so
+        // the first tick after resume doesn't immediately re-enter the stall.
+        auto timingState = previewTimingStateValue();
+        timingState.fWaitingForCache = false;
+        timingState.fFrameAccumulator = 0;
+        setPreviewTimingState(timingState);
         mPreviewFPSTimer->start();
         emit previewBeingPlayed();
         setPreviewState(PreviewState::playing);
@@ -385,14 +500,23 @@ void RenderHandler::resumePreview() {
 }
 
 void RenderHandler::playPreviewAfterAllTasksCompleted() {
-    if(mRenderingPreview) {
+    if(renderingPreviewValue()) {
         TaskScheduler::sSetTaskUnderflowFunc(nullptr);
         Document::sInstance->actionFinished();
+        const auto finishPreviewRendering = [this]() {
+            setRenderingPreview(false);
+        };
         if(TaskScheduler::sAllTasksFinished()) {
-            playPreview();
-        } else {
-            TaskScheduler::sSetAllTasksFinishedFunc([this]() {
+            finishPreviewRendering();
+            if(previewStateValue() == PreviewState::rendering) {
                 playPreview();
+            }
+        } else {
+            TaskScheduler::sSetAllTasksFinishedFunc([this, finishPreviewRendering]() {
+                finishPreviewRendering();
+                if(previewStateValue() == PreviewState::rendering) {
+                    playPreview();
+                }
             });
         }
     }
@@ -403,13 +527,55 @@ void RenderHandler::playPreview() {
         setCurrentScene(mDocument.fActiveScene);
     }
     if(!mCurrentScene) return;
-    if(mBackgroundCaching) {
+    if(previewStateValue() == PreviewState::playing) {
+        return;
+    }
+    if(previewStateValue() == PreviewState::paused) {
+        resumePreview();
+        return;
+    }
+    if(backgroundCachingValue()) {
         stopBackgroundCaching();
     }
-    if(mPreviewState == PreviewState::stopped && !mRenderingPreview) {
-        renderPreview();
+    if(!renderingPreviewValue()) {
+        mSavedCurrentFrame = mCurrentScene->getCurrentFrame();
+        auto timingState = previewTimingStateValue();
+        timingState.fBaseResolution = mCurrentScene->getResolution();
+        setPreviewTimingState(timingState);
+
+        const auto fIn = mCurrentScene->getFrameIn();
+        const auto fOut = mCurrentScene->getFrameOut();
+        mMinRenderFrame = mLoop ?
+                    (fIn.enabled ? fIn.frame : mCurrentScene->getMinFrame()) - 1 :
+                    (fIn.enabled ? fIn.frame : mSavedCurrentFrame);
+        mMaxRenderFrame = fOut.enabled ?
+                    fOut.frame :
+                    mCurrentScene->getMaxFrame();
+        mCurrentRenderFrame = mMinRenderFrame;
+        mCurrRenderRange = {mCurrentRenderFrame, mCurrentRenderFrame};
+        mCurrentScene->setMinFrameUseRange(mCurrentRenderFrame);
+        if(mCurrentSoundComposition) {
+            mCurrentSoundComposition->setMinFrameUseRange(mCurrentRenderFrame);
+        }
     }
-    //setFrameAction(mSavedCurrentFrame);
+
+    const auto fIn = mCurrentScene->getFrameIn();
+    const auto fOut = mCurrentScene->getFrameOut();
+    const int savedFrame = mCurrentScene->getCurrentFrame();
+    const int maxPreviewFrame = fOut.enabled ?
+                fOut.frame :
+                mCurrentScene->getMaxFrame();
+    const int minPreviewFrame = fIn.enabled ?
+                (fIn.frame < savedFrame && savedFrame < maxPreviewFrame ?
+                     savedFrame : fIn.frame) :
+                savedFrame;
+    if(minPreviewFrame > maxPreviewFrame) return;
+    const int boundedMinPreviewFrame = mLoop ?
+                (fIn.enabled ? fIn.frame : mCurrentScene->getMinFrame()) :
+                minPreviewFrame;
+    setPreviewFrameState(boundedMinPreviewFrame, maxPreviewFrame, minPreviewFrame);
+    setPreviewPlayedRangeValue({minPreviewFrame, minPreviewFrame});
+
     if(!eSettings::instance().fPreviewCache) {
         TaskScheduler::sClearAllFinishedFuncs();
     } else {
@@ -419,98 +585,164 @@ void RenderHandler::playPreview() {
         TaskScheduler::sSetTaskUnderflowFunc(nextFrameFunc);
         TaskScheduler::sSetAllTasksFinishedFunc(nextFrameFunc);
     }
-    const auto fIn = mCurrentScene->getFrameIn();
-    const auto fOut = mCurrentScene->getFrameOut();
-    const int minPreviewFrame = fIn.enabled ?
-                (fIn.frame < mSavedCurrentFrame && mSavedCurrentFrame < mMaxRenderFrame ?
-                     mSavedCurrentFrame : fIn.frame) :
-                mSavedCurrentFrame;
-    const int maxPreviewFrame = mMaxRenderFrame;
-    if(minPreviewFrame > maxPreviewFrame) return;
-    mMinPreviewFrame = mLoop ? (fIn.enabled? fIn.frame : mCurrentScene->getMinFrame()) : (fIn.enabled? (fIn.frame < minPreviewFrame && minPreviewFrame < mCurrentRenderFrame ? minPreviewFrame : fIn.frame) : minPreviewFrame);
-    mMaxPreviewFrame = fOut.enabled ? fOut.frame : maxPreviewFrame;
-    mCurrentPreviewFrame = minPreviewFrame;
-    mCurrentScene->setSceneFrame(mCurrentPreviewFrame);
-    ensurePreviewWindowQueued(mCurrentPreviewFrame);
+
+    ensurePreviewWindowQueued(currentPreviewFrameValue());
+    const auto currentPreviewCont =
+            mCurrentScene->getSceneFramesHandler().
+            sharedAtFrame<SceneFrameContainer>(currentPreviewFrameValue());
+    if(previewFrameReady(currentPreviewFrameValue())) {
+        mCurrentScene->setSceneFrame(currentPreviewFrameValue());
+    } else if(currentPreviewCont &&
+              sceneFrameMatchesCurrentPreview(currentPreviewCont.get())) {
+        mCurrentScene->setLoadingSceneFrame(currentPreviewCont);
+    } else {
+        mCurrentScene->anim_setAbsFrame(currentPreviewFrameValue());
+    }
 
     setPreviewState(PreviewState::playing);
-
+    activateInteractivePreviewCaching();
     startAudio();
 
-    mPreviewNominalIntervalMs = qMax(1, qRound(1000/mCurrentScene->getFps()));
-    mPreviewWaitingForCache = false;
-    mPreviewAudioPausedForCache = false;
-    mPreviewAudioNeedsRestart = false;
-    mPreviewRenderCursorRetargeted = false;
-    mPreviewFPSTimer->setInterval(mPreviewNominalIntervalMs);
+    mPreviewTickClock.invalidate();
+    auto timingState = previewTimingStateValue();
+    timingState.fNominalIntervalMs = qMax(1, qRound(1000/mCurrentScene->getFps()));
+    timingState.fTickIntervalMs = qMax(1, qMin(16, timingState.fNominalIntervalMs));
+    timingState.fFrameAccumulator = 0;
+    timingState.fPlaybackRate = 1;
+    timingState.fWaitingForCache = false;
+    timingState.fAudioPausedForCache = false;
+    timingState.fAudioNeedsRestart = false;
+    timingState.fRenderCursorRetargeted = false;
+    setPreviewTimingState(timingState);
+    updatePreviewPlaybackRate(currentPreviewFrameValue() + 1);
+    mPreviewFPSTimer->setInterval(timingState.fTickIntervalMs);
     mPreviewFPSTimer->start();
     emit previewBeingPlayed();
-    emit mCurrentScene->requestUpdate();
+    mCurrentScene->scheduleUpdate();
 }
 
 void RenderHandler::nextPreviewRenderFrame() {
-    if(!mRenderingPreview) return;
+    if(!renderingPreviewValue()) return;
+    if((previewStateValue() == PreviewState::playing ||
+        previewStateValue() == PreviewState::paused) &&
+       previewHasBufferedAhead(currentPreviewFrameValue(), previewSteadyBufferFrames())) {
+        suspendInteractivePreviewCaching();
+        return;
+    }
     if(mCurrentRenderFrame >= mMaxRenderFrame) {
-        if(mBackgroundCaching) {
+        if(backgroundCachingValue()) {
             stopBackgroundCaching();
         } else {
-            playPreviewAfterAllTasksCompleted();
+            suspendInteractivePreviewCaching();
         }
     } else {
         nextCurrentRenderFrame();
         if(TaskScheduler::sAllTasksFinished()) {
-            nextPreviewRenderFrame();
+            QTimer::singleShot(0, this, [this]() {
+                nextPreviewRenderFrame();
+            });
         }
     }
 }
 
 void RenderHandler::nextPreviewFrame() {
     if(!mCurrentScene) return;
-    const int nextFrame = mCurrentPreviewFrame + 1;
-    if(nextFrame > mMaxPreviewFrame) {
+    if(!mPreviewTickClock.isValid()) {
+        mPreviewTickClock.start();
+        ensurePreviewWindowQueued(currentPreviewFrameValue() + 1);
+        return;
+    }
+
+    const qint64 elapsedMs = mPreviewTickClock.restart();
+    const qreal fps = mCurrentScene->getFps();
+    updatePreviewPlaybackRate(currentPreviewFrameValue() + 1);
+    auto timingState = previewTimingStateValue();
+    const auto frameState = previewFrameStateValue();
+    timingState.fFrameAccumulator += qMax<qreal>(0.0, elapsedMs)*
+            fps*timingState.fPlaybackRate/1000.0;
+    if(timingState.fFrameAccumulator < 1.0) {
+        setPreviewTimingState(timingState);
+        ensurePreviewWindowQueued(currentPreviewFrameValue() + 1);
+        return;
+    }
+
+    timingState.fFrameAccumulator =
+            qMin<qreal>(timingState.fFrameAccumulator, 2.0);
+    const int nextFrame = frameState.fCurrentFrame + 1;
+    if(nextFrame > frameState.fMaxFrame) {
+        timingState.fFrameAccumulator = 0;
+        setPreviewTimingState(timingState);
         if(mLoop) {
-            const int savedFrame = mCurrentPreviewFrame;
-            mCurrentPreviewFrame = mMinPreviewFrame - 1;
+            const int savedFrame = frameState.fCurrentFrame;
+            setCurrentPreviewFrameValue(frameState.fMinFrame - 1);
+            timingState.fFrameAccumulator = 1.0;
+            setPreviewTimingState(timingState);
+            mPreviewTickClock.restart();
             nextPreviewFrame();
-            if (mCurrentPreviewFrame == mMinPreviewFrame - 1) {
-                mCurrentPreviewFrame = savedFrame;
+            if (currentPreviewFrameValue() == frameState.fMinFrame - 1) {
+                setCurrentPreviewFrameValue(savedFrame);
             } else {
                 stopAudio();
                 startAudio();
             }
         } else stopPreview();
     } else {
+        const bool wasWaitingForCache = timingState.fWaitingForCache;
         ensurePreviewWindowQueued(nextFrame);
-        const auto cachedFrame =
-                mCurrentScene->getSceneFramesHandler().atFrame<SceneFrameContainer>(nextFrame);
-        if(!cachedFrame) {
-            mPreviewWaitingForCache = true;
-            ensurePreviewWindowQueued(nextFrame);
-            mPreviewFPSTimer->setInterval(qMax(mPreviewNominalIntervalMs,
-                                               mPreviewNominalIntervalMs*2));
-            if(!mPreviewAudioPausedForCache) {
-                stopAudio();
-                mPreviewAudioPausedForCache = true;
-                mPreviewAudioNeedsRestart = true;
+        const auto cachedFrame = mCurrentScene->getSceneFramesHandler().
+                sharedAtFrame<SceneFrameContainer>(nextFrame);
+        const bool exactFrameReady =
+                cachedFrame &&
+                sceneFrameMatchesCurrentPreview(cachedFrame.get()) &&
+                cachedFrame->storesDataInMemory();
+        if(!exactFrameReady) {
+            // If a cached frame exists but its stateId no longer matches the
+            // current scene state, the scene changed after caching started.
+            // The render system may believe all frames are done (mCurrentRenderFrame
+            // >= mMaxRenderFrame) while the cache is stale — a deadlock.
+            // Detect this and force a re-render by resetting the render cursor.
+            if(cachedFrame && !sceneFrameMatchesCurrentPreview(cachedFrame.get())) {
+                // Stale cache — scene state changed. Reset render cursor so
+                // ensurePreviewWindowQueued will re-activate caching.
+                mCurrentRenderFrame = qMax(mMinRenderFrame, nextFrame - 1);
+                mCurrRenderRange = {mCurrentRenderFrame, mCurrentRenderFrame};
+                // Re-run ensurePreviewWindowQueued now that the cursor is reset
+                // so it can immediately re-activate interactive caching.
+                ensurePreviewWindowQueued(nextFrame);
+            } else if(cachedFrame && sceneFrameMatchesCurrentPreview(cachedFrame.get()) &&
+               !cachedFrame->storesDataInMemory()) {
+                cachedFrame->scheduleLoadFromTmpFile();
             }
-            emit mCurrentScene->requestUpdate();
+            timingState.fWaitingForCache = true;
+            timingState.fFrameAccumulator =
+                    qMin<qreal>(timingState.fFrameAccumulator, 1.0);
+            setPreviewTimingState(timingState);
+            if(!wasWaitingForCache) {
+                mCurrentScene->scheduleUpdate();
+            }
             return;
         }
-        if(mPreviewWaitingForCache) {
-            mPreviewWaitingForCache = false;
-            mPreviewFPSTimer->setInterval(mPreviewNominalIntervalMs);
+        if(timingState.fWaitingForCache) {
+            timingState.fWaitingForCache = false;
+            // Reset the tick clock so accumulated wait time doesn't cause
+            // frame skips when playback resumes after a cache stall.
+            mPreviewTickClock.restart();
         }
-        if(mPreviewAudioPausedForCache || mPreviewAudioNeedsRestart) {
-            startAudio();
-            mPreviewAudioPausedForCache = false;
-            mPreviewAudioNeedsRestart = false;
+        timingState.fFrameAccumulator =
+                qMax<qreal>(0.0, timingState.fFrameAccumulator - 1.0);
+        setPreviewTimingState(timingState);
+        setCurrentPreviewFrameValue(nextFrame);
+        if(!mLoop) {
+            mCurrentScene->setMinFrameUseRange(nextFrame);
+            if(mCurrentSoundComposition) {
+                mCurrentSoundComposition->setMinFrameUseRange(nextFrame);
+            }
         }
-        mCurrentPreviewFrame = nextFrame;
-        mCurrentScene->setSceneFrame(mCurrentPreviewFrame);
-        if(!mLoop) mCurrentScene->setMinFrameUseRange(mCurrentPreviewFrame);
-        emit mCurrentScene->currentFrameChanged(mCurrentPreviewFrame);
+        appendPreviewPlayedFrameValue(nextFrame);
+        mCurrentScene->setSceneFrame(currentPreviewFrameValue());
+        updatePreviewPlaybackRate(currentPreviewFrameValue() + 1);
+        emit mCurrentScene->currentFrameChanged(currentPreviewFrameValue());
     }
-    emit mCurrentScene->requestUpdate();
 }
 
 void RenderHandler::finishEncoding() {
@@ -523,6 +755,7 @@ void RenderHandler::finishEncoding() {
         mCurrentScene->setResolution(mSavedResolutionFraction);
     }
     mCurrentSoundComposition->clearUseRange();
+    setQueuedPreviewWindowValue({0, -1}, false);
     VideoEncoder::sFinishEncoding();
 }
 
@@ -579,20 +812,49 @@ void RenderHandler::nextSaveOutputFrame() {
 }
 
 void RenderHandler::startAudio() {
+    auto timingState = previewTimingStateValue();
+    if(!mCurrentSoundComposition || !mCurrentSoundComposition->hasAnySounds()) {
+        if(timingState.fAudioActive) {
+            stopAudio();
+        }
+        return;
+    }
+    if(timingState.fAudioActive) {
+        mAudioHandler.stopAudio();
+        if(mCurrentSoundComposition->isOpen()) {
+            mCurrentSoundComposition->stop();
+        }
+    }
     mAudioHandler.startAudio();
-    if(mCurrentSoundComposition)
-        mCurrentSoundComposition->start(mCurrentPreviewFrame);
+    mCurrentSoundComposition->start(currentPreviewFrameValue());
+    timingState.fAudioActive = true;
+    setPreviewTimingState(timingState);
     audioPushTimerExpired();
 }
 
 void RenderHandler::stopAudio() {
+    auto timingState = previewTimingStateValue();
+    if(!timingState.fAudioActive &&
+       (!mCurrentSoundComposition || !mCurrentSoundComposition->isOpen())) {
+        return;
+    }
     mAudioHandler.stopAudio();
-    if(mCurrentSoundComposition) mCurrentSoundComposition->stop();
-    mPreviewAudioPausedForCache = false;
+    if(mCurrentSoundComposition && mCurrentSoundComposition->isOpen()) {
+        mCurrentSoundComposition->stop();
+    }
+    timingState.fAudioActive = false;
+    timingState.fAudioPausedForCache = false;
+    setPreviewTimingState(timingState);
 }
 
 void RenderHandler::audioPushTimerExpired() {
-    if(!mCurrentSoundComposition) return;
+    if(!previewTimingStateValue().fAudioActive || !mCurrentSoundComposition) {
+        return;
+    }
+    if(!mCurrentSoundComposition->hasAnySounds()) {
+        stopAudio();
+        return;
+    }
     while(auto request = mAudioHandler.dataRequest()) {
         const qint64 len = mCurrentSoundComposition->read(
                     request.fData, request.fSize);
@@ -604,8 +866,19 @@ void RenderHandler::audioPushTimerExpired() {
 
 void RenderHandler::ensurePreviewWindowQueued(int anchorFrame) {
     if(!mCurrentScene) return;
-    const int cacheSpanForward = qMax(24, qRound(mCurrentScene->getFps()*1.5));
-    const int cacheSpanBackward = qMax(6, qRound(mCurrentScene->getFps()*0.25));
+    bool queuedPreviewWindowValid = false;
+    const FrameRange queuedPreviewWindow =
+            queuedPreviewWindowValue(&queuedPreviewWindowValid);
+    const bool activePreview =
+            previewStateValue() == PreviewState::playing ||
+            previewStateValue() == PreviewState::paused ||
+            previewStateValue() == PreviewState::rendering;
+    const int cacheSpanForward = activePreview ?
+                qMax(48, qRound(mCurrentScene->getFps()*2.0)) :
+                qMax(24, qRound(mCurrentScene->getFps()*1.5));
+    const int cacheSpanBackward = activePreview ?
+                qMax(12, qRound(mCurrentScene->getFps()*0.5)) :
+                qMax(6, qRound(mCurrentScene->getFps()*0.25));
     int minFrame = qMax(mMinRenderFrame, anchorFrame - cacheSpanBackward);
     int maxFrame = qMin(mMaxRenderFrame, anchorFrame + cacheSpanForward);
     const auto fIn = mCurrentScene->getFrameIn();
@@ -619,48 +892,421 @@ void RenderHandler::ensurePreviewWindowQueued(int anchorFrame) {
     if(maxFrame < minFrame) {
         maxFrame = minFrame;
     }
-    const auto &cacheHandler = mCurrentScene->getSceneFramesHandler();
-    const int firstMissing = cacheHandler.firstEmptyFrameAtOrAfter(anchorFrame);
-    if(firstMissing <= maxFrame) {
-        maxFrame = qMax(firstMissing + cacheSpanForward/2, anchorFrame);
+    if(activePreview && queuedPreviewWindowValid) {
+        const int keepForward = qMax(12, cacheSpanForward/3);
+        const int keepBackward = qMax(6, cacheSpanBackward/2);
+        const bool enoughForwardBuffered =
+                previewBufferedAheadFrames(anchorFrame, keepForward) >= keepForward;
+        const bool enoughBackwardBuffered =
+                anchorFrame - queuedPreviewWindow.fMin >= keepBackward;
+        if(enoughForwardBuffered && enoughBackwardBuffered) {
+            return;
+        }
+    }
+    const int firstMissingUsable =
+            firstMissingUsablePreviewFrameAtOrAfter(anchorFrame, maxFrame);
+    const int firstUnready = activePreview ?
+                firstUnreadyPreviewFrameAtOrAfter(anchorFrame, maxFrame) :
+                firstMissingUsable;
+    if(firstUnready <= maxFrame) {
+        maxFrame = qMax(firstUnready + cacheSpanForward/2, anchorFrame);
         maxFrame = qMin(maxFrame, mMaxRenderFrame);
         if(fOut.enabled) {
             maxFrame = qMin(maxFrame, fOut.frame);
         }
     }
 
-    if(mRenderingPreview && firstMissing <= maxFrame) {
+    if(renderingPreviewValue() && firstMissingUsable <= maxFrame) {
         const bool renderCursorOutsideWindow =
                 mCurrentRenderFrame < minFrame || mCurrentRenderFrame > maxFrame;
-        const bool renderCursorAheadOfNeed = mCurrentRenderFrame > firstMissing;
+        const bool renderCursorAheadOfNeed = mCurrentRenderFrame > firstMissingUsable;
         if(renderCursorOutsideWindow || renderCursorAheadOfNeed) {
-            mCurrentRenderFrame = qMax(mMinRenderFrame, firstMissing - 1);
+            mCurrentRenderFrame = qMax(mMinRenderFrame, firstMissingUsable - 1);
             mCurrRenderRange.fMax = mCurrentRenderFrame;
-            mPreviewRenderCursorRetargeted = true;
+            setPreviewRenderCursorRetargetedValue(true);
         }
     }
-
-    mCurrentScene->setMinFrameUseRange(minFrame);
-    mCurrentScene->setMaxFrameUseRange(maxFrame);
-    if(mCurrentSoundComposition) {
-        mCurrentSoundComposition->setMinFrameUseRange(minFrame);
-        mCurrentSoundComposition->setMaxFrameUseRange(maxFrame);
-        mCurrentSoundComposition->scheduleFrameRange({minFrame, maxFrame});
+    if(activePreview && !renderingPreviewValue() && firstMissingUsable <= maxFrame) {
+        mCurrentRenderFrame = qMax(mMinRenderFrame, firstMissingUsable - 1);
+        mCurrRenderRange = {mCurrentRenderFrame, mCurrentRenderFrame};
+        activateInteractivePreviewCaching();
     }
-    mDocument.updateScenes();
 
-    if(mPreviewRenderCursorRetargeted && TaskScheduler::sAllTasksFinished()) {
-        mPreviewRenderCursorRetargeted = false;
-        nextPreviewRenderFrame();
+    if(applyPreviewWindowRange({minFrame, maxFrame}, true)) {
+        mDocument.updateScenes();
+    }
+    if(activePreview) {
+        warmPreviewFramesInMemory({anchorFrame, maxFrame},
+                                  previewSteadyBufferFrames());
+    }
+
+    if(previewRenderCursorRetargetedValue() && TaskScheduler::sAllTasksFinished()) {
+        setPreviewRenderCursorRetargetedValue(false);
+        QTimer::singleShot(0, this, [this]() {
+            nextPreviewRenderFrame();
+        });
     }
 }
 
 void RenderHandler::stopBackgroundCaching()
 {
-    if(!mBackgroundCaching) return;
-    mBackgroundCaching = false;
-    mPreviewRenderCursorRetargeted = false;
+    if(!backgroundCachingValue()) return;
+    auto timingState = previewTimingStateValue();
+    timingState.fBackgroundCaching = false;
+    timingState.fRenderCursorRetargeted = false;
+    setPreviewTimingState(timingState);
+    setQueuedPreviewWindowValue({0, -1}, false);
     TaskScheduler::sSetTaskUnderflowFunc(nullptr);
     TaskScheduler::sSetAllTasksFinishedFunc(nullptr);
     setRenderingPreview(false);
+}
+
+void RenderHandler::trimPreviewCaches(const FrameRange &activeRange) {
+    if(!mCurrentScene || !activeRange.isValid()) {
+        return;
+    }
+    if(previewStateValue() == PreviewState::playing ||
+       previewStateValue() == PreviewState::paused ||
+       previewStateValue() == PreviewState::rendering) {
+        return;
+    }
+
+    const int keepBackward = qMax(6, qRound(mCurrentScene->getFps()*0.5));
+    const int keepForward = qMax(18, qRound(mCurrentScene->getFps()*1.0));
+    FrameRange keepRange{
+        qMax(mMinRenderFrame, activeRange.fMin - keepBackward),
+        qMin(mMaxRenderFrame, activeRange.fMax + keepForward)
+    };
+    bool pinnedPreviewWindowValid = false;
+    const FrameRange pinnedPreviewWindow =
+            pinnedPreviewWindowValue(&pinnedPreviewWindowValid);
+    if(pinnedPreviewWindowValid) {
+        const FrameRange pinnedRange{
+            qMax(mMinRenderFrame, pinnedPreviewWindow.fMin - keepBackward),
+            qMin(mMaxRenderFrame, pinnedPreviewWindow.fMax + keepForward)
+        };
+        keepRange += pinnedRange;
+    }
+    mCurrentScene->freeUnusedSceneFramesOutsideRange(
+                keepRange, kPreviewCacheTrimMaxFramesPerPass);
+}
+
+int RenderHandler::warmPreviewFramesInMemory(const FrameRange &range,
+                                             int maxFrames) {
+    if(!mCurrentScene || !range.isValid() || maxFrames <= 0) {
+        return 0;
+    }
+
+    auto &cacheHandler = mCurrentScene->getSceneFramesHandler();
+    int warmedFrames = 0;
+    for(auto it = cacheHandler.begin();
+        it != cacheHandler.end() && warmedFrames < maxFrames;
+        ++it) {
+        const auto cont = static_cast<SceneFrameContainer*>(it->second.get());
+        if(!cont || !sceneFrameMatchesCurrentPreview(cont)) {
+            continue;
+        }
+        const FrameRange overlap = cont->getRange()*range;
+        if(!overlap.isValid()) {
+            continue;
+        }
+        if(cont->storesDataInMemory()) {
+            warmedFrames += overlap.span();
+            continue;
+        }
+        if(cont->scheduleLoadFromTmpFile()) {
+            warmedFrames += overlap.span();
+        }
+    }
+    return warmedFrames;
+}
+
+bool RenderHandler::sceneFrameMatchesCurrentPreview(
+        const SceneFrameContainer *cont) const {
+    return cont &&
+           mCurrentScene &&
+           cont->fBoxState == mCurrentScene->currentStateId() &&
+           isZero6Dec(cont->fResolution - mCurrentScene->getResolution());
+}
+
+int RenderHandler::firstMissingUsablePreviewFrameAtOrAfter(int frame,
+                                                           int maxFrame) const {
+    if(!mCurrentScene) {
+        return frame;
+    }
+    const auto &cacheHandler = mCurrentScene->getSceneFramesHandler();
+    for(int current = qMax(frame, mMinRenderFrame);
+        current <= maxFrame;
+        current++) {
+        const auto cont = cacheHandler.atFrame<SceneFrameContainer>(current);
+        if(!sceneFrameMatchesCurrentPreview(cont)) {
+            return current;
+        }
+    }
+    return maxFrame + 1;
+}
+
+int RenderHandler::firstUnreadyPreviewFrameAtOrAfter(int frame,
+                                                     int maxFrame) const {
+    if(!mCurrentScene) {
+        return frame;
+    }
+    for(int current = qMax(frame, mMinRenderFrame);
+        current <= maxFrame;
+        current++) {
+        if(!previewFrameReady(current)) {
+            return current;
+        }
+    }
+    return maxFrame + 1;
+}
+
+bool RenderHandler::previewFrameReady(int frame) const {
+    if(!mCurrentScene) {
+        return false;
+    }
+    const auto cont = mCurrentScene->getSceneFramesHandler().
+            atFrame<SceneFrameContainer>(frame);
+    return cont && sceneFrameMatchesCurrentPreview(cont) &&
+           cont->storesDataInMemory();
+}
+
+int RenderHandler::previewSteadyBufferFrames() const {
+    if(!mCurrentScene) {
+        return 0;
+    }
+    return qMax(12, qRound(mCurrentScene->getFps()*kPreviewSteadyBufferSeconds));
+}
+
+int RenderHandler::previewBufferedAheadFrames(int anchorFrame, int maxFrames) const {
+    const auto frameState = previewFrameStateValue();
+    if(!mCurrentScene || maxFrames <= 0 || anchorFrame > frameState.fMaxFrame) {
+        return 0;
+    }
+    const int lastFrame = qMin(frameState.fMaxFrame, anchorFrame + maxFrames - 1);
+    int bufferedFrames = 0;
+    for(int frame = anchorFrame; frame <= lastFrame; frame++) {
+        if(!previewFrameReady(frame)) {
+            break;
+        }
+        bufferedFrames++;
+    }
+    return bufferedFrames;
+}
+
+bool RenderHandler::previewHasBufferedAhead(int anchorFrame, int targetFrames) const {
+    bool queuedPreviewWindowValid = false;
+    queuedPreviewWindowValue(&queuedPreviewWindowValid);
+    if(!mCurrentScene || targetFrames <= 0 || !queuedPreviewWindowValid) {
+        return false;
+    }
+    return previewBufferedAheadFrames(anchorFrame, targetFrames) >= targetFrames;
+}
+
+qreal RenderHandler::previewPlaybackRateForBufferedFrames(int bufferedFrames) const {
+    const int steadyFrames = previewSteadyBufferFrames();
+    const auto timingState = previewTimingStateValue();
+    if(timingState.fNominalIntervalMs <= 0 || steadyFrames <= 0) {
+        return 1.0;
+    }
+    if(bufferedFrames >= steadyFrames) {
+        return 1.0;
+    }
+    if(bufferedFrames <= 0) {
+        return 0.2;
+    }
+
+    const qreal ratio = qBound<qreal>(0.0,
+                                      qreal(bufferedFrames)/steadyFrames,
+                                      1.0);
+    return 0.2 + ratio*0.8;
+}
+
+void RenderHandler::updatePreviewPlaybackRate(int anchorFrame) {
+    auto timingState = previewTimingStateValue();
+    if(!mPreviewFPSTimer || timingState.fNominalIntervalMs <= 0) {
+        return;
+    }
+    const int bufferedFrames = previewBufferedAheadFrames(anchorFrame,
+                                                          previewSteadyBufferFrames());
+    timingState.fPlaybackRate =
+            previewPlaybackRateForBufferedFrames(bufferedFrames);
+    setPreviewTimingState(timingState);
+}
+
+void RenderHandler::restorePreviewResolution() {
+    if(!mCurrentScene) {
+        return;
+    }
+    const auto timingState = previewTimingStateValue();
+    if(!isZero6Dec(mCurrentScene->getResolution() - timingState.fBaseResolution)) {
+        mCurrentScene->setResolution(timingState.fBaseResolution);
+        mDocument.actionFinished();
+    }
+}
+
+void RenderHandler::activateInteractivePreviewCaching() {
+    if(backgroundCachingValue() || !mCurrentScene) {
+        return;
+    }
+    const auto nextFrameFunc = [this]() {
+        nextPreviewRenderFrame();
+    };
+    TaskScheduler::sSetTaskUnderflowFunc(nextFrameFunc);
+    TaskScheduler::sSetAllTasksFinishedFunc(nextFrameFunc);
+    setRenderingPreview(true);
+    if(TaskScheduler::sAllTasksFinished()) {
+        QTimer::singleShot(0, this, [this]() {
+            nextPreviewRenderFrame();
+        });
+    }
+}
+
+void RenderHandler::suspendInteractivePreviewCaching() {
+    if(backgroundCachingValue() || !renderingPreviewValue()) {
+        return;
+    }
+    TaskScheduler::sSetTaskUnderflowFunc(nullptr);
+    TaskScheduler::sSetAllTasksFinishedFunc(nullptr);
+    setRenderingPreview(false);
+}
+
+PreviewState RenderHandler::previewStateValue() const {
+    QReadLocker locker(&mPreviewStateLock);
+    return mPreviewState;
+}
+
+int RenderHandler::currentPreviewFrameValue() const {
+    QReadLocker locker(&mPreviewStateLock);
+    return mCurrentPreviewFrame;
+}
+
+RenderHandler::PreviewFrameState RenderHandler::previewFrameStateValue() const {
+    QReadLocker locker(&mPreviewStateLock);
+    return {mCurrentPreviewFrame, mMinPreviewFrame, mMaxPreviewFrame};
+}
+
+bool RenderHandler::previewingValue() const {
+    QReadLocker locker(&mPreviewStateLock);
+    return mPreviewing;
+}
+
+bool RenderHandler::renderingPreviewValue() const {
+    QReadLocker locker(&mPreviewStateLock);
+    return mRenderingPreview;
+}
+
+void RenderHandler::setCurrentPreviewFrameValue(int frame) {
+    QWriteLocker locker(&mPreviewStateLock);
+    mCurrentPreviewFrame = frame;
+}
+
+void RenderHandler::setPreviewFrameState(int minFrame,
+                                         int maxFrame,
+                                         int currentFrame) {
+    QWriteLocker locker(&mPreviewStateLock);
+    mMinPreviewFrame = minFrame;
+    mMaxPreviewFrame = maxFrame;
+    mCurrentPreviewFrame = currentFrame;
+}
+
+RenderHandler::PreviewTimingState RenderHandler::previewTimingStateValue() const {
+    QReadLocker locker(&mPreviewStateLock);
+    return {mPreviewNominalIntervalMs,
+            mPreviewTickIntervalMs,
+            mPreviewFrameAccumulator,
+            mPreviewPlaybackRate,
+            mPreviewWaitingForCache,
+            mPreviewAudioPausedForCache,
+            mPreviewAudioNeedsRestart,
+            mPreviewAudioActive,
+            mPreviewRenderCursorRetargeted,
+            mBackgroundCaching,
+            mBackgroundCacheVisibleFrame,
+            mPreviewBaseResolution};
+}
+
+void RenderHandler::setPreviewTimingState(const PreviewTimingState &state) {
+    QWriteLocker locker(&mPreviewStateLock);
+    mPreviewNominalIntervalMs = state.fNominalIntervalMs;
+    mPreviewTickIntervalMs = state.fTickIntervalMs;
+    mPreviewFrameAccumulator = state.fFrameAccumulator;
+    mPreviewPlaybackRate = state.fPlaybackRate;
+    mPreviewWaitingForCache = state.fWaitingForCache;
+    mPreviewAudioPausedForCache = state.fAudioPausedForCache;
+    mPreviewAudioNeedsRestart = state.fAudioNeedsRestart;
+    mPreviewAudioActive = state.fAudioActive;
+    mPreviewRenderCursorRetargeted = state.fRenderCursorRetargeted;
+    mBackgroundCaching = state.fBackgroundCaching;
+    mBackgroundCacheVisibleFrame = state.fBackgroundCacheVisibleFrame;
+    mPreviewBaseResolution = state.fBaseResolution;
+}
+
+FrameRange RenderHandler::queuedPreviewWindowValue(bool *valid) const {
+    QReadLocker locker(&mPreviewStateLock);
+    if(valid) {
+        *valid = mQueuedPreviewWindowValid;
+    }
+    return mQueuedPreviewWindow;
+}
+
+void RenderHandler::setQueuedPreviewWindowValue(const FrameRange &range,
+                                                bool valid) {
+    QWriteLocker locker(&mPreviewStateLock);
+    mQueuedPreviewWindow = range;
+    mQueuedPreviewWindowValid = valid;
+}
+
+FrameRange RenderHandler::pinnedPreviewWindowValue(bool *valid) const {
+    QReadLocker locker(&mPreviewStateLock);
+    if(valid) {
+        *valid = mPinnedPreviewWindowValid;
+    }
+    return mPinnedPreviewWindow;
+}
+
+void RenderHandler::setPinnedPreviewWindowValue(const FrameRange &range,
+                                                bool valid) {
+    QWriteLocker locker(&mPreviewStateLock);
+    mPinnedPreviewWindow = range;
+    mPinnedPreviewWindowValid = valid;
+}
+
+FrameRange RenderHandler::previewPlayedRangeValue() const {
+    QReadLocker locker(&mPreviewStateLock);
+    return mPreviewPlayedRange;
+}
+
+void RenderHandler::setPreviewPlayedRangeValue(const FrameRange &range) {
+    QWriteLocker locker(&mPreviewStateLock);
+    mPreviewPlayedRange = range;
+}
+
+void RenderHandler::appendPreviewPlayedFrameValue(int frame) {
+    QWriteLocker locker(&mPreviewStateLock);
+    if(mPreviewPlayedRange.isValid()) {
+        mPreviewPlayedRange += FrameRange{frame, frame};
+    } else {
+        mPreviewPlayedRange = {frame, frame};
+    }
+}
+
+bool RenderHandler::backgroundCachingValue() const {
+    QReadLocker locker(&mPreviewStateLock);
+    return mBackgroundCaching;
+}
+
+void RenderHandler::setBackgroundCachingValue(bool backgroundCaching) {
+    QWriteLocker locker(&mPreviewStateLock);
+    mBackgroundCaching = backgroundCaching;
+}
+
+bool RenderHandler::previewRenderCursorRetargetedValue() const {
+    QReadLocker locker(&mPreviewStateLock);
+    return mPreviewRenderCursorRetargeted;
+}
+
+void RenderHandler::setPreviewRenderCursorRetargetedValue(bool retargeted) {
+    QWriteLocker locker(&mPreviewStateLock);
+    mPreviewRenderCursorRetargeted = retargeted;
 }

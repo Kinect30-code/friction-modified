@@ -29,12 +29,14 @@
 #include <QApplication>
 #include <QLabel>
 #include <QPushButton>
+#include <QToolButton>
 #include <QHBoxLayout>
 #include <QDebug>
 #include <QCloseEvent>
 #include <QMouseEvent>
 #include <QMoveEvent>
 #include <QTimer>
+#include <QTabBar>
 
 #define UI_CONF_GROUP "uiLayout"
 #define UI_CONF_KEY_POS "pos_%1"
@@ -42,11 +44,13 @@
 #define UI_CONF_KEY_FLOATING "floating_%1"
 #define UI_CONF_KEY_FLOATING_GEOMETRY "floatingGeometry_%1"
 #define UI_CONF_KEY_MAIN "uiMain"
+#define UI_CONF_KEY_COLUMNS "uiColumns"
 #define UI_CONF_KEY_LEFT "uiLeft"
 #define UI_CONF_KEY_MIDDLE "uiMiddle"
 #define UI_CONF_KEY_RIGHT "uiRight"
 #define UI_CONF_KEY_TOP "uiTop"
-#define UI_CONF_KEY_BOTTOM "uiBottom"
+#define UI_CONF_KEY_BOTTOM_CURRENT "uiBottomCurrent"
+#define UI_CONF_KEY_COLLAPSED "collapsed_%1"
 
 class FloatingDockWindow final : public QWidget
 {
@@ -111,22 +115,48 @@ private:
         if (!hostRect.isValid()) { return; }
 
         const QRect selfRect = frameGeometry();
-        const QPoint center = selfRect.center();
-        constexpr int threshold = 80;
+        constexpr int threshold = 120;
+        constexpr int minOverlap = 48;
 
         int bestDistance = threshold + 1;
         int bestPos = -1;
 
-        const auto consider = [&](const int distance, const UIDock::Position pos) {
-            if (distance > threshold || distance >= bestDistance) { return; }
+        const auto overlapLength = [](const int a1,
+                                      const int a2,
+                                      const int b1,
+                                      const int b2) {
+            return qMax(0, qMin(a2, b2) - qMax(a1, b1));
+        };
+
+        const int overlapX = overlapLength(selfRect.left(),
+                                           selfRect.right(),
+                                           hostRect.left(),
+                                           hostRect.right());
+        const int overlapY = overlapLength(selfRect.top(),
+                                           selfRect.bottom(),
+                                           hostRect.top(),
+                                           hostRect.bottom());
+
+        const auto consider = [&](const int distance,
+                                  const int overlap,
+                                  const UIDock::Position pos) {
+            if (overlap < minOverlap || distance > threshold || distance >= bestDistance) { return; }
             bestDistance = distance;
             bestPos = static_cast<int>(pos);
         };
 
-        consider(qAbs(center.x() - hostRect.left()), UIDock::Position::Left);
-        consider(qAbs(center.x() - hostRect.right()), UIDock::Position::Right);
-        consider(qAbs(center.y() - hostRect.top()), UIDock::Position::Up);
-        consider(qAbs(center.y() - hostRect.bottom()), UIDock::Position::Down);
+        consider(qAbs(selfRect.left() - hostRect.left()),
+                 overlapY,
+                 UIDock::Position::Left);
+        consider(qAbs(selfRect.right() - hostRect.right()),
+                 overlapY,
+                 UIDock::Position::Right);
+        consider(qAbs(selfRect.top() - hostRect.top()),
+                 overlapX,
+                 UIDock::Position::Up);
+        consider(qAbs(selfRect.bottom() - hostRect.bottom()),
+                 overlapX,
+                 UIDock::Position::Down);
 
         if (bestPos >= 0) {
             emit requestDockBack(mLabel, bestPos);
@@ -244,6 +274,7 @@ UIDock::UIDock(QWidget *parent,
 
     if (showHeader) {
         const auto headerWidget = new DockHeaderWidget(this);
+        mHeaderWidget = headerWidget;
         const auto headerLayout = new QHBoxLayout(headerWidget);
         headerWidget->setObjectName(QStringLiteral("UIDockHeader"));
 
@@ -259,36 +290,45 @@ UIDock::UIDock(QWidget *parent,
         headerLayout->setMargin(0);
         headerLayout->setSpacing(0);
 
+        const auto collapseButton = new QToolButton(this);
         const auto leftButton = new QPushButton(this);
         const auto rightButton = new QPushButton(this);
         const auto upButton = new QPushButton(this);
         const auto downButton = new QPushButton(this);
         const auto floatButton = new QPushButton(this);
+        mCollapseButton = collapseButton;
 
+        collapseButton->setArrowType(Qt::DownArrow);
+        collapseButton->setAutoRaise(true);
         leftButton->setIcon(QIcon::fromTheme("leftarrow"));
         rightButton->setIcon(QIcon::fromTheme("rightarrow"));
         upButton->setIcon(QIcon::fromTheme("uparrow"));
         downButton->setIcon(QIcon::fromTheme("downarrow"));
         floatButton->setIcon(QIcon::fromTheme("window-new"));
 
+        collapseButton->setFocusPolicy(Qt::NoFocus);
         leftButton->setFocusPolicy(Qt::NoFocus);
         rightButton->setFocusPolicy(Qt::NoFocus);
         upButton->setFocusPolicy(Qt::NoFocus);
         downButton->setFocusPolicy(Qt::NoFocus);
         floatButton->setFocusPolicy(Qt::NoFocus);
 
+        collapseButton->setObjectName("FlatButton");
         leftButton->setObjectName("FlatButton");
         rightButton->setObjectName("FlatButton");
         upButton->setObjectName("FlatButton");
         downButton->setObjectName("FlatButton");
         floatButton->setObjectName("FlatButton");
 
+        collapseButton->setToolTip(tr("Collapse panel"));
         leftButton->setToolTip(tr("Left"));
         rightButton->setToolTip(tr("Right"));
         upButton->setToolTip(tr("Up"));
         downButton->setToolTip(tr("Down"));
         floatButton->setToolTip(tr("Float panel"));
 
+        collapseButton->setSizePolicy(QSizePolicy::Fixed,
+                                      QSizePolicy::Fixed);
         leftButton->setSizePolicy(QSizePolicy::Fixed,
                                   QSizePolicy::Fixed);
         rightButton->setSizePolicy(QSizePolicy::Fixed,
@@ -300,6 +340,7 @@ UIDock::UIDock(QWidget *parent,
         floatButton->setSizePolicy(QSizePolicy::Fixed,
                                    QSizePolicy::Fixed);
 
+        headerLayout->addWidget(collapseButton);
         headerLayout->addWidget(leftButton);
         headerLayout->addWidget(rightButton);
         headerLayout->addWidget(floatButton);
@@ -307,6 +348,7 @@ UIDock::UIDock(QWidget *parent,
 
         if (showLabel) {
             const auto dockLabel = new QLabel(this);
+            mDockLabel = dockLabel;
             dockLabel->setObjectName(QStringLiteral("UIDockLabel"));
             dockLabel->setText(mLabel);
             headerLayout->addWidget(dockLabel);
@@ -318,6 +360,15 @@ UIDock::UIDock(QWidget *parent,
 
         mLayout->addWidget(headerWidget);
 
+        mSideCollapseWidgets << leftButton
+                             << rightButton
+                             << floatButton
+                             << upButton
+                             << downButton;
+        if (mDockLabel) { mSideCollapseWidgets << mDockLabel; }
+
+        connect(collapseButton, &QToolButton::clicked,
+                this, [this]() { setCollapsed(!mCollapsed); });
         connect(leftButton, &QPushButton::clicked,
                 this, [this]() { emit changePosition(mPos, Position::Left); });
         connect(rightButton, &QPushButton::clicked,
@@ -339,7 +390,14 @@ UIDock::UIDock(QWidget *parent,
         connect(headerWidget, &DockHeaderWidget::dragFinished,
                 this, [this]() { emit endInteractiveDrag(); });
     }
-    mLayout->addWidget(widget);
+
+    mContentWidget = new QWidget(this);
+    mContentLayout = new QVBoxLayout(mContentWidget);
+    mContentLayout->setContentsMargins(0, 0, 0, 0);
+    mContentLayout->setSpacing(0);
+    mLayout->addWidget(mContentWidget);
+    addWidget(widget);
+    updateCollapseUi();
 }
 
 UIDock::~UIDock()
@@ -350,6 +408,7 @@ UIDock::~UIDock()
 void UIDock::setPosition(const Position &pos)
 {
     mPos = pos;
+    applyCollapseState(false);
 }
 
 UIDock::Position UIDock::getPosition()
@@ -379,12 +438,144 @@ const QString UIDock::getId()
 
 void UIDock::addWidget(QWidget *widget)
 {
-    mLayout->addWidget(widget);
+    if (!widget) { return; }
+    if (mContentLayout) {
+        mContentLayout->addWidget(widget);
+    } else {
+        mLayout->addWidget(widget);
+    }
 }
 
 void UIDock::setFloating(bool floating)
 {
     mFloating = floating;
+}
+
+void UIDock::setCollapsed(bool collapsed)
+{
+    if (mCollapsed == collapsed) { return; }
+    mCollapsed = collapsed;
+    applyCollapseState(true);
+    writeSettings();
+}
+
+void UIDock::updateCollapseUi()
+{
+    const bool sideStripCollapsed =
+        mCollapsed && (mPos == Position::Left || mPos == Position::Right);
+
+    if (const auto button = qobject_cast<QToolButton*>(mCollapseButton)) {
+        button->setArrowType(mCollapsed ? Qt::RightArrow : Qt::DownArrow);
+        button->setToolTip(mCollapsed ? tr("Expand panel")
+                                      : tr("Collapse panel"));
+    }
+
+    for (auto *widget : mSideCollapseWidgets) {
+        if (widget) { widget->setVisible(!sideStripCollapsed); }
+    }
+}
+
+int UIDock::currentExtent() const
+{
+    const bool collapseWidth = (mPos == Position::Left || mPos == Position::Right);
+    const int current = collapseWidth ? width() : height();
+    if (current > 0) { return current; }
+    const QSize hint = sizeHint();
+    return collapseWidth ? hint.width() : hint.height();
+}
+
+int UIDock::collapsedExtent() const
+{
+    const bool collapseWidth = (mPos == Position::Left || mPos == Position::Right);
+    if (mHeaderWidget) {
+        const QSize hint = mHeaderWidget->minimumSizeHint();
+        return qMax(24, collapseWidth ? hint.width() : hint.height());
+    }
+    return 24;
+}
+
+void UIDock::applyCollapseState(bool adjustSplitter)
+{
+    updateCollapseUi();
+    if (mContentWidget) { mContentWidget->setVisible(!mCollapsed); }
+
+    setMinimumWidth(0);
+    setMaximumWidth(QWIDGETSIZE_MAX);
+    setMinimumHeight(0);
+    setMaximumHeight(QWIDGETSIZE_MAX);
+
+    const bool collapseWidth = (mPos == Position::Left || mPos == Position::Right);
+    const int collapsedSize = collapsedExtent();
+    if (mCollapsed) {
+        const int extent = currentExtent();
+        if (extent > collapsedSize + 8) {
+            mExpandedExtent = extent;
+        }
+        if (collapseWidth) {
+            setMinimumWidth(collapsedSize);
+            setMaximumWidth(collapsedSize);
+        } else {
+            setMinimumHeight(collapsedSize);
+            setMaximumHeight(collapsedSize);
+        }
+    }
+
+    updateGeometry();
+
+    if (!adjustSplitter) { return; }
+
+    const int expandedDefault = collapseWidth ? 300 : 260;
+    const int targetExtent = mCollapsed
+                                 ? collapsedSize
+                                 : qMax(mExpandedExtent, expandedDefault);
+
+    QWidget *splitterChild = this;
+    QWidget *splitterParent = parentWidget();
+    while (splitterParent && !qobject_cast<QSplitter*>(splitterParent)) {
+        splitterChild = splitterParent;
+        splitterParent = splitterParent->parentWidget();
+    }
+
+    if (const auto splitter = qobject_cast<QSplitter*>(splitterParent)) {
+        auto sizes = splitter->sizes();
+        const int index = splitter->indexOf(splitterChild);
+        if (index >= 0 && index < sizes.size()) {
+            int currentSize = sizes.at(index);
+            if (currentSize <= 0) { currentSize = currentExtent(); }
+            const int delta = targetExtent - currentSize;
+            sizes[index] = targetExtent;
+
+            if (delta != 0) {
+                int adjustIndex = -1;
+                int largestSize = -1;
+                for (int i = 0; i < sizes.size(); ++i) {
+                    if (i == index) { continue; }
+                    const auto candidate = splitter->widget(i);
+                    if (!candidate || !candidate->isVisible()) { continue; }
+                    if (sizes.at(i) > largestSize) {
+                        largestSize = sizes.at(i);
+                        adjustIndex = i;
+                    }
+                }
+                if (adjustIndex >= 0) {
+                    sizes[adjustIndex] = qMax(0, sizes.at(adjustIndex) - delta);
+                }
+            }
+
+            splitter->setSizes(sizes);
+        }
+        return;
+    }
+
+    if (isFloating()) {
+        const auto floatingWindow = parentWidget();
+        if (!floatingWindow || floatingWindow == this) { return; }
+        if (collapseWidth) {
+            floatingWindow->resize(targetExtent, floatingWindow->height());
+        } else {
+            floatingWindow->resize(floatingWindow->width(), targetExtent);
+        }
+    }
 }
 
 void UIDock::writeSettings()
@@ -400,44 +591,60 @@ void UIDock::writeSettings()
     AppSupport::setSettings(UI_CONF_GROUP,
                             QString(UI_CONF_KEY_INDEX).arg(getId()),
                             mIndex);
+    AppSupport::setSettings(UI_CONF_GROUP,
+                            QString(UI_CONF_KEY_COLLAPSED).arg(getId()),
+                            mCollapsed);
 }
 
 UILayout::UILayout(QWidget *parent)
     : QSplitter{parent}
+    , mColumns(nullptr)
     , mLeft(nullptr)
     , mMiddle(nullptr)
     , mRight(nullptr)
     , mTop(nullptr)
-    , mBottom(nullptr)
+    , mBottomTabs(nullptr)
 {
-    setOrientation(Qt::Horizontal);
+    setOrientation(Qt::Vertical);
 
-    mLeft = new QSplitter(this);
+    mColumns = new QSplitter(this);
+    mColumns->setOrientation(Qt::Horizontal);
+    addWidget(mColumns);
+
+    mLeft = new QSplitter(mColumns);
     mLeft->setOrientation(Qt::Vertical);
-    addWidget(mLeft);
+    mColumns->addWidget(mLeft);
 
-    mMiddle = new QSplitter(this);
+    mMiddle = new QSplitter(mColumns);
     mMiddle->setOrientation(Qt::Vertical);
-    addWidget(mMiddle);
+    mColumns->addWidget(mMiddle);
 
-    mRight = new QSplitter(this);
+    mRight = new QSplitter(mColumns);
     mRight->setOrientation(Qt::Vertical);
-    addWidget(mRight);
+    mColumns->addWidget(mRight);
 
     mTop = new QSplitter(this);
     mTop->setOrientation(Qt::Horizontal);
     mMiddle->addWidget(mTop);
 
-    mBottom = new QSplitter(this);
-    mBottom->setOrientation(Qt::Horizontal);
-    mMiddle->addWidget(mBottom);
+    mBottomTabs = new QTabWidget(this);
+    mBottomTabs->setObjectName("AePanelTabs");
+    mBottomTabs->setDocumentMode(true);
+    mBottomTabs->setTabsClosable(false);
+    mBottomTabs->setMovable(false);
+    mBottomTabs->tabBar()->setFocusPolicy(Qt::NoFocus);
+    mBottomTabs->tabBar()->setExpanding(false);
+    mBottomTabs->setContentsMargins(0, 0, 0, 0);
+    mBottomTabs->setTabPosition(QTabWidget::North);
+    addWidget(mBottomTabs);
 
-    setCollapsible(indexOf(mLeft), false);
-    setCollapsible(indexOf(mMiddle), false);
-    setCollapsible(indexOf(mRight), false);
+    setCollapsible(indexOf(mColumns), false);
+    setCollapsible(indexOf(mBottomTabs), false);
 
+    mColumns->setCollapsible(mColumns->indexOf(mLeft), false);
+    mColumns->setCollapsible(mColumns->indexOf(mMiddle), false);
+    mColumns->setCollapsible(mColumns->indexOf(mRight), false);
     mMiddle->setCollapsible(mMiddle->indexOf(mTop), false);
-    mMiddle->setCollapsible(mMiddle->indexOf(mBottom), false);
 }
 
 UILayout::~UILayout()
@@ -448,27 +655,41 @@ UILayout::~UILayout()
 
 void UILayout::readSettings()
 {
-    bool firstrun = AppSupport::getSettings(UI_CONF_GROUP, UI_CONF_KEY_MAIN).isNull();
-    restoreState(AppSupport::getSettings(UI_CONF_GROUP, UI_CONF_KEY_MAIN).toByteArray());
+    const bool firstrun = AppSupport::getSettings(UI_CONF_GROUP, UI_CONF_KEY_COLUMNS).isNull();
+    const bool mainRestored =
+        restoreState(AppSupport::getSettings(UI_CONF_GROUP, UI_CONF_KEY_MAIN).toByteArray());
+    const bool columnsRestored =
+        mColumns->restoreState(AppSupport::getSettings(UI_CONF_GROUP, UI_CONF_KEY_COLUMNS).toByteArray());
     mLeft->restoreState(AppSupport::getSettings(UI_CONF_GROUP, UI_CONF_KEY_LEFT).toByteArray());
     mMiddle->restoreState(AppSupport::getSettings(UI_CONF_GROUP, UI_CONF_KEY_MIDDLE).toByteArray());
     mRight->restoreState(AppSupport::getSettings(UI_CONF_GROUP, UI_CONF_KEY_RIGHT).toByteArray());
     mTop->restoreState(AppSupport::getSettings(UI_CONF_GROUP, UI_CONF_KEY_TOP).toByteArray());
-    mBottom->restoreState(AppSupport::getSettings(UI_CONF_GROUP, UI_CONF_KEY_BOTTOM).toByteArray());
 
-    if (firstrun) {
-        setSizes({300, 1024, 300});
+    if (firstrun || !mainRestored || !columnsRestored) {
+        applyAeDefaultWorkspace();
     }
+
+    const int currentBottomTab =
+        AppSupport::getSettings(UI_CONF_GROUP,
+                                UI_CONF_KEY_BOTTOM_CURRENT,
+                                0).toInt();
+    if (currentBottomTab >= 0 && currentBottomTab < mBottomTabs->count()) {
+        mBottomTabs->setCurrentIndex(currentBottomTab);
+    }
+    updateBottomTabsVisibility();
 }
 
 void UILayout::writeSettings()
 {
     AppSupport::setSettings(UI_CONF_GROUP, UI_CONF_KEY_MAIN, saveState());
+    AppSupport::setSettings(UI_CONF_GROUP, UI_CONF_KEY_COLUMNS, mColumns->saveState());
     AppSupport::setSettings(UI_CONF_GROUP, UI_CONF_KEY_LEFT, mLeft->saveState());
     AppSupport::setSettings(UI_CONF_GROUP, UI_CONF_KEY_MIDDLE, mMiddle->saveState());
     AppSupport::setSettings(UI_CONF_GROUP, UI_CONF_KEY_RIGHT, mRight->saveState());
     AppSupport::setSettings(UI_CONF_GROUP, UI_CONF_KEY_TOP, mTop->saveState());
-    AppSupport::setSettings(UI_CONF_GROUP, UI_CONF_KEY_BOTTOM, mBottom->saveState());
+    AppSupport::setSettings(UI_CONF_GROUP,
+                            UI_CONF_KEY_BOTTOM_CURRENT,
+                            mBottomTabs ? mBottomTabs->currentIndex() : 0);
     for (auto it = mDocks.constBegin(); it != mDocks.constEnd(); ++it) {
         const auto label = it.key();
         AppSupport::setSettings(UI_CONF_GROUP,
@@ -484,12 +705,12 @@ void UILayout::writeSettings()
 
 void UILayout::applyAeDefaultWorkspace()
 {
-    setSizes({380, 1280, 300});
-    mMiddle->setSizes({760, 380});
+    setSizes({860, 340});
+    mColumns->setSizes({360, 1320, 320});
     mLeft->setSizes({620, 320});
-    mRight->setSizes({560, 380});
+    mMiddle->setSizes({900});
+    mRight->setSizes({420, 260, 220});
     mTop->setSizes({1280});
-    mBottom->setSizes({1280});
 }
 
 void UILayout::addDocks(std::vector<Item> items)
@@ -564,6 +785,7 @@ void UILayout::addDocks(std::vector<Item> items)
 void UILayout::setDockVisible(const QString &label,
                               bool visible)
 {
+    mDockVisibility.insert(label, visible);
     emit updateDockVisibility(label, visible);
 }
 
@@ -593,6 +815,11 @@ void UILayout::setDockFloating(const QString &label,
         });
         mFloatingWindows.insert(label, window);
 
+        const int tabIndex = mBottomTabs->indexOf(dock);
+        if (tabIndex >= 0) {
+            mBottomTabs->removeTab(tabIndex);
+            updateBottomTabsVisibility();
+        }
         dock->setParent(window);
         dock->setFloating(true);
         window->setDockWidget(dock);
@@ -609,6 +836,7 @@ void UILayout::setDockFloating(const QString &label,
         window->show();
         window->raise();
         window->activateWindow();
+        setDockPageVisible(dock, mDockVisibility.value(label, true));
         updateDocks();
         return;
     }
@@ -643,6 +871,11 @@ bool UILayout::isDockFloating(const QString &label) const
     return mFloatingWindows.contains(label);
 }
 
+bool UILayout::isDockVisible(const QString &label) const
+{
+    return mDockVisibility.value(label, true);
+}
+
 void UILayout::addDockWidget(const QString &label, QWidget *widget)
 {
     if (!widget) { return; }
@@ -661,8 +894,19 @@ void UILayout::addDock(const Item &item)
                                  item.showHeader,
                                  item.darkHeader);
     mDocks.insert(item.label, dock);
+    mDockVisibility.insert(item.label, item.widget->isVisible());
     insertDock(dock, static_cast<UIDock::Position>(item.pos), item.index);
     connectDock(dock);
+    setDockPageVisible(dock, mDockVisibility.value(item.label, true));
+    const bool collapsed =
+        AppSupport::getSettings(UI_CONF_GROUP,
+                                QString(UI_CONF_KEY_COLLAPSED).arg(dock->getId()),
+                                false).toBool();
+    if (collapsed) {
+        QTimer::singleShot(0,
+                           dock,
+                           [dock]() { dock->setCollapsed(true); });
+    }
 }
 
 void UILayout::connectDock(UIDock *dock)
@@ -671,110 +915,35 @@ void UILayout::connectDock(UIDock *dock)
     connect(this,
             &UILayout::updateDockVisibility,
             this,
-            [dock](const QString &label,
-                   bool visible) {
+            [this, dock](const QString &label,
+                         bool visible) {
                 if (dock->getLabel() != label) { return; }
+                setDockPageVisible(dock, visible);
                 if (const auto window = dock->window()) {
                     if (dock->isFloating() && window != dock) {
                         window->setVisible(visible);
-                    } else {
-                        dock->setVisible(visible);
                     }
-                } else {
-                    dock->setVisible(visible);
                 }
             });
     connect(this,
             &UILayout::updateDockWidget,
             this,
-            [dock](const QString &label,
-                   QWidget *widget) {
+            [this, dock](const QString &label,
+                         QWidget *widget) {
                 if (dock->getLabel() == label) {
                     dock->addWidget(widget);
-                    dock->setVisible(true);
+                    mDockVisibility.insert(label, true);
+                    setDockPageVisible(dock, true);
                 }
             });
     connect(dock,
             &UIDock::changePosition,
             this,
-            [this, dock](const UIDock::Position &pos,
+            [this, dock](const UIDock::Position &,
                          const UIDock::Position &trigger)
             {
-                int index = -1;
-                int count = -1;
-                switch (pos) {
-                case UIDock::Position::Left:
-                    index = mLeft->indexOf(dock);
-                    count = mLeft->count();
-                    break;
-                case UIDock::Position::Right:
-                    index = mRight->indexOf(dock);
-                    count = mRight->count();
-                    break;
-                case UIDock::Position::Up:
-                    index = mTop->indexOf(dock);
-                    count = mTop->count();
-                    break;
-                case UIDock::Position::Down:
-                    index = mBottom->indexOf(dock);
-                    count = mBottom->count();
-                    break;
-                }
-                if (index < 0 || count <= 0) { return; }
-                switch (pos) {
-                case UIDock::Position::Left:
-                    if (trigger == UIDock::Position::Down && (index + 1) < count) {
-                        mLeft->insertWidget(index + 1, dock);
-                    } else if (trigger == UIDock::Position::Up && index > 0) {
-                        mLeft->insertWidget(index - 1, dock);
-                    } else if (trigger == UIDock::Position::Right) {
-                        mTop->insertWidget(0, dock);
-                    } else if (trigger == UIDock::Position::Left) {
-                        mRight->addWidget(dock);
-                    }
-                    break;
-                case UIDock::Position::Right:
-                    if (trigger == UIDock::Position::Down && (index + 1) < count) {
-                        mRight->insertWidget(index + 1, dock);
-                    } else if (trigger == UIDock::Position::Up && index > 0) {
-                        mRight->insertWidget(index - 1, dock);
-                    } else if (trigger == UIDock::Position::Right) {
-                        mLeft->addWidget(dock);
-                    } else if (trigger == UIDock::Position::Left) {
-                        mTop->addWidget(dock);
-                    }
-                    break;
-                case UIDock::Position::Up:
-                    if (trigger == UIDock::Position::Right && (index + 1) < count) {
-                        mTop->insertWidget(index + 1, dock);
-                    } else if (trigger == UIDock::Position::Right && (index + 1) >= count) {
-                        mRight->insertWidget(index + 1, dock);
-                    } else if (trigger == UIDock::Position::Left && index > 0) {
-                        mTop->insertWidget(index - 1, dock);
-                    } else if (trigger == UIDock::Position::Left && index == 0) {
-                        mLeft->insertWidget(index - 1, dock);
-                    } else if (trigger == UIDock::Position::Down && index == 0) {
-                        mBottom->insertWidget(0, dock);
-                    } else if (trigger == UIDock::Position::Down) {
-                        mBottom->addWidget(dock);
-                    }
-                    break;
-                case UIDock::Position::Down:
-                    if (trigger == UIDock::Position::Right && (index + 1) < count) {
-                        mBottom->insertWidget(index + 1, dock);
-                    } else if (trigger == UIDock::Position::Right && (index + 1) >= count) {
-                        mRight->insertWidget(index + 1, dock);
-                    } else if (trigger == UIDock::Position::Left && index > 0) {
-                        mBottom->insertWidget(index - 1, dock);
-                    } else if (trigger == UIDock::Position::Left && index == 0) {
-                        mLeft->insertWidget(index - 1, dock);
-                    } else if (trigger == UIDock::Position::Up && index == 0) {
-                        mTop->insertWidget(0, dock);
-                    } else if (trigger == UIDock::Position::Up) {
-                        mTop->addWidget(dock);
-                    }
-                    break;
-                }
+                if (dock->getPosition() == trigger) { return; }
+                insertDock(dock, trigger, -1);
                 updateDocks();
             });
     connect(dock, &UIDock::requestFloating,
@@ -835,7 +1004,14 @@ void UILayout::updateDocks()
     updateDock(mLeft, UIDock::Position::Left);
     updateDock(mRight, UIDock::Position::Right);
     updateDock(mTop, UIDock::Position::Up);
-    updateDock(mBottom, UIDock::Position::Down);
+    for (int i = 0; i < mBottomTabs->count(); ++i) {
+        UIDock *dock = qobject_cast<UIDock*>(mBottomTabs->widget(i));
+        if (!dock) { continue; }
+        dock->setPosition(UIDock::Position::Down);
+        dock->setIndex(i);
+        qDebug() << "==> update dock" << dock->getLabel() << dock->getPosition() << dock->getIndex();
+    }
+    updateBottomTabsVisibility();
 }
 
 QSplitter *UILayout::containerForPosition(const UIDock::Position &pos) const
@@ -848,7 +1024,7 @@ QSplitter *UILayout::containerForPosition(const UIDock::Position &pos) const
     case UIDock::Position::Up:
         return mTop;
     case UIDock::Position::Down:
-        return mBottom;
+        return nullptr;
     }
     return nullptr;
 }
@@ -858,6 +1034,27 @@ void UILayout::insertDock(UIDock *dock,
                           int index)
 {
     if (!dock) { return; }
+    const int bottomIndex = mBottomTabs->indexOf(dock);
+    if (bottomIndex >= 0) {
+        mBottomTabs->removeTab(bottomIndex);
+    }
+
+    if (pos == UIDock::Position::Down) {
+        dock->setParent(nullptr);
+        dock->setPosition(pos);
+        if (index >= 0 && index < mBottomTabs->count()) {
+            mBottomTabs->insertTab(index, dock, dock->getLabel());
+        } else {
+            mBottomTabs->addTab(dock, dock->getLabel());
+        }
+        if (mDockVisibility.value(dock->getLabel(), true)) {
+            mBottomTabs->setCurrentWidget(dock);
+        }
+        setDockPageVisible(dock, mDockVisibility.value(dock->getLabel(), true));
+        updateBottomTabsVisibility();
+        return;
+    }
+
     const auto container = containerForPosition(pos);
     if (!container) { return; }
     dock->setPosition(pos);
@@ -867,6 +1064,51 @@ void UILayout::insertDock(UIDock *dock,
         container->addWidget(dock);
     }
     container->setCollapsible(container->indexOf(dock), false);
+    setDockPageVisible(dock, mDockVisibility.value(dock->getLabel(), true));
+}
+
+void UILayout::setDockPageVisible(UIDock *dock,
+                                  bool visible)
+{
+    if (!dock) { return; }
+
+    const int tabIndex = mBottomTabs->indexOf(dock);
+    if (tabIndex >= 0) {
+        mBottomTabs->tabBar()->setTabVisible(tabIndex, visible);
+        dock->setVisible(visible);
+        if (visible) {
+            if (mBottomTabs->currentIndex() < 0 ||
+                !mBottomTabs->tabBar()->isTabVisible(mBottomTabs->currentIndex())) {
+                mBottomTabs->setCurrentIndex(tabIndex);
+            }
+        } else if (mBottomTabs->currentIndex() == tabIndex) {
+            for (int i = 0; i < mBottomTabs->count(); ++i) {
+                if (mBottomTabs->tabBar()->isTabVisible(i)) {
+                    mBottomTabs->setCurrentIndex(i);
+                    break;
+                }
+            }
+        }
+        updateBottomTabsVisibility();
+        return;
+    }
+
+    dock->setVisible(visible);
+}
+
+void UILayout::updateBottomTabsVisibility()
+{
+    if (!mBottomTabs) { return; }
+
+    bool hasVisibleTabs = false;
+    for (int i = 0; i < mBottomTabs->count(); ++i) {
+        if (mBottomTabs->tabBar()->isTabVisible(i)) {
+            hasVisibleTabs = true;
+            break;
+        }
+    }
+
+    mBottomTabs->setVisible(hasVisibleTabs);
 }
 
 #include "uilayout.moc"

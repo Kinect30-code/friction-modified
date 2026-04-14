@@ -166,6 +166,9 @@ void ToolBox::setupMainAction(const QIcon &icon,
         case CanvasMode::rectCreate:
             mActions.setRectangleMode();
             break;
+        case CanvasMode::polygonCreate:
+            mActions.setPolygonMode();
+            break;
         case CanvasMode::textCreate:
             mActions.setTextMode();
             break;
@@ -291,6 +294,17 @@ void ToolBox::setupMainActions()
                     {CanvasMode::circleCreate},
                     false);
     const auto ellipseAction = lastMainAction();
+    setupMainAction(QIcon::fromTheme("polygonCreate",
+                                     QIcon::fromTheme("draw-polygon",
+                                                      QIcon::fromTheme("shape-polygon",
+                                                                       QIcon::fromTheme("rectCreate")))),
+                    tr("Polygon Tool"),
+                    QKeySequence(AppSupport::getSettings("shortcuts",
+                                                         "polygonMode",
+                                                         "").toString()),
+                    {CanvasMode::polygonCreate},
+                    false);
+    const auto polygonAction = lastMainAction();
     setupMainAction(QIcon::fromTheme("rectCreate"),
                     tr("Shape Tool"),
                     QKeySequence(AppSupport::getSettings("shortcuts",
@@ -363,9 +377,10 @@ void ToolBox::setupMainActions()
                             {CanvasMode::drawPath, freehandAction}},
                            penAction);
     addMainToolbarAction(puppetPinAction);
-    addMainToolGroupButton({rectAction, ellipseAction},
+    addMainToolGroupButton({rectAction, ellipseAction, polygonAction},
                            {{CanvasMode::rectCreate, rectAction},
-                            {CanvasMode::circleCreate, ellipseAction}},
+                            {CanvasMode::circleCreate, ellipseAction},
+                            {CanvasMode::polygonCreate, polygonAction}},
                            rectAction);
     addMainToolbarAction(textAction);
     addMainToolbarAction(nullAction);

@@ -44,6 +44,8 @@ ColorToolBar::ColorToolBar(Document &document,
     setWindowTitle(tr("Color Toolbar"));
     setObjectName("ColorToolBar");
     setToolButtonStyle(Qt::ToolButtonIconOnly);
+    setAllowedAreas(Qt::AllToolBarAreas);
+    setFloatable(true);
 #ifdef Q_OS_MAC
     setStyleSheet(QString("font-size: %1pt;").arg(font().pointSize()));
 #endif

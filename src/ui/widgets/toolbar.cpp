@@ -102,6 +102,8 @@ void ToolBar::setup()
     setMovable(AppSupport::getSettings("ui",
                                        QString("ToolBarMovable_%1").arg(objectName()),
                                        false).toBool());
+    setAllowedAreas(Qt::AllToolBarAreas);
+    setFloatable(true);
     setFocusPolicy(Qt::NoFocus);
 
     setToolButtonStyle(mIconsOnly ? Qt::ToolButtonIconOnly : Qt::ToolButtonTextBesideIcon);

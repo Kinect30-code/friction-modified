@@ -36,6 +36,9 @@ Colors and icon size from 'src/core/themesupport.cpp'.
 %12 = half icon pixel ratio
 %13 = getThemeColorTextDisabled
 %14 = quarter icon size
+%15 = theme icon base url
+%16 = theme text color
+%17 = theme muted text color
 
 */
 
@@ -65,13 +68,13 @@ QSpinBox::down-button {
 }
 QDoubleSpinBox::up-arrow,
 QSpinBox::up-arrow {
-    image: url(:/icons/hicolor/%11x%11/actions/go-up.png);
+    image: url(%15/%11x%11/actions/go-up.png);
     width: %10px;
     height: %10px;
 }
 QDoubleSpinBox::down-arrow,
 QSpinBox::down-arrow {
-    image: url(:/icons/hicolor/%11x%11/actions/go-down.png);
+    image: url(%15/%11x%11/actions/go-down.png);
     width: %10px;
     height: %10px;
 }
@@ -233,7 +236,7 @@ QWidget#UIDockHeader {
 }
 
 QLabel#UIDockLabel {
-    color: %7;
+    color: %17;
     font-size: 11px;
     padding-left: 4px;
     padding-right: 4px;
@@ -276,13 +279,13 @@ QTabBar QToolButton:hover {
 }
 
 QTabBar QToolButton::right-arrow {
-    image: url(:/icons/hicolor/%11x%11/actions/go-next.png);
+    image: url(%15/%11x%11/actions/go-next.png);
     width: %10px;
     height: %10px;
 }
 
 QTabBar QToolButton::left-arrow {
-    image: url(:/icons/hicolor/%11x%11/actions/go-previous.png);
+    image: url(%15/%11x%11/actions/go-previous.png);
     width: %10px;
     height: %10px;
 }
@@ -352,7 +355,7 @@ QDoubleSpinBox:hover,
 QSpinBox:hover,
 QLineEdit:hover,
 QTextEdit#TextEdit:hover {
-    background-color: black;
+    background-color: %5;
 }
 
 QComboBox::drop-down:button{
@@ -363,7 +366,7 @@ QComboBox::drop-down:button{
 
 QToolButton::menu-arrow,
 QComboBox::down-arrow {
-    image: url(:/icons/hicolor/%11x%11/actions/go-down.png);
+    image: url(%15/%11x%11/actions/go-down.png);
     width: %7px;
     height: %7px;
 }
@@ -376,7 +379,7 @@ QWidget#menuBarWidget QPushButton {
 QToolBar#animationDockWidget,
 #darkWidget
 {
-    background-color: rgb(33, 33, 38);
+    background-color: %5;
 }
 
 QToolBar::separator {
@@ -413,7 +416,7 @@ QMenuBar {
 
 QLineEdit#OutputDestinationLineEdit {
     border: 0;
-    background-color: rgb(40, 40, 47);
+    background-color: %3;
 }
 
 QPushButton#WelcomeButton,
@@ -455,8 +458,8 @@ QPushButton#NoButton {
 
 QPushButton#FlatButton:hover,
 QToolButton#FlatButton:hover {
-    background-color: rgb(19, 19, 21);
-    border-color: rgb(104, 144, 206);
+    background-color: %3;
+    border-color: %4;
 }
 
 QPushButton#NoButton:hover {
@@ -478,7 +481,7 @@ QToolButton#AutoPopupButton:pressed {
     background-color: transparent;
 }
 QToolButton#AutoPopupButton::menu-indicator { width: 0px; }
-QToolButton#AutoPopupButton QMenu { border: 1.5px solid rgb(74, 74, 79); }
+QToolButton#AutoPopupButton QMenu { border: 1.5px solid %2; }
 
 QSplitter::handle:horizontal {
     background-color: transparent;
@@ -507,10 +510,38 @@ QWidget#AeTimelineHeader {
 }
 
 QLabel#AeTimelinePanelTitle {
-    color: #d8d8d8;
+    color: %16;
     font-weight: bold;
     padding-left: .35em;
     padding-right: .5em;
+}
+
+QLabel#AeTimelineNameLabel {
+    color: %16;
+    background: transparent;
+}
+
+QLabel#AeTimelinePointValueLabel {
+    color: %17;
+    background: transparent;
+    padding: 0 6px;
+}
+
+QPushButton#AeTimelineSoloButton {
+    padding: 0;
+    margin: 0;
+    color: %17;
+    font-weight: 700;
+    border: 0;
+    background-color: transparent;
+}
+
+QPushButton#AeTimelineSoloButton:hover {
+    color: %16;
+}
+
+QPushButton#AeTimelineSoloButton:checked {
+    color: %8;
 }
 
 QWidget[aeHeader="true"] QPushButton {
@@ -552,10 +583,23 @@ QToolBar#AeTimelineTransport QToolButton:checked {
 }
 
 QLabel#AeTimelineToolbarLabel {
-    color: #bcbcbc;
+    color: %17;
     font-weight: bold;
     padding-left: .35em;
     padding-right: .15em;
+}
+
+QPushButton#AeTimelineRelationPickWhip {
+    padding: 0;
+    margin: 0;
+    color: %17;
+    font-weight: 600;
+    border: 0;
+    background-color: transparent;
+}
+
+QPushButton#AeTimelineRelationPickWhip:hover {
+    color: %16;
 }
 
 QWidget#AeViewerHeader,
@@ -747,14 +791,14 @@ QWidget#RenderContentWidget {
 
 QTreeView::indicator:checked,
 QCheckBox::indicator:checked {
-    image: url(:/icons/hicolor/%11x%11/friction/box-checked.png);
+    image: url(%15/%11x%11/friction/box-checked.png);
     width: %7px;
     height: %7px;
 }
 
 QTreeView::indicator:unchecked,
 QCheckBox::indicator:unchecked {
-    image: url(:/icons/hicolor/%11x%11/friction/box-unchecked.png);
+    image: url(%15/%11x%11/friction/box-unchecked.png);
     width: %7px;
     height: %7px;
 }
@@ -762,14 +806,14 @@ QCheckBox::indicator:unchecked {
 
 QTreeView::indicator:checked:hover,
 QCheckBox::indicator:checked:hover {
-    image: url(:/icons/hicolor/%11x%11/friction/box-checked-hover.png);
+    image: url(%15/%11x%11/friction/box-checked-hover.png);
     width: %7px;
     height: %7px;
 }
 
 QTreeView::indicator:unchecked:hover,
 QCheckBox::indicator:unchecked:hover {
-    image: url(:/icons/hicolor/%11x%11/friction/box-unchecked-hover.png);
+    image: url(%15/%11x%11/friction/box-unchecked-hover.png);
     width: %7px;
     height: %7px;
 }
@@ -789,19 +833,19 @@ QMenu::item {
 }
 
 QMenu::indicator:non-exclusive:unchecked {
-    image: url(:/icons/hicolor/%11x%11/friction/box-unchecked.png);
+    image: url(%15/%11x%11/friction/box-unchecked.png);
 }
 
 QMenu::indicator:non-exclusive:unchecked:selected {
-    image: url(:/icons/hicolor/%11x%11/friction/box-unchecked.png);
+    image: url(%15/%11x%11/friction/box-unchecked.png);
 }
 
 QMenu::indicator:non-exclusive:checked {
-    image: url(:/icons/hicolor/%11x%11/friction/box-checked.png);
+    image: url(%15/%11x%11/friction/box-checked.png);
 }
 
 QMenu::indicator:non-exclusive:checked:selected {
-    image: url(:/icons/hicolor/%11x%11/friction/box-checked.png);
+    image: url(%15/%11x%11/friction/box-checked.png);
 }
 
 QProgressBar {
@@ -905,7 +949,7 @@ QToolButton#ToolBoxGizmo[popupMode="1"]::menu-button {
 }
 
 QToolButton#ToolBoxGizmo[popupMode="1"]::menu-arrow {
-    image: url(:/icons/hicolor/%11x%11/actions/go-down.png);
+    image: url(%15/%11x%11/actions/go-down.png);
     width: %10px;
     height: %10px;
 }
