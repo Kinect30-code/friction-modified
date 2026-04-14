@@ -24,11 +24,8 @@
 #include "canvastoolbar.h"
 #include "GUI/global.h"
 #include "Private/document.h"
-#include "widgets/editablecombobox.h"
 
 #include <QLabel>
-#include <QLineEdit>
-#include <QDebug>
 
 using namespace Friction::Ui;
 
@@ -36,7 +33,6 @@ CanvasToolBar::CanvasToolBar(QWidget *parent)
     : QToolBar(parent)
     , mSpinWidth(nullptr)
     , mSpinHeight(nullptr)
-    , mComboResolution(nullptr)
     , mMemoryLabel(nullptr)
     , mIconsOnly(AppSupport::getSettings("ui",
                                          "CanvasToolbarIconsOnly",
@@ -74,17 +70,12 @@ CanvasToolBar::CanvasToolBar(QWidget *parent)
     mMemoryLabel->setToolTip(tr("0 MB used"));
 
     setupDimensions();
-    setupResolution();
 }
 
 void CanvasToolBar::setCurrentCanvas(Canvas * const target)
 {
     mCanvas.assign(target);
     if (target) {
-        mCanvas << connect(mComboResolution, &QComboBox::currentTextChanged,
-                           this, [this, target](const QString &text) {
-            setResolution(text, target);
-        });
         mCanvas << connect(mSpinWidth,
                            QOverload<int>::of(&QSpinBox::valueChanged),
                            this, [this, target]() {
@@ -103,11 +94,6 @@ void CanvasToolBar::setCurrentCanvas(Canvas * const target)
         });
     }
     updateWidgets(target);
-}
-
-QComboBox *CanvasToolBar::getResolutionComboBox()
-{
-    return mComboResolution;
 }
 
 void CanvasToolBar::setMemoryUsage(const intMB &usage)
@@ -142,30 +128,6 @@ void CanvasToolBar::setupDimensions()
     addWidget(mSpinHeight);
 }
 
-void CanvasToolBar::setupResolution()
-{
-    mComboResolution = new EditableComboBox(this);
-    mComboResolution->setMinimumWidth(75);
-    mComboResolution->setFocusPolicy(Qt::ClickFocus);
-    mComboResolution->addItem("500 %");
-    mComboResolution->addItem("400 %");
-    mComboResolution->addItem("300 %");
-    mComboResolution->addItem("200 %");
-    mComboResolution->addItem("100 %");
-    mComboResolution->addItem("75 %");
-    mComboResolution->addItem("50 %");
-    mComboResolution->addItem("25 %");
-    mComboResolution->lineEdit()->setInputMask("D00 %");
-    mComboResolution->setCurrentText("100 %");
-    mComboResolution->setInsertPolicy(QComboBox::NoInsert);
-
-    addSeparator();
-    addAction(QIcon::fromTheme("resolution"),
-              tr("Resolution"));
-
-    addWidget(mComboResolution);
-}
-
 void CanvasToolBar::addSpacer()
 {
     const auto space = new QWidget(this);
@@ -183,11 +145,6 @@ void CanvasToolBar::updateWidgets(Canvas * const target)
     setEnabled(true);
 
     updateDimension(target->getCanvasSize());
-
-    mComboResolution->blockSignals(true);
-    mComboResolution->setCurrentText(QString("%1 %")
-                                         .arg(target->getResolution() * 100));
-    mComboResolution->blockSignals(false);
 }
 
 void CanvasToolBar::updateDimension(const QSize dim)
@@ -199,18 +156,6 @@ void CanvasToolBar::updateDimension(const QSize dim)
     mSpinHeight->blockSignals(true);
     mSpinHeight->setValue(dim.height());
     mSpinHeight->blockSignals(false);
-}
-
-void CanvasToolBar::setResolution(QString text,
-                                  Canvas * const target)
-{
-    if (!target) { return; }
-
-    const qreal percent = clamp(text.remove("%").simplified().toDouble(),
-                                1, 1000) / 100;
-
-    target->setResolution(percent);
-    Document::sInstance->actionFinished();
 }
 
 void CanvasToolBar::setDimension(const QSize dim,

@@ -1,0 +1,92 @@
+#!/bin/sh
+
+set -eu
+
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+APP_BIN="$HERE/usr/bin/vecb"
+APPIMAGE_NAME=${APPIMAGE:-}
+APPIMAGE_NAME=${APPIMAGE_NAME##*/}
+
+if [ -z "${APPIMAGE_NAME:-}" ]; then
+    APPIMAGE_NAME=$(basename -- "$0")
+fi
+
+export LD_LIBRARY_PATH="$HERE/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export QT_PLUGIN_PATH="$HERE/usr/plugins${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}"
+export QT_QPA_PLATFORM_PLUGIN_PATH="$HERE/usr/plugins/platforms"
+export QML2_IMPORT_PATH="$HERE/usr/qml${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
+export QT_LOGGING_RULES="${QT_LOGGING_RULES:-qt.qpa.plugin=false}"
+
+show_error() {
+    message=$1
+    if command -v zenity >/dev/null 2>&1; then
+        zenity --error --width=560 --title="VECB Launch Error" --text="$message"
+        return
+    fi
+    if command -v kdialog >/dev/null 2>&1; then
+        kdialog --error "$message" --title "VECB Launch Error"
+        return
+    fi
+    if command -v xmessage >/dev/null 2>&1; then
+        xmessage -center "$message"
+        return
+    fi
+    printf '%s\n' "$message" >&2
+}
+
+map_packages() {
+    while IFS= read -r lib; do
+        case "$lib" in
+            libGL.so.1) echo "libgl1" ;;
+            libEGL.so.1) echo "libegl1" ;;
+            libGLESv2.so.2) echo "libgles2" ;;
+            libxkbcommon-x11.so.0) echo "libxkbcommon-x11-0" ;;
+            libxkbcommon.so.0) echo "libxkbcommon0" ;;
+            libxcb-icccm.so.4) echo "libxcb-icccm4" ;;
+            libxcb-image.so.0) echo "libxcb-image0" ;;
+            libxcb-keysyms.so.1) echo "libxcb-keysyms1" ;;
+            libxcb-render-util.so.0) echo "libxcb-render-util0" ;;
+            libxcb-xinerama.so.0) echo "libxcb-xinerama0" ;;
+            libxcb-xkb.so.1) echo "libxcb-xkb1" ;;
+            libxcb-cursor.so.0) echo "libxcb-cursor0" ;;
+            libdbus-1.so.3) echo "libdbus-1-3" ;;
+            libfontconfig.so.1) echo "fontconfig" ;;
+            libfreetype.so.6) echo "libfreetype6" ;;
+            libasound.so.2) echo "libasound2" ;;
+            libpulse.so.0) echo "libpulse0" ;;
+            libwayland-client.so.0) echo "libwayland-client0" ;;
+        esac
+    done
+}
+
+scan_missing() {
+    for target in "$@"; do
+        if [ -e "$target" ]; then
+            ldd "$target" 2>/dev/null || true
+        fi
+    done | awk '/not found/ { print $1 }' | sort -u
+}
+
+if [ ! -x "$APP_BIN" ]; then
+    show_error "VECB launch failed.\n\nBundled executable not found:\n$APP_BIN"
+    exit 1
+fi
+
+MISSING_LIBS=$(scan_missing \
+    "$APP_BIN" \
+    "$HERE/usr/plugins/platforms/libqxcb.so" \
+    "$HERE/usr/plugins/imageformats/libqsvg.so" \
+    "$HERE/usr/plugins/iconengines/libqsvgicon.so")
+
+if [ -n "$MISSING_LIBS" ]; then
+    PACKAGE_HINTS=$(printf '%s\n' "$MISSING_LIBS" | map_packages | sort -u | sed '/^$/d')
+    MESSAGE="VECB failed to start because some system libraries are missing:\n\n$MISSING_LIBS"
+    if [ -n "$PACKAGE_HINTS" ]; then
+        MESSAGE="$MESSAGE\n\nOn Debian/Ubuntu you can try:\n\nsudo apt install $PACKAGE_HINTS"
+    fi
+    MESSAGE="$MESSAGE\n\nIf this system cannot mount AppImage files with FUSE, try:\n\nAPPIMAGE_EXTRACT_AND_RUN=1 ./$APPIMAGE_NAME"
+    show_error "$MESSAGE"
+    exit 1
+fi
+
+exec "$APP_BIN" "$@"

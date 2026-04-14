@@ -25,12 +25,13 @@
 
 #include "canvaswrappernode.h"
 #include "widgets/scenechooser.h"
+#include "widgets/editablecombobox.h"
 #include "Private/document.h"
-#include "efiltersettings.h"
 #include "mainwindow.h"
 
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QStatusBar>
 #include <QToolButton>
 #include <QComboBox>
@@ -82,19 +83,26 @@ public:
         label->setMinimumWidth(0);
         layout->addWidget(label);
 
-        const auto qualityLabel = new QLabel(tr("Quality"), this);
-        layout->addWidget(qualityLabel);
+        const auto resolutionLabel = new QLabel(tr("Resolution"), this);
+        layout->addWidget(resolutionLabel);
 
-        mQualityCombo = new QComboBox(this);
-        mQualityCombo->addItem(tr("Dynamic"));
-        mQualityCombo->addItem(tr("None"));
-        mQualityCombo->addItem(tr("Low"));
-        mQualityCombo->addItem(tr("Medium"));
-        mQualityCombo->addItem(tr("High"));
-        mQualityCombo->setFixedHeight(22);
-        mQualityCombo->setMinimumWidth(84);
-        mQualityCombo->setCurrentText(currentQualityText());
-        layout->addWidget(mQualityCombo);
+        mResolutionCombo = new EditableComboBox(this);
+        mResolutionCombo->addItem(QStringLiteral("500 %"));
+        mResolutionCombo->addItem(QStringLiteral("400 %"));
+        mResolutionCombo->addItem(QStringLiteral("300 %"));
+        mResolutionCombo->addItem(QStringLiteral("200 %"));
+        mResolutionCombo->addItem(QStringLiteral("100 %"));
+        mResolutionCombo->addItem(QStringLiteral("75 %"));
+        mResolutionCombo->addItem(QStringLiteral("50 %"));
+        mResolutionCombo->addItem(QStringLiteral("25 %"));
+        mResolutionCombo->setFixedHeight(22);
+        mResolutionCombo->setMinimumWidth(84);
+        mResolutionCombo->setInsertPolicy(QComboBox::NoInsert);
+        if (mResolutionCombo->lineEdit()) {
+            mResolutionCombo->lineEdit()->setInputMask(QStringLiteral("D00 %"));
+        }
+        syncResolutionFromScene();
+        layout->addWidget(mResolutionCombo);
 
         mSnapshotButton = new QToolButton(this);
         mSnapshotButton->setText(tr("Snapshot"));
@@ -143,9 +151,9 @@ public:
             });
         });
 
-        connect(mQualityCombo, &QComboBox::currentTextChanged,
+        connect(mResolutionCombo, &QComboBox::currentTextChanged,
                 this, [this](const QString &text) {
-            applyQualityText(text);
+            applyResolutionText(text);
         });
 
         connect(mCropButton, &QToolButton::clicked,
@@ -182,60 +190,51 @@ public:
                 this, [this](bool active) {
             mCropButton->setText(active ? tr("Cancel Crop") : tr("Crop"));
         });
+
+        connect(mWindow, &CanvasWindow::currentSceneChanged,
+                this, [this](Canvas *) {
+            syncResolutionFromScene();
+        });
     }
 
 private:
-    QString currentQualityText() const
+    void syncResolutionFromScene()
     {
-        if (eFilterSettings::sSmartDisplat()) {
-            return tr("Dynamic");
+        if (!mResolutionCombo) {
+            return;
         }
-        switch (eFilterSettings::sDisplay()) {
-        case kNone_SkFilterQuality:
-            return tr("None");
-        case kLow_SkFilterQuality:
-            return tr("Low");
-        case kMedium_SkFilterQuality:
-            return tr("Medium");
-        case kHigh_SkFilterQuality:
-        default:
-            return tr("High");
-        }
+        const auto *scene = mWindow ? mWindow->getCurrentCanvas() : nullptr;
+        const QString text = scene ?
+                    QStringLiteral("%1 %").arg(qRound(scene->getResolution() * 100.0)) :
+                    QStringLiteral("100 %");
+        mResolutionCombo->blockSignals(true);
+        mResolutionCombo->setCurrentText(text);
+        mResolutionCombo->blockSignals(false);
     }
 
-    void applyQualityText(const QString &text)
+    void applyResolutionText(QString text)
     {
-        if (text == tr("Dynamic")) {
-            eFilterSettings::sSetSmartDisplay(true);
-        } else {
-            eFilterSettings::sSetSmartDisplay(false);
-            if (text == tr("None")) {
-                eFilterSettings::sSetDisplayFilter(kNone_SkFilterQuality);
-            } else if (text == tr("Low")) {
-                eFilterSettings::sSetDisplayFilter(kLow_SkFilterQuality);
-            } else if (text == tr("Medium")) {
-                eFilterSettings::sSetDisplayFilter(kMedium_SkFilterQuality);
-            } else {
-                eFilterSettings::sSetDisplayFilter(kHigh_SkFilterQuality);
-            }
+        if (!mWindow) {
+            return;
         }
+        const qreal resolution = qBound<qreal>(1.0,
+                                               text.remove('%').simplified().toDouble(),
+                                               1000.0) / 100.0;
+        mWindow->setResolution(resolution);
+        syncResolutionFromScene();
 
-        if (mWindow) {
-            mWindow->update();
-        }
         if (auto *mw = MainWindow::sGetInstance()) {
-            if (mw->centralWidget()) {
-                mw->centralWidget()->update();
-            }
             if (mw->statusBar()) {
                 mw->statusBar()->showMessage(
-                    tr("AE: Preview Quality %1").arg(text), 2000);
+                    tr("AE: Preview Resolution %1")
+                        .arg(QStringLiteral("%1 %").arg(qRound(resolution * 100.0))),
+                    2000);
             }
         }
     }
 
     CanvasWindow * const mWindow;
-    QComboBox *mQualityCombo = nullptr;
+    QComboBox *mResolutionCombo = nullptr;
     QToolButton *mSnapshotButton = nullptr;
     QToolButton *mCropButton = nullptr;
     QToolButton *mRecallButton = nullptr;

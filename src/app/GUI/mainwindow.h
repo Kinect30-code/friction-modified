@@ -141,12 +141,14 @@ public:
     stdsptr<void> lock();
 
     bool processKeyEvent(QKeyEvent *event);
+    bool deleteSelectedEffectProperties();
 
 #ifdef Q_OS_MAC
     bool processBoxesListKeyEvent(QKeyEvent *event);
 #endif
 
     void installNumericFilter(QObject* const object) {
+        if (!object) { return; }
         object->installEventFilter(mNumericFilter);
     }
 
@@ -394,6 +396,7 @@ private:
     void askRestoreFillStrokeDefault();
     void askRestoreDefaultUi();
     bool isTimelineInputContext() const;
+    bool isEffectControlsInputContext() const;
 
     QAction *mToolBarMainAct;
     QAction *mToolBarColorAct;

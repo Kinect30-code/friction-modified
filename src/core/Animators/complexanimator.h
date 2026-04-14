@@ -41,6 +41,8 @@ protected:
 public:    
     virtual void ca_childIsRecordingChanged();
     virtual void ca_removeAllChildren();
+    void anim_scaleTime(const int pivotAbsFrame,
+                        const qreal scale) override;
 
     void SWT_setupAbstraction(SWT_Abstraction *abstraction,
                               const UpdateFuncs &updateFuncs,

@@ -39,9 +39,22 @@
 Animator::Animator(const QString& name) : Property(name), anim_mKeys(this) {}
 
 void Animator::anim_scaleTime(const int pivotAbsFrame, const qreal scale) {
-    for(const auto &key : anim_mKeys) {
+    QList<Key*> keys;
+    keys.reserve(anim_mKeys.count());
+    for (const auto &key : anim_mKeys) {
+        keys.append(key);
+    }
+
+    for (const auto key : keys) {
+        if (!key) {
+            continue;
+        }
         key->scaleFrameAndUpdateParentAnimator(pivotAbsFrame, scale, false);
     }
+
+    anim_mergeKeysIfNeeded();
+    anim_updateKeyOnCurrrentFrame();
+    prp_afterWholeInfluenceRangeChanged();
 }
 
 void Animator::anim_shiftAllKeys(const int shift) {

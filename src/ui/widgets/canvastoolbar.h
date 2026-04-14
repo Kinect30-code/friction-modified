@@ -31,7 +31,6 @@
 
 #include <QToolBar>
 #include <QSpinBox>
-#include <QComboBox>
 #include <QAction>
 
 namespace Friction
@@ -43,24 +42,19 @@ namespace Friction
         public:
             explicit CanvasToolBar(QWidget *parent = nullptr);
             void setCurrentCanvas(Canvas * const target);
-            QComboBox* getResolutionComboBox();
             void setMemoryUsage(const intMB &usage);
 
         private:
             void setupDimensions();
-            void setupResolution();
             void addSpacer();
             void updateWidgets(Canvas * const target);
             void updateDimension(const QSize dim);
-            void setResolution(QString text,
-                               Canvas * const target);
             void setDimension(const QSize dim,
                               Canvas * const target);
             void showContextMenu(const QPoint &pos);
 
             QSpinBox *mSpinWidth;
             QSpinBox *mSpinHeight;
-            QComboBox *mComboResolution;
             QAction *mMemoryLabel;
 
             ConnContextQPtr<Canvas> mCanvas;

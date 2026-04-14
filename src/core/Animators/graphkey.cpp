@@ -176,8 +176,10 @@ void GraphKey::scaleFrameAndUpdateParentAnimator(
     }
 
 
-    const qreal actualScale = qreal(newFrame - relPivot)/
-                                   (thisRelFrame - relPivot);
+    const qreal sourceDistance = thisRelFrame - relPivot;
+    const qreal actualScale = qFuzzyIsNull(sourceDistance) ?
+                scaleFactor :
+                qreal(newFrame - relPivot)/sourceDistance;
     const bool switchCtrls = actualScale < 0;
     setC0Enabled(switchCtrls ? mSavedC1Enabled :
                                mSavedC0Enabled);

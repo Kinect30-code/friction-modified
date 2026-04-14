@@ -85,9 +85,15 @@
 #include "appsupport.h"
 #include "themesupport.h"
 #include "RasterEffects/rastereffectmenucreator.h"
+#include "RasterEffects/rastereffect.h"
 #include "BlendEffects/blendeffectmenucreator.h"
+#include "BlendEffects/blendeffect.h"
 #include "TransformEffects/transformeffectmenucreator.h"
+#include "TransformEffects/transformeffect.h"
 #include "PathEffects/patheffectmenucreator.h"
+#include "PathEffects/patheffect.h"
+#include "texteffect.h"
+#include "Animators/dynamiccomplexanimator.h"
 #include "Properties/emimedata.h"
 
 #include "widgets/assetswidget.h"
@@ -123,6 +129,53 @@ QWidget *editorWidgetFromObject(QObject *object)
         object = object->parent();
     }
     return nullptr;
+}
+
+template<typename T>
+bool removeEffectProperty(Property *property)
+{
+    auto *effect = enve_cast<T*>(property);
+    if (!effect) {
+        return false;
+    }
+
+    if (const auto parent = effect->template getParent<DynamicComplexAnimatorBase<T>>()) {
+        parent->removeChild(effect->template ref<T>());
+        return true;
+    }
+    return false;
+}
+
+bool isEffectProperty(const Property *property)
+{
+    return enve_cast<const TransformEffect*>(property) ||
+           enve_cast<const RasterEffect*>(property) ||
+           enve_cast<const BlendEffect*>(property) ||
+           enve_cast<const PathEffect*>(property) ||
+           enve_cast<const TextEffect*>(property);
+}
+
+Property *effectPropertyFromWidget(QWidget *widget)
+{
+    while (widget) {
+        if (const auto row = dynamic_cast<BoxSingleWidget*>(widget)) {
+            auto *property = row->targetProperty();
+            if (isEffectProperty(property)) {
+                return property;
+            }
+        }
+        widget = widget->parentWidget();
+    }
+    return nullptr;
+}
+
+bool deleteEffectProperty(Property *property)
+{
+    return removeEffectProperty<TransformEffect>(property) ||
+           removeEffectProperty<RasterEffect>(property) ||
+           removeEffectProperty<BlendEffect>(property) ||
+           removeEffectProperty<PathEffect>(property) ||
+           removeEffectProperty<TextEffect>(property);
 }
 
 enum class EffectsPresetKind {
@@ -793,7 +846,6 @@ void MainWindow::setupToolBar()
     addToolBar(Qt::TopToolBarArea, mToolbar);
 
     mCanvasToolBar = new Ui::CanvasToolBar(this);
-    installNumericFilter(mCanvasToolBar->getResolutionComboBox());
 
     mCanvasToolBar->addSeparator();
     mCanvasToolBar->addAction(QIcon::fromTheme("workspace"),
@@ -1019,6 +1071,13 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *e)
             return QMainWindow::eventFilter(obj, e);
         }
         const auto keyEvent = static_cast<QKeyEvent*>(e);
+        const bool effectsDeleteContext =
+                isTimelineInputContext() || isEffectControlsInputContext();
+        if (keyEvent->key() == Qt::Key_Delete &&
+            effectsDeleteContext &&
+            deleteSelectedEffectProperties()) {
+            return true;
+        }
         if (isTimelineInputContext() && mTimeline &&
             mTimeline->processKeyPress(keyEvent)) {
             return true;
@@ -1083,6 +1142,56 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *e)
         //finishUndoRedoSet();
     }
     return QMainWindow::eventFilter(obj, e);
+}
+
+bool MainWindow::deleteSelectedEffectProperties()
+{
+    Canvas *scene = mDocument.fActiveScene;
+    if (!scene) {
+        return false;
+    }
+
+    const auto deleteCurrentEffect = [](QWidget *widget) {
+        return deleteEffectProperty(effectPropertyFromWidget(widget));
+    };
+
+    if (deleteCurrentEffect(QApplication::focusWidget()) ||
+        deleteCurrentEffect(QApplication::widgetAt(QCursor::pos()))) {
+        mDocument.actionFinished();
+        return true;
+    }
+
+    bool deleted = false;
+    scene->execOpOnSelectedProperties<TransformEffect>(
+                [&deleted](TransformEffect *effect) {
+        if (!effect) { return; }
+        deleted = deleteEffectProperty(effect) || deleted;
+    });
+    scene->execOpOnSelectedProperties<RasterEffect>(
+                [&deleted](RasterEffect *effect) {
+        if (!effect) { return; }
+        deleted = deleteEffectProperty(effect) || deleted;
+    });
+    scene->execOpOnSelectedProperties<BlendEffect>(
+                [&deleted](BlendEffect *effect) {
+        if (!effect) { return; }
+        deleted = deleteEffectProperty(effect) || deleted;
+    });
+    scene->execOpOnSelectedProperties<PathEffect>(
+                [&deleted](PathEffect *effect) {
+        if (!effect) { return; }
+        deleted = deleteEffectProperty(effect) || deleted;
+    });
+    scene->execOpOnSelectedProperties<TextEffect>(
+                [&deleted](TextEffect *effect) {
+        if (!effect) { return; }
+        deleted = deleteEffectProperty(effect) || deleted;
+    });
+
+    if (deleted) {
+        mDocument.actionFinished();
+    }
+    return deleted;
 }
 
 void MainWindow::closeEvent(QCloseEvent *e)
@@ -1164,6 +1273,54 @@ bool MainWindow::isTimelineInputContext() const
     }
 
     return mTimeline->underMouse();
+}
+
+bool MainWindow::isEffectControlsInputContext() const
+{
+    if (!mPropertiesPanel && !mObjectSettingsWidget && !mObjectSettingsScrollArea) {
+        return false;
+    }
+
+    const auto belongsToEffectControls = [this](QWidget *widget) {
+        while (widget) {
+            if (widget == mPropertiesPanel ||
+                widget == mObjectSettingsWidget ||
+                widget == mObjectSettingsScrollArea) {
+                return true;
+            }
+            widget = widget->parentWidget();
+        }
+        return false;
+    };
+
+    auto *focusWidget = QApplication::focusWidget();
+    if (isFocusedEditorWidget(focusWidget)) {
+        return false;
+    }
+    if (belongsToEffectControls(focusWidget)) {
+        return true;
+    }
+
+    auto *hoveredWidget = QApplication::widgetAt(QCursor::pos());
+    if (hoveredWidget && isFocusedEditorWidget(hoveredWidget)) {
+        return false;
+    }
+    if (belongsToEffectControls(hoveredWidget)) {
+        return true;
+    }
+
+    if (mPropertiesPanel) {
+        const QRect panelGlobalRect(mPropertiesPanel->mapToGlobal(QPoint(0, 0)),
+                                    mPropertiesPanel->size());
+        if (panelGlobalRect.contains(QCursor::pos())) {
+            return true;
+        }
+        if (mPropertiesPanel->underMouse()) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 #ifdef Q_OS_MAC

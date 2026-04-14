@@ -238,18 +238,21 @@ bool RenderHandler::applyPreviewWindowRange(const FrameRange &range,
     bool queuedPreviewWindowValid = false;
     const FrameRange queuedPreviewWindow =
             queuedPreviewWindowValue(&queuedPreviewWindowValid);
-    if(queuedPreviewWindowValid && queuedPreviewWindow == range) {
-        return false;
-    }
+    const bool rangeChanged =
+            !queuedPreviewWindowValid || queuedPreviewWindow != range;
 
     mCurrentScene->setMinFrameUseRange(range.fMin);
     mCurrentScene->setMaxFrameUseRange(range.fMax);
     if(mCurrentSoundComposition) {
         mCurrentSoundComposition->setMinFrameUseRange(range.fMin);
         mCurrentSoundComposition->setMaxFrameUseRange(range.fMax);
-        if(scheduleAudio) {
+        if(scheduleAudio && rangeChanged) {
             mCurrentSoundComposition->scheduleFrameRange(range);
         }
+    }
+
+    if(!rangeChanged) {
+        return false;
     }
 
     setQueuedPreviewWindowValue(range, true);

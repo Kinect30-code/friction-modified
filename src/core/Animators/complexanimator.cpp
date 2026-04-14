@@ -383,6 +383,15 @@ bool ComplexAnimator::anim_isDescendantRecording() const {
     return ca_mChildRecording;
 }
 
+void ComplexAnimator::anim_scaleTime(const int pivotAbsFrame, const qreal scale)
+{
+    for (const auto &property : ca_mChildren) {
+        if (const auto asAnim = enve_cast<Animator*>(property.get())) {
+            asAnim->anim_scaleTime(pivotAbsFrame, scale);
+        }
+    }
+}
+
 void ComplexAnimator::anim_setRecording(const bool rec) {
     for(const auto &property : ca_mChildren) {
         if(const auto asAnim = enve_cast<Animator*>(property.get())) {
