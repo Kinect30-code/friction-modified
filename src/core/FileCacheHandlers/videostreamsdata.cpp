@@ -26,6 +26,8 @@
 #include "videostreamsdata.h"
 #include "Private/esettings.h"
 
+#include <QFileInfo>
+
 namespace {
 AVRational resolveVideoFrameRate(AVFormatContext *formatContext,
                                  AVStream *videoStream)
@@ -94,6 +96,10 @@ VideoStreamsData::SourceInfo collectVideoSourceInfo(AVFormatContext *formatConte
 }
 
 VideoStreamsData::SourceInfo inspectVideoSource(const QString& path) {
+    if(path.isEmpty() || !QFileInfo::exists(path)) {
+        return VideoStreamsData::SourceInfo{};
+    }
+
     AVFormatContext *formatContext = avformat_alloc_context();
     if(!formatContext) {
         RuntimeThrow(QObject::tr("Error allocating AVFormatContext"));

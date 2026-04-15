@@ -95,18 +95,27 @@ void SoundComposition::scheduleFrameRange(const FrameRange &range) {
     const qreal fps = mParent->getFps();
     const int minSec = qFloor((range.fMin + 1)/fps);
     const int maxSec = qFloor((range.fMax + 1)/fps);
-    for(int i = minSec; i <= maxSec; i++) scheduleSecond(i);
+    for(int i = minSec; i <= maxSec; i++) scheduleSecondIfNeeded(i);
 }
 
 SoundMerger *SoundComposition::scheduleFrame(const int frameId) {
     const qreal fps = mParent->getFps();
-    return scheduleSecond(qFloor(frameId/fps));
+    return scheduleSecondIfNeeded(qFloor(frameId/fps));
+}
+
+SoundMerger *SoundComposition::scheduleSecondIfNeeded(const int secondId) {
+    return scheduleSecond(secondId);
 }
 
 SoundMerger *SoundComposition::scheduleSecond(const int secondId) {
     if(mSounds.isEmpty()) return nullptr;
     if(mProcessingSeconds.contains(secondId)) return nullptr;
-    if(mSecondsCache.atFrame(secondId)) return nullptr;
+    if(const auto cont = mSecondsCache.atFrame<SoundCacheContainer>(secondId)) {
+        if(cont->hasRecoverableData()) {
+            return nullptr;
+        }
+        mSecondsCache.remove(cont->getRange());
+    }
     mProcessingSeconds.append(secondId);
     const int sampleRate = mSettings.fSampleRate;
     const SampleRange sampleRange = {secondId*sampleRate,
@@ -163,8 +172,25 @@ qint64 SoundComposition::readData(char *data, qint64 maxLen) {
     while(maxLen > total) {
         const int secondId = static_cast<int>(mPos/sampleRate + (mPos >= 0 ? 0 : -1));
         const auto cont = mSecondsCache.atFrame<SoundCacheContainer>(secondId);
-        if(!cont) break;
+        if(!cont) {
+            scheduleSecondIfNeeded(secondId);
+            break;
+        }
+        if(!cont->storesDataInMemory()) {
+            if(cont->hasRecoverableData()) {
+                cont->scheduleLoadFromTmpFile();
+            } else {
+                mSecondsCache.remove(cont->getRange());
+                scheduleSecondIfNeeded(secondId);
+            }
+            break;
+        }
         const auto samples = cont->getSamples();
+        if(!samples) {
+            mSecondsCache.remove(cont->getRange());
+            scheduleSecondIfNeeded(secondId);
+            break;
+        }
         const auto contSampleRange = samples->fSampleRange;
         const auto secondData = samples->fData;
         if(!secondData) break;

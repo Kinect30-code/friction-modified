@@ -138,6 +138,9 @@ bool AnimationBox::shouldScheduleUpdate() {
 
 int AnimationBox::getAnimationFrameForRelFrame(const qreal relFrame) {
     const int lastFrameId = mSrcFramesCache->getFrameCount() - 1;
+    if(lastFrameId < 0) {
+        return -1;
+    }
     const int animStartRelFrame =
                 getAnimationDurationRect()->getMinAnimRelFrame();
     int pixId;
@@ -285,6 +288,15 @@ public:
         const int relFrame = mFirstRelFrame + mI;
         const int absFrame = mFirstAbsFrame + mI;
         const int animFrame = mBox->getAnimationFrameForRelFrame(relFrame);
+        if(animFrame < 0) {
+            auto task = addEmptyTask();
+            const QPointer<AnimationToPaint> ptr = this;
+            task->addDependent({[ptr, animFrame, absFrame]() {
+                if(ptr) ptr->mLoader(animFrame, absFrame);
+            }, nullptr});
+            mI += mIncrement;
+            return;
+        }
         auto task = mSrc->scheduleFrameLoad(animFrame);
         if(task) addTask(task->ref<eTask>());
         else task = addEmptyTask();
@@ -393,6 +405,10 @@ void AnimationBox::setupRenderData(const qreal relFrame,
     const auto imgData = static_cast<AnimationBoxRenderData*>(data);
     const int animFrame = getAnimationFrameForRelFrame(relFrame);
     imgData->fAnimFrame = animFrame;
+    if(animFrame < 0) {
+        imgData->setContainer(nullptr);
+        return;
+    }
     const auto upd = mSrcFramesCache->scheduleFrameLoad(animFrame);
     if(upd) upd->addDependent(imgData);
     else {

@@ -4,6 +4,7 @@
 #include "Animators/dynamiccomplexanimator.h"
 
 #include "blendeffect.h"
+#include <QReadWriteLock>
 
 CORE_EXPORT
 qsptr<BlendEffect> readIdCreateBlendEffect(eReadStream& src);
@@ -44,6 +45,21 @@ public:
                         const SkFilterQuality filter, int& drawId,
                         QList<BlendEffect::Delayed> &delayed) const;
     void drawBlendSetup(SkCanvas * const canvas);
+private:
+    struct LayerMaskPathCache {
+        bool fResolved = false;
+        bool fHasMask = false;
+        FrameRange fRange = {0, -1};
+        uint fOwnerStateId = 0;
+        QRectF fOwnerBoundsRect;
+        SkPath fPath;
+    };
+
+    bool composedLayerMaskPath(const qreal relFrame,
+                               SkPath * const outPath) const;
+
+    mutable QReadWriteLock mLayerMaskPathCacheLock;
+    mutable LayerMaskPathCache mLayerMaskPathCache;
 };
 
 #endif // BLENDEFFECTCOLLECTION_H

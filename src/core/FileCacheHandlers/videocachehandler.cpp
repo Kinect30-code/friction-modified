@@ -64,7 +64,13 @@ public:
         mRequestId(requestId) {}
 
     void process() override {
-        mInfo = VideoStreamsData::sInspect(mFilePath);
+        try {
+            mInfo = VideoStreamsData::sInspect(mFilePath);
+        } catch(...) {
+            // Keep the handler responsive even if the source is missing
+            // or currently unreadable. The UI can then degrade gracefully.
+            mInfo = VideoStreamsData::SourceInfo{};
+        }
     }
 
     void afterProcessing() override {
@@ -202,6 +208,7 @@ eTask *VideoFrameHandler::scheduleFrameLoadInternal(
 
     const int frameCount = getFrameCount();
     if(frameCount <= 0) {
+        mDataHandler->ensureSourceInfo();
         if(throwOnOutOfRange && !mDataHandler->sourceInfoPending()) {
             RuntimeThrow("Frame outside of range " + std::to_string(frame));
         }
@@ -408,6 +415,13 @@ void VideoDataHandler::setHasAudio(const bool hasAudio) {
 
 bool VideoDataHandler::sourceInfoPending() const {
     return mSourceInfoPending;
+}
+
+void VideoDataHandler::ensureSourceInfo() {
+    if(mFileMissing || mSourceInfoPending || mFrameCount > 0) {
+        return;
+    }
+    queueSourceInfoRefresh();
 }
 
 int VideoDataHandler::pendingFrameLoadCount() const {

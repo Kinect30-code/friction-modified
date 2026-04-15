@@ -31,7 +31,79 @@
 #include "formatoptions.h"
 #include "../../../core/ffmpegcompat.h"
 
+#include <initializer_list>
+
 using namespace Friction::Core;
+
+namespace {
+
+QString codecDisplayName(const AVCodec * const codec) {
+    if(!codec) {
+        return QString();
+    }
+    const QString longName = codec->long_name ?
+                QString::fromUtf8(codec->long_name).trimmed() :
+                QString();
+    const QString shortName = codec->name ?
+                QString::fromUtf8(codec->name).trimmed() :
+                QString();
+    if(longName.isEmpty()) {
+        return shortName;
+    }
+    if(shortName.isEmpty() || shortName == longName) {
+        return longName;
+    }
+    return QObject::tr("%1 (%2)").arg(longName, shortName);
+}
+
+const AVCodec *findPreferredEncoder(
+        const AVCodecID codecId,
+        const std::initializer_list<const char *> preferredNames = {}) {
+    for(const auto preferredName : preferredNames) {
+        const AVCodec * const codec =
+                avcodec_find_encoder_by_name(preferredName);
+        if(!codec) {
+            continue;
+        }
+        if(codec->id != codecId || !av_codec_is_encoder(codec)) {
+            continue;
+        }
+        return codec;
+    }
+    return avcodec_find_encoder(codecId);
+}
+
+const AVCodec *preferredVideoEncoder(const AVCodecID codecId) {
+    switch(codecId) {
+    case AV_CODEC_ID_H264:
+        return findPreferredEncoder(codecId, {"libx264"});
+    case AV_CODEC_ID_PRORES:
+        return findPreferredEncoder(codecId, {"prores_ks", "prores_aw", "prores"});
+    case AV_CODEC_ID_VP8:
+        return findPreferredEncoder(codecId, {"libvpx", "vp8"});
+    case AV_CODEC_ID_VP9:
+        return findPreferredEncoder(codecId, {"libvpx-vp9", "vp9"});
+    default:
+        return findPreferredEncoder(codecId);
+    }
+}
+
+const AVCodec *preferredAudioEncoder(const AVCodecID codecId) {
+    switch(codecId) {
+    case AV_CODEC_ID_MP3:
+        return findPreferredEncoder(codecId, {"libmp3lame", "mp3"});
+    case AV_CODEC_ID_VORBIS:
+        return findPreferredEncoder(codecId, {"libvorbis", "vorbis"});
+    case AV_CODEC_ID_OPUS:
+        return findPreferredEncoder(codecId, {"libopus", "opus"});
+    case AV_CODEC_ID_AAC:
+        return findPreferredEncoder(codecId, {"aac"});
+    default:
+        return findPreferredEncoder(codecId);
+    }
+}
+
+}
 
 OutputSettingsDialog::OutputSettingsDialog(const OutputSettings &settings,
                                            QWidget *parent) :
@@ -289,27 +361,31 @@ void OutputSettingsDialog::addVideoCodec(const AVCodec* const codec,
     if(codec->pix_fmts == nullptr) return;
     if(avformat_query_codec(outputFormat, codec->id, COMPLIANCE) == 0) return;
     mVideoCodecsList << codec;
-    const QString codecName(codec->long_name);
-    mVideoCodecsComboBox->addItem(codecName);
-    if(codecName == currentCodecName) {
-        mVideoCodecsComboBox->setCurrentText(codecName);
+    const QString codecKey = codec->name ? QString::fromUtf8(codec->name) :
+                                           QString();
+    const QString displayName = codecDisplayName(codec);
+    mVideoCodecsComboBox->addItem(displayName, codecKey);
+    if(codecKey == currentCodecName) {
+        mVideoCodecsComboBox->setCurrentIndex(mVideoCodecsComboBox->count() - 1);
     }
 }
 
-void OutputSettingsDialog::addAudioCodec(const AVCodecID &codecId,
+void OutputSettingsDialog::addAudioCodec(const AVCodec * const currentCodec,
                                          const AVOutputFormat *outputFormat,
                                          const QString &currentCodecName) {
-    const AVCodec* currentCodec = avcodec_find_encoder(codecId);
     if(!currentCodec) return;
     if(currentCodec->type != AVMEDIA_TYPE_AUDIO) return;
     if(currentCodec->capabilities & AV_CODEC_CAP_EXPERIMENTAL) return;
     if(currentCodec->sample_fmts == nullptr) return;
-    if(avformat_query_codec(outputFormat, codecId, COMPLIANCE) == 0) return;
+    if(avformat_query_codec(outputFormat, currentCodec->id, COMPLIANCE) == 0) return;
     mAudioCodecsList << currentCodec;
-    const QString codecName(currentCodec->long_name);
-    mAudioCodecsComboBox->addItem(codecName);
-    if(codecName == currentCodecName) {
-        mAudioCodecsComboBox->setCurrentText(codecName);
+    const QString codecKey = currentCodec->name ?
+                QString::fromUtf8(currentCodec->name) :
+                QString();
+    const QString displayName = codecDisplayName(currentCodec);
+    mAudioCodecsComboBox->addItem(displayName, codecKey);
+    if(codecKey == currentCodecName) {
+        mAudioCodecsComboBox->setCurrentIndex(mAudioCodecsComboBox->count() - 1);
     }
 }
 
@@ -462,7 +538,7 @@ FormatOptions OutputSettingsDialog::getFormatOptions()
 }
 
 void OutputSettingsDialog::updateAvailableVideoCodecs() {
-    const QString currentCodecName = mVideoCodecsComboBox->currentText();
+    const QString currentCodecName = mVideoCodecsComboBox->currentData().toString();
     mVideoCodecsComboBox->clear();
     mVideoCodecsList.clear();
     if(mOutputFormatsComboBox->count() == 0) return;
@@ -489,8 +565,8 @@ void OutputSettingsDialog::updateAvailableVideoCodecs() {
         const FormatCodecs currFormatT =
                 mSupportedFormats.at(outputFormatId);
         for(const AVCodecID &codecId : currFormatT.mVidCodecs) {
-            const AVCodec* iCodec = avcodec_find_encoder(codecId);
-            if(!iCodec) break;
+            const AVCodec* iCodec = preferredVideoEncoder(codecId);
+            if(!iCodec) continue;
             if(iCodec->type != AVMEDIA_TYPE_VIDEO) continue;
             if(iCodec->capabilities & AV_CODEC_CAP_EXPERIMENTAL) {
                 continue;
@@ -506,7 +582,7 @@ void OutputSettingsDialog::updateAvailableVideoCodecs() {
 
 void OutputSettingsDialog::updateAvailableAudioCodecs() {
     const QString currentCodecName =
-            mAudioCodecsComboBox->currentText();
+            mAudioCodecsComboBox->currentData().toString();
     mAudioCodecsComboBox->clear();
     mAudioCodecsList.clear();
     if(mOutputFormatsComboBox->count() == 0) return;
@@ -525,7 +601,7 @@ void OutputSettingsDialog::updateAvailableAudioCodecs() {
                     continue;
                 }
                 if(currentCodec->sample_fmts == nullptr) continue;
-                addAudioCodec(currentCodec->id,
+                addAudioCodec(currentCodec,
                               outputFormat,
                               currentCodecName);
             }
@@ -534,14 +610,14 @@ void OutputSettingsDialog::updateAvailableAudioCodecs() {
         const FormatCodecs currFormatT =
                 mSupportedFormats.at(outputFormatId);
         for(const AVCodecID &codecId : currFormatT.mAudioCodecs) {
-            const AVCodec* currentCodec = avcodec_find_encoder(codecId);
-            if(!currentCodec) break;
+            const AVCodec* currentCodec = preferredAudioEncoder(codecId);
+            if(!currentCodec) continue;
             if(currentCodec->type != AVMEDIA_TYPE_AUDIO) continue;
             if(currentCodec->capabilities & AV_CODEC_CAP_EXPERIMENTAL) {
                 continue;
             }
             if(currentCodec->sample_fmts == nullptr) continue;
-            addAudioCodec(currentCodec->id,
+            addAudioCodec(currentCodec,
                           outputFormat,
                           currentCodecName);
         }
@@ -846,8 +922,13 @@ void OutputSettingsDialog::restoreInitialSettings() {
     if(!currentVideoCodec) {
         mVideoCodecsComboBox->setCurrentIndex(0);
     } else {
-        QString currentCodecName = QString(currentVideoCodec->long_name);
-        mVideoCodecsComboBox->setCurrentText(currentCodecName);
+        const QString currentCodecName = currentVideoCodec->name ?
+                    QString::fromUtf8(currentVideoCodec->name) :
+                    QString();
+        const int codecIndex = mVideoCodecsComboBox->findData(currentCodecName);
+        if(codecIndex >= 0) {
+            mVideoCodecsComboBox->setCurrentIndex(codecIndex);
+        }
     }
     AVPixelFormat currentFormat = mInitialSettings.fVideoPixelFormat;
     if(currentFormat == AV_PIX_FMT_NONE) {
@@ -873,8 +954,13 @@ void OutputSettingsDialog::restoreInitialSettings() {
     if(!currentAudioCodec) {
         mAudioCodecsComboBox->setCurrentIndex(0);
     } else {
-        QString currentCodecName = QString(currentAudioCodec->long_name);
-        mAudioCodecsComboBox->setCurrentText(currentCodecName);
+        const QString currentCodecName = currentAudioCodec->name ?
+                    QString::fromUtf8(currentAudioCodec->name) :
+                    QString();
+        const int codecIndex = mAudioCodecsComboBox->findData(currentCodecName);
+        if(codecIndex >= 0) {
+            mAudioCodecsComboBox->setCurrentIndex(codecIndex);
+        }
     }
 
     AVSampleFormat currentSampleFormat = mInitialSettings.fAudioSampleFormat;

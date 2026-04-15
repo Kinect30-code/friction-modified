@@ -29,41 +29,57 @@
 #include "BlendEffects/trackmatteeffect.h"
 #include "skia/skiahelpers.h"
 #include "skia/skqtconversions.h"
+#include <QHash>
 
 namespace {
 
-bool isTrackMatteInverted(const BoundingBox* const box) {
-    if(!box) {
-        return false;
-    }
-    switch(box->getTrackMatteMode()) {
-    case TrackMatteMode::alphaInvertedMatte:
-    case TrackMatteMode::lumaInvertedMatte:
-        return true;
-    default:
-        return false;
-    }
-}
+using MainChildRenderDataByBox = QHash<const BoundingBox*, const ChildRenderData*>;
+using ResolvedTrackMatteDrawDataByRenderData =
+        QHash<const BoxRenderData*, TrackMatteDrawResolver::DrawData>;
 
-const ChildRenderData* findMainChildRenderDataForBox(
-        const QList<ChildRenderData>& children,
-        const BoundingBox* const box) {
-    if(!box) {
-        return nullptr;
-    }
+MainChildRenderDataByBox buildMainChildRenderDataIndex(
+        const QList<ChildRenderData>& children) {
+    MainChildRenderDataByBox result;
+    result.reserve(children.count());
     for(const auto& candidate : children) {
         if(!candidate.fIsMain || !candidate.fData) {
             continue;
         }
-        if(candidate.fData->fBlendEffectIdentifier == box) {
-            return &candidate;
+        const auto * const box = candidate.fData->fBlendEffectIdentifier;
+        if(!box || result.contains(box)) {
+            continue;
         }
+        result.insert(box, &candidate);
     }
-    return nullptr;
+    return result;
 }
 
-bool drawTrackMatteChild(const QList<ChildRenderData>& children,
-                         const ChildRenderData& child,
+TrackMatteDrawResolver::DrawData resolveTrackMatteDrawData(
+        const BoundingBox* const box,
+        const ChildRenderData& child,
+        ResolvedTrackMatteDrawDataByRenderData& resolvedDrawDataByRenderData) {
+    if(!child.fData) {
+        return {};
+    }
+
+    const auto * const renderData = child.fData.get();
+    const auto resolved =
+            resolvedDrawDataByRenderData.constFind(renderData);
+    if(resolved != resolvedDrawDataByRenderData.constEnd()) {
+        return resolved.value();
+    }
+
+    const auto drawData =
+            TrackMatteDrawResolver::resolve(box, child.fData->fRelFrame,
+                                            child.fData);
+    resolvedDrawDataByRenderData.insert(renderData, drawData);
+    return drawData;
+}
+
+bool drawTrackMatteChild(const ChildRenderData& child,
+                         const MainChildRenderDataByBox& mainChildrenByBox,
+                         ResolvedTrackMatteDrawDataByRenderData&
+                             resolvedDrawDataByRenderData,
                          const QRect& parentRect,
                          SkCanvas * const canvas) {
     if(!child.fData) {
@@ -75,29 +91,63 @@ bool drawTrackMatteChild(const QList<ChildRenderData>& children,
         return false;
     }
 
-    const auto matteSource = box->getTrackMatteTarget();
+    const auto trackMatte = box->getTrackMatteEffect();
+    if(!trackMatte) {
+        return false;
+    }
+
+    const auto matteSource = trackMatte->matteSource();
     if(!matteSource) {
         return false;
     }
 
-    const auto matteChild = findMainChildRenderDataForBox(children, matteSource);
-    if(!matteChild || !matteChild->fData) {
-        return false;
-    }
+    const auto mode = trackMatte->getMode();
+    const bool inverted = mode == TrackMatteMode::alphaInvertedMatte ||
+                          mode == TrackMatteMode::lumaInvertedMatte;
 
-    const auto childRelFrame = child.fData->fRelFrame;
-    const auto matteRelFrame = matteChild->fData->fRelFrame;
     const auto targetDrawData =
-            TrackMatteDrawResolver::resolve(box, childRelFrame, child.fData);
-    const auto matteDrawData =
-            TrackMatteDrawResolver::resolve(matteSource, matteRelFrame,
-                                            matteChild->fData);
-    if(!targetDrawData || !matteDrawData) {
-        return false;
+            resolveTrackMatteDrawData(box, child, resolvedDrawDataByRenderData);
+    if(!targetDrawData) {
+        return true;
     }
 
-    const QRectF compositeRect =
-            targetDrawData.fBounds.united(matteDrawData.fBounds);
+    const auto matteChild = mainChildrenByBox.value(matteSource, nullptr);
+    if(!matteChild || !matteChild->fData) {
+        if(inverted) {
+            SkPaint boxPaint;
+            boxPaint.setFilterQuality(child.fData->fFilterQuality);
+            boxPaint.setBlendMode(targetDrawData.fBlendMode);
+            targetDrawData.fDrawRaw(canvas, boxPaint);
+        }
+        return true;
+    }
+
+    const auto matteDrawData =
+            resolveTrackMatteDrawData(matteSource, *matteChild,
+                                      resolvedDrawDataByRenderData);
+    if(!matteDrawData) {
+        if(inverted) {
+            SkPaint boxPaint;
+            boxPaint.setFilterQuality(child.fData->fFilterQuality);
+            boxPaint.setBlendMode(targetDrawData.fBlendMode);
+            targetDrawData.fDrawRaw(canvas, boxPaint);
+        }
+        return true;
+    }
+
+    const bool intersects = targetDrawData.fBounds.intersects(matteDrawData.fBounds);
+    if(!intersects) {
+        if(inverted) {
+            SkPaint boxPaint;
+            boxPaint.setFilterQuality(child.fData->fFilterQuality);
+            boxPaint.setBlendMode(targetDrawData.fBlendMode);
+            targetDrawData.fDrawRaw(canvas, boxPaint);
+            return true;
+        }
+        return true;
+    }
+
+    const QRectF compositeRect = targetDrawData.fBounds;
     const auto compositeBounds =
             SkRect::MakeLTRB(compositeRect.left() - parentRect.left(),
                              compositeRect.top() - parentRect.top(),
@@ -109,12 +159,13 @@ bool drawTrackMatteChild(const QList<ChildRenderData>& children,
     canvas->saveLayer(&compositeBounds, &compositePaint);
 
     SkPaint mattePaint;
+    mattePaint.setFilterQuality(matteChild->fData->fFilterQuality);
     matteDrawData.fDrawRaw(canvas, mattePaint);
 
     SkPaint boxPaint;
-    boxPaint.setBlendMode(isTrackMatteInverted(box)
-                              ? SkBlendMode::kSrcOut
-                              : SkBlendMode::kSrcIn);
+    boxPaint.setFilterQuality(child.fData->fFilterQuality);
+    boxPaint.setBlendMode(inverted ? SkBlendMode::kSrcOut
+                                   : SkBlendMode::kSrcIn);
     targetDrawData.fDrawRaw(canvas, boxPaint);
 
     canvas->restore();
@@ -171,6 +222,10 @@ void ContainerBoxRenderData::updateRelBoundingRect() {
 }
 
 void ContainerBoxRenderData::drawSk(SkCanvas * const canvas) {
+    const auto mainChildrenByBox =
+            buildMainChildRenderDataIndex(fChildrenRenderData);
+    ResolvedTrackMatteDrawDataByRenderData resolvedDrawDataByRenderData;
+    resolvedDrawDataByRenderData.reserve(mainChildrenByBox.count());
     for(const auto &child : fChildrenRenderData) {
         canvas->save();
         if(!child.fClip.fClipOps.isEmpty()) {
@@ -180,7 +235,9 @@ void ContainerBoxRenderData::drawSk(SkCanvas * const canvas) {
             canvas->setMatrix(transform);
         }
 
-        if(drawTrackMatteChild(fChildrenRenderData, child, fGlobalRect, canvas)) {
+        if(drawTrackMatteChild(child, mainChildrenByBox,
+                               resolvedDrawDataByRenderData,
+                               fGlobalRect, canvas)) {
             canvas->restore();
             continue;
         }

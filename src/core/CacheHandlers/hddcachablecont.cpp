@@ -25,6 +25,7 @@
 
 #include "hddcachablecont.h"
 #include "../Private/esettings.h"
+#include "Tasks/etask.h"
 
 namespace {
 
@@ -36,6 +37,23 @@ qint64 configuredHddCacheCapBytes() {
     return cap.fValue > 0 ? longB(cap).fValue : 0;
 }
 
+bool tmpTaskCanStillProduceData(const stdsptr<eTask> &task) {
+    if(!task) {
+        return false;
+    }
+    switch(task->getState()) {
+    case eTaskState::created:
+    case eTaskState::qued:
+    case eTaskState::processing:
+    case eTaskState::waiting:
+        return true;
+    case eTaskState::finished:
+    case eTaskState::canceled:
+        return false;
+    }
+    return false;
+}
+
 }
 
 HddCachableCont::HddCachableCont() {}
@@ -45,7 +63,11 @@ HddCachableCont::~HddCachableCont() {
 }
 
 int HddCachableCont::free_RAM_k() {
-    if(!storesDataInMemory()) return 0;
+    cleanupFinishedTmpTasks();
+    if(!storesDataInMemory()) {
+        discardIfUnrecoverable();
+        return 0;
+    }
     // Queue a tmp-file save before releasing RAM so reclaim behaves like
     // cache spill instead of permanently dropping reusable frame/audio data.
     if(!mTmpFile && !mTmpSaveTask) {
@@ -53,37 +75,58 @@ int HddCachableCont::free_RAM_k() {
     }
     const int bytes = clearMemory();
     setDataInMemory(false);
-    if(!mTmpFile && !mTmpSaveTask) noDataLeft_k();
+    discardIfUnrecoverable();
     return bytes;
 }
 
 eTask *HddCachableCont::scheduleDeleteTmpFile() {
-    if(!mTmpFile) return nullptr;
+    cleanupFinishedTmpTasks();
+    if(!mTmpFile) {
+        discardIfUnrecoverable();
+        return nullptr;
+    }
     const auto updatable = enve::make_shared<TmpDeleter>(mTmpFile);
     clearTrackedTmpFile();
     mTmpFile.reset();
     updatable->queTask();
+    discardIfUnrecoverable();
     return updatable.get();
 }
 
 eTask *HddCachableCont::scheduleSaveToTmpFile() {
-    if(!eSettings::instance().fHddCache) return nullptr;
-    if(mTmpSaveTask || mTmpFile) return nullptr;
+    cleanupFinishedTmpTasks();
+    if(!eSettings::instance().fHddCache) {
+        discardIfUnrecoverable();
+        return nullptr;
+    }
+    if(tmpTaskCanStillProduceData(mTmpSaveTask) || mTmpFile) return nullptr;
     mTmpSaveTask = createTmpFileDataSaver();
+    const auto thisRef = ref<HddCachableCont>();
+    mTmpSaveTask->addDependent({nullptr, [thisRef]() {
+                                    if(thisRef) thisRef->onTmpSaveTaskCanceled();
+                                }});
     mTmpSaveTask->queTask();
     return mTmpSaveTask.get();
 }
 
 eTask *HddCachableCont::scheduleLoadFromTmpFile() {
+    cleanupFinishedTmpTasks();
     if(storesDataInMemory()) return nullptr;
-    if(mTmpLoadTask) return mTmpLoadTask.get();
-    if(!mTmpSaveTask && !mTmpFile) return nullptr;
+    if(tmpTaskCanStillProduceData(mTmpLoadTask)) return mTmpLoadTask.get();
+    if(!tmpTaskCanStillProduceData(mTmpSaveTask) && !mTmpFile) {
+        discardIfUnrecoverable();
+        return nullptr;
+    }
     if(mTmpFile) {
         touchTrackedTmpFile();
     }
 
     mTmpLoadTask = createTmpFileDataLoader();
-    if(mTmpSaveTask)
+    const auto thisRef = ref<HddCachableCont>();
+    mTmpLoadTask->addDependent({nullptr, [thisRef]() {
+                                    if(thisRef) thisRef->onTmpLoadTaskCanceled();
+                                }});
+    if(tmpTaskCanStillProduceData(mTmpSaveTask))
         mTmpSaveTask->addDependent(mTmpLoadTask.get());
     mTmpLoadTask->queTask();
     return mTmpLoadTask.get();
@@ -111,6 +154,39 @@ void HddCachableCont::afterDataReplaced() {
 
 void HddCachableCont::setDataInMemory(const bool dataInMemory) {
     mDataInMemory = dataInMemory;
+}
+
+bool HddCachableCont::hasRecoverableData() const {
+    return mDataInMemory ||
+           mTmpFile ||
+           tmpTaskCanStillProduceData(mTmpLoadTask) ||
+           tmpTaskCanStillProduceData(mTmpSaveTask);
+}
+
+void HddCachableCont::cleanupFinishedTmpTasks() {
+    if(mTmpLoadTask && !tmpTaskCanStillProduceData(mTmpLoadTask)) {
+        mTmpLoadTask.reset();
+    }
+    if(mTmpSaveTask && !tmpTaskCanStillProduceData(mTmpSaveTask)) {
+        mTmpSaveTask.reset();
+    }
+}
+
+void HddCachableCont::discardIfUnrecoverable() {
+    cleanupFinishedTmpTasks();
+    if(!mDataInMemory && !mTmpFile && !mTmpLoadTask && !mTmpSaveTask) {
+        noDataLeft_k();
+    }
+}
+
+void HddCachableCont::onTmpSaveTaskCanceled() {
+    mTmpSaveTask.reset();
+    discardIfUnrecoverable();
+}
+
+void HddCachableCont::onTmpLoadTaskCanceled() {
+    mTmpLoadTask.reset();
+    discardIfUnrecoverable();
 }
 
 void HddCachableCont::clearTrackedTmpFile() {

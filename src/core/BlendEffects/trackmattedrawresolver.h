@@ -4,6 +4,7 @@
 #include "Boxes/boundingbox.h"
 #include "Boxes/boxrenderdata.h"
 #include "actions.h"
+#include "skia/skqtconversions.h"
 
 #include <functional>
 
@@ -56,26 +57,33 @@ inline DrawData resolve(const BoundingBox* const box,
     }
 
     stdsptr<BoxRenderData> resolvedRenderData;
-    bool usesDisplayTransform = false;
     const auto currentTransform = box ? box->getTotalTransformAtFrame(relFrame)
                                       : QMatrix();
     if(renderData && renderData->finished()) {
         if(box &&
            (!isZero4Dec(renderData->fRelFrame - relFrame) ||
             !matricesMatch(renderData->fTotalTransform, currentTransform))) {
+            if(renderData->fRenderedImage &&
+               !renderData->fUseRenderTransform) {
+                const QMatrix paintTransform =
+                        displayTransform(renderData.get(), currentTransform);
+                result.fBounds = paintTransform.mapRect(
+                            QRectF(renderData->fGlobalRect));
+                result.fBlendMode = renderData->fBlendMode;
+                result.fDrawRaw = [renderData, paintTransform](
+                        SkCanvas * const canvas,
+                        SkPaint& paint) {
+                    canvas->save();
+                    canvas->concat(toSkMatrix(paintTransform));
+                    renderData->drawOnParentLayerRaw(canvas, paint);
+                    canvas->restore();
+                };
+                return result;
+            }
             resolvedRenderData = renderData->makeCopy();
             if(resolvedRenderData) {
                 resolvedRenderData->fRelFrame = relFrame;
-                if(renderData->fRenderedImage &&
-                   !renderData->fUseRenderTransform) {
-                    resolvedRenderData->fUseRenderTransform = true;
-                    resolvedRenderData->fRenderTransform =
-                            displayTransform(renderData.get(),
-                                             currentTransform);
-                    usesDisplayTransform = true;
-                } else {
-                    resolvedRenderData->remapToTotalTransform(currentTransform);
-                }
+                resolvedRenderData->remapToTotalTransform(currentTransform);
             }
         } else {
             resolvedRenderData = renderData;
@@ -83,19 +91,27 @@ inline DrawData resolve(const BoundingBox* const box,
     } else if(box) {
         const auto latestFinished = box->getLatestFinishedRenderData(relFrame);
         if(latestFinished) {
+            if(latestFinished->fRenderedImage &&
+               !latestFinished->fUseRenderTransform) {
+                const QMatrix paintTransform =
+                        displayTransform(latestFinished.get(), currentTransform);
+                result.fBounds = paintTransform.mapRect(
+                            QRectF(latestFinished->fGlobalRect));
+                result.fBlendMode = latestFinished->fBlendMode;
+                result.fDrawRaw = [latestFinished, paintTransform](
+                        SkCanvas * const canvas,
+                        SkPaint& paint) {
+                    canvas->save();
+                    canvas->concat(toSkMatrix(paintTransform));
+                    latestFinished->drawOnParentLayerRaw(canvas, paint);
+                    canvas->restore();
+                };
+                return result;
+            }
             resolvedRenderData = latestFinished->makeCopy();
             if(resolvedRenderData) {
                 resolvedRenderData->fRelFrame = relFrame;
-                if(latestFinished->fRenderedImage &&
-                   !latestFinished->fUseRenderTransform) {
-                    resolvedRenderData->fUseRenderTransform = true;
-                    resolvedRenderData->fRenderTransform =
-                            displayTransform(latestFinished.get(),
-                                             currentTransform);
-                    usesDisplayTransform = true;
-                } else {
-                    resolvedRenderData->remapToTotalTransform(currentTransform);
-                }
+                resolvedRenderData->remapToTotalTransform(currentTransform);
             }
         }
     }
@@ -104,10 +120,7 @@ inline DrawData resolve(const BoundingBox* const box,
         return result;
     }
 
-    result.fBounds = usesDisplayTransform
-            ? resolvedRenderData->fRenderTransform.mapRect(
-                  QRectF(resolvedRenderData->fGlobalRect))
-            : QRectF(resolvedRenderData->fGlobalRect);
+    result.fBounds = QRectF(resolvedRenderData->fGlobalRect);
     result.fBlendMode = resolvedRenderData->fBlendMode;
     result.fDrawRaw = [resolvedRenderData](SkCanvas * const canvas, SkPaint& paint) {
         resolvedRenderData->drawOnParentLayerRaw(canvas, paint);

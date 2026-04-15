@@ -28,6 +28,7 @@
 #include "Properties/comboboxproperty.h"
 #include "Animators/qrealanimator.h"
 #include <QMetaObject>
+#include <QReadWriteLock>
 
 class SmartPathCollection;
 class SWT_Abstraction;
@@ -71,6 +72,14 @@ public:
     static constexpr int sMaskPathTrackIndex = 1;
 
 private:
+    struct EffectivePathCache {
+        bool fValid = false;
+        FrameRange fRange = {0, -1};
+        uint fOwnerStateId = 0;
+        uint fSourceStateId = 0;
+        SkPath fPath;
+    };
+
     SmartPathCollection* maskPathAnimatorFor(PathBox* source) const;
     SmartPathCollection* maskPathAnimator() const;
     void syncMaskPathAbstraction(
@@ -90,6 +99,8 @@ private:
     QMetaObject::Connection mMaskPathChildAddedConn;
     QMetaObject::Connection mMaskPathChildRemovedConn;
     QMetaObject::Connection mMaskPathChildMovedConn;
+    mutable QReadWriteLock mEffectivePathCacheLock;
+    mutable EffectivePathCache mEffectivePathCache;
 };
 
 #endif // LAYERMASKEFFECT_H

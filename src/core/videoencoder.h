@@ -51,6 +51,11 @@ extern "C" {
 
 class SceneFrameContainer;
 
+struct CORE_EXPORT QueuedVideoFrame {
+    sk_sp<SkImage> fImage;
+    FrameRange fRange = {0, -1};
+};
+
 class CORE_EXPORT SoundIterator {
 public:
     SoundIterator() {}
@@ -216,7 +221,7 @@ public:
         else finishEncodingSuccess();
     }
 
-    void addContainer(const stdsptr<SceneFrameContainer> &cont);
+    void addContainer(const QueuedVideoFrame &cont);
     void addContainer(const stdsptr<Samples> &cont);
     void allAudioProvided();
 
@@ -226,7 +231,7 @@ public:
 
     static void sInterruptEncoding();
     static bool sStartEncoding(RenderInstanceSettings *settings);
-    static void sAddCacheContainerToEncoder(const stdsptr<SceneFrameContainer> &cont);
+    static void sAddCacheContainerToEncoder(const QueuedVideoFrame &cont);
     static void sAddCacheContainerToEncoder(const stdsptr<Samples> &cont);
     static void sAllAudioProvided();
     static void sFinishEncoding();
@@ -259,7 +264,7 @@ protected:
     AVFormatContext *mFormatContext = nullptr;
     const AVOutputFormat *mOutputFormat = nullptr;
     bool mCurrentlyEncoding = false;
-    QList<stdsptr<SceneFrameContainer>> mNextContainers;
+    QList<QueuedVideoFrame> mNextContainers;
     QList<stdsptr<Samples>> mNextSoundConts;
 
     RenderSettings mRenderSettings;
@@ -275,7 +280,7 @@ protected:
     int _mCurrentContainerFrame = 0; // some containers will add multiple frames
     FrameRange _mRenderRange;
 
-    QList<stdsptr<SceneFrameContainer>> _mContainers;
+    QList<QueuedVideoFrame> _mContainers;
     SoundIterator mSoundIterator;
 };
 

@@ -140,7 +140,7 @@ protected:
     void addVideoCodec(const AVCodec * const codec,
                        const AVOutputFormat *outputFormat,
                        const QString &currentCodecName);
-    void addAudioCodec(const AVCodecID &codecId,
+    void addAudioCodec(const AVCodec * const codec,
                        const AVOutputFormat *outputFormat,
                        const QString &currentCodecName);
 };

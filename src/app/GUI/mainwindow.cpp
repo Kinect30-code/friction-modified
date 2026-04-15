@@ -671,10 +671,6 @@ void MainWindow::closedRenderQueueWindow()
 
 void MainWindow::initRenderPresets(const bool reinstall)
 {
-    const bool doInstall = reinstall ? true : AppSupport::getSettings("settings",
-                                                                      "firstRunRenderPresets",
-                                                                      true).toBool();
-    if (!doInstall) { return; }
     const QString path = AppSupport::getAppOutputProfilesPath();
     if (path.isEmpty() || !QFileInfo(path).isWritable()) { return; }
 
@@ -685,6 +681,21 @@ void MainWindow::initRenderPresets(const bool reinstall)
     presets << "004-friction-preset-prores-444-aac.conf";
     presets << "005-friction-preset-png.conf";
     presets << "006-friction-preset-tiff.conf";
+    presets << "007-friction-preset-webm-vp9-alpha.conf";
+
+    bool hasMissingPreset = false;
+    for (const auto &preset : presets) {
+        const QString filePath(QString("%1/%2").arg(path, preset));
+        if (!QFile::exists(filePath)) {
+            hasMissingPreset = true;
+            break;
+        }
+    }
+    const bool doInstall = reinstall || hasMissingPreset ||
+            AppSupport::getSettings("settings",
+                                    "firstRunRenderPresets",
+                                    true).toBool();
+    if (!doInstall) { return; }
 
     for (const auto &preset : presets) {
         QString filePath(QString("%1/%2").arg(path, preset));

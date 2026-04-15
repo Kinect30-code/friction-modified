@@ -69,6 +69,7 @@ public:
     bool hasAudio() const;
     void setHasAudio(const bool hasAudio);
     bool sourceInfoPending() const;
+    void ensureSourceInfo();
     void registerFrameHandler(VideoFrameHandler* const handler);
     void unregisterFrameHandler(VideoFrameHandler* const handler);
     int pendingFrameLoadCount() const;

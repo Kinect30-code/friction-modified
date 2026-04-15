@@ -341,6 +341,10 @@ void TimelineDockWidget::updateFrameRange(const FrameRange &range)
 void TimelineDockWidget::handleCurrentFrameChanged(int frame)
 {
     mCurrentFrameSpin->setValue(frame);
+    const auto scene = *mDocument.fActiveScene;
+    if (scene && scene->isOutputRendering()) {
+        return;
+    }
     if (eSettings::instance().fPreviewCache &&
         RenderHandler::sInstance->currentPreviewState() == PreviewState::paused) {
         RenderHandler::sInstance->setPreviewFrame(frame);
@@ -356,7 +360,8 @@ void TimelineDockWidget::scheduleIdlePreviewCache()
         mIdleCacheTimer->stop();
         return;
     }
-    if (!mDocument.fActiveScene) { return; }
+    const auto scene = *mDocument.fActiveScene;
+    if (!scene || scene->isOutputRendering()) { return; }
     mIdleCacheTimer->start();
 }
 
@@ -369,7 +374,7 @@ void TimelineDockWidget::processIdlePreviewCache()
     }
 
     const auto scene = *mDocument.fActiveScene;
-    if (!scene) { return; }
+    if (!scene || scene->isOutputRendering()) { return; }
 
     RenderHandler::sInstance->cacheAroundFrame(scene->anim_getCurrentAbsFrame());
 }

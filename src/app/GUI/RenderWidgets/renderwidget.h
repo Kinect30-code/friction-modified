@@ -31,6 +31,7 @@
 #include <QVBoxLayout>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QLabel>
 #include "renderinstancesettings.h"
 
 class ScrollArea;
@@ -59,10 +60,13 @@ signals:
                             const RenderState &state);
 
 private:
+    bool confirmOutputDestination(RenderInstanceWidget *wid);
     void render(RenderInstanceSettings& settings);
     void addRenderInstanceWidget(RenderInstanceWidget *wid);
+    void updateProgressText(int frame);
     QVBoxLayout *mMainLayout;
     QProgressBar *mRenderProgressBar;
+    QLabel *mRenderProgressLabel;
     QPushButton *mStartRenderButton;
     QPushButton *mStopRenderButton;
     QPushButton *mAddRenderButton;

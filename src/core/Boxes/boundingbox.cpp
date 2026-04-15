@@ -1566,15 +1566,28 @@ ParentEffect *BoundingBox::getParentEffect() const
     return nullptr;
 }
 
-TrackMatteEffect *BoundingBox::getTrackMatteEffect() const
+TrackMatteEffect *BoundingBox::resolveTrackMatteEffect() const
 {
+    if(mTrackMatteEffectCache.fStateId == mStateId) {
+        return mTrackMatteEffectCache.fEffect;
+    }
+
+    TrackMatteEffect *trackMatteEffect = nullptr;
     const int totalEffects = mBlendEffectCollection->ca_getNumberOfChildren();
     for(int i = 0; i < totalEffects; ++i) {
         if(auto *effect = enve_cast<TrackMatteEffect*>(mBlendEffectCollection->getChild(i))) {
-            return effect;
+            trackMatteEffect = effect;
+            break;
         }
     }
-    return nullptr;
+
+    mTrackMatteEffectCache = {mStateId, trackMatteEffect};
+    return trackMatteEffect;
+}
+
+TrackMatteEffect *BoundingBox::getTrackMatteEffect() const
+{
+    return resolveTrackMatteEffect();
 }
 
 BoundingBox *BoundingBox::getParentEffectTarget() const
@@ -1624,7 +1637,7 @@ void BoundingBox::clearParentEffectTarget()
 
 BoundingBox *BoundingBox::getTrackMatteTarget() const
 {
-    if(auto *effect = getTrackMatteEffect()) {
+    if(auto *effect = resolveTrackMatteEffect()) {
         return effect->matteSource();
     }
     return nullptr;
@@ -1632,7 +1645,7 @@ BoundingBox *BoundingBox::getTrackMatteTarget() const
 
 TrackMatteMode BoundingBox::getTrackMatteMode() const
 {
-    if(auto *effect = getTrackMatteEffect()) {
+    if(auto *effect = resolveTrackMatteEffect()) {
         return effect->getMode();
     }
     return TrackMatteMode::alphaMatte;
@@ -1676,16 +1689,7 @@ void BoundingBox::clearTrackMatte()
 bool BoundingBox::isUsedAsTrackMatteSource() const
 {
     const auto parent = getParentGroup();
-    if(!parent) return false;
-
-    const auto &siblings = parent->getContainedBoxes();
-    for(const auto &sibling : siblings) {
-        if(!sibling || sibling == this) continue;
-        if(sibling->getTrackMatteTarget() == this) {
-            return true;
-        }
-    }
-    return false;
+    return parent && parent->usesTrackMatteSource(this);
 }
 
 //int BoundingBox::prp_getParentFrameShift() const {

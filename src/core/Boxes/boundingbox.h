@@ -38,6 +38,7 @@
 #include "TransformEffects/transformeffect.h"
 #include "Tasks/domeletask.h"
 #include <QHash>
+#include <limits>
 
 class Canvas;
 
@@ -501,8 +502,14 @@ public:
                                 const FrameRange& parentVisRange,
                                 const QString &maskId = QString()) const;
 private:
+    struct TrackMatteEffectCache {
+        uint fStateId = std::numeric_limits<uint>::max();
+        qptr<TrackMatteEffect> fEffect;
+    };
+
     void planUpdate(const UpdateReason reason,
                     const bool causedByDescendant);
+    TrackMatteEffect *resolveTrackMatteEffect() const;
     bool isCurrentRenderData(const BoxRenderData *renderData) const;
     BoxRenderData *currentRenderDataAtRelFrame(const qreal relFrame) const;
     BoxRenderData *reusableDisplayRenderData(const qreal relFrame,
@@ -539,6 +546,7 @@ protected:
     const qsptr<TransformEffectCollection> mTransformEffectCollection;
     const qsptr<BoxTransformAnimator> mTransformAnimator;
     const qsptr<RasterEffectCollection> mRasterEffectsAnimators;
+    mutable TrackMatteEffectCache mTrackMatteEffectCache;
 private:
     void alignGeometry(const QRectF& geometry,
                        const Qt::Alignment align,

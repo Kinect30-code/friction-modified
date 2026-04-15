@@ -911,6 +911,15 @@ void Canvas::setOutputRendering(const bool bT) {
     mRenderingOutput = bT;
 }
 
+void Canvas::setPreviewDisplayFrame(int frame) {
+    mPreviewDisplayAbsFrame = frame;
+    mPreviewDisplayFrameValid = true;
+}
+
+void Canvas::clearPreviewDisplayFrame() {
+    mPreviewDisplayFrameValid = false;
+}
+
 void Canvas::setSceneFrame(const int relFrame) {
     const auto cont = mSceneFramesHandler.atFrame(relFrame);
     setSceneFrame(enve::shared<SceneFrameContainer>(cont));
@@ -924,7 +933,7 @@ void Canvas::setSceneFrame(const stdsptr<SceneFrameContainer>& cont) {
 }
 
 void Canvas::setLoadingSceneFrame(const stdsptr<SceneFrameContainer>& cont) {
-    setLoadingSceneFrame(cont, anim_getCurrentRelFrame());
+    setLoadingSceneFrame(cont, currentDisplayRelFrame());
 }
 
 void Canvas::setLoadingSceneFrame(const stdsptr<SceneFrameContainer>& cont,
@@ -939,13 +948,18 @@ void Canvas::setLoadingSceneFrame(const stdsptr<SceneFrameContainer>& cont,
     mLoadingSceneFrameTargetValid = cont != nullptr;
     if(cont) {
         Q_ASSERT(!cont->storesDataInMemory());
-        cont->scheduleLoadFromTmpFile();
+        if(cont->hasRecoverableData()) {
+            cont->scheduleLoadFromTmpFile();
+        } else {
+            mLoadingSceneFrame.reset();
+            mLoadingSceneFrameTargetValid = false;
+        }
     }
 }
 
 bool Canvas::sceneFrameMatchesCurrentDisplayFrame(
         const SceneFrameContainer *cont) const {
-    return cont && cont->getRange().inRange(anim_getCurrentRelFrame());
+    return cont && cont->getRange().inRange(currentDisplayRelFrame());
 }
 
 bool Canvas::sceneFrameMatchesPendingDisplayFrame(
@@ -1331,8 +1345,17 @@ void Canvas::anim_setAbsFrame(const int frame)
     if (cont) {
         if (cont->storesDataInMemory()) {
             setSceneFrame(cont->ref<SceneFrameContainer>());
-        } else {
+        } else if(cont->hasRecoverableData()) {
             setLoadingSceneFrame(cont->ref<SceneFrameContainer>(), newRelFrame);
+        } else {
+            mSceneFramesHandler.remove(cont->getRange());
+            setLoadingSceneFrame(nullptr);
+            mSceneFrameOutdated = true;
+            planUpdate(UpdateReason::frameChange);
+            mUndoRedoStack->setFrame(frame);
+            emit currentFrameChanged(frame);
+            schedulePivotUpdate();
+            return;
         }
         mSceneFrameOutdated = !cont->storesDataInMemory();
     } else {
@@ -1493,7 +1516,19 @@ bool Canvas::SWT_shouldBeVisible(const SWT_RulesCollection &rules,
 
 int Canvas::getCurrentFrame() const
 {
-    return anim_getCurrentAbsFrame();
+    return currentDisplayAbsFrame();
+}
+
+int Canvas::currentDisplayAbsFrame() const
+{
+    return mPreviewDisplayFrameValid ?
+                mPreviewDisplayAbsFrame :
+                anim_getCurrentAbsFrame();
+}
+
+int Canvas::currentDisplayRelFrame() const
+{
+    return prp_absFrameToRelFrame(currentDisplayAbsFrame());
 }
 
 HddCachableCacheHandler &Canvas::getSoundCacheHandler()

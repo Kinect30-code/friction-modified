@@ -310,6 +310,9 @@ public:
 
     void setPreviewing(const bool bT);
     void setOutputRendering(const bool bT);
+    bool isOutputRendering() const { return mRenderingOutput; }
+    void setPreviewDisplayFrame(int frame);
+    void clearPreviewDisplayFrame();
 
     bool SWT_shouldBeVisible(const SWT_RulesCollection &rules,
                              const bool parentSatisfies,
@@ -941,6 +944,8 @@ protected:
     bool mPreviewing = false;
     bool mRenderingPreview = false;
     bool mRenderingOutput = false;
+    int mPreviewDisplayAbsFrame = 0;
+    bool mPreviewDisplayFrameValid = false;
 
     bool mSceneFrameOutdated = false;
     UseSharedPointer<SceneFrameContainer> mSceneFrame;
@@ -975,6 +980,9 @@ protected:
     FrameMarker mIn{tr("In"), false, 0};
     FrameMarker mOut{tr("Out"), false, 0};
     std::vector<FrameMarker> mMarkers;
+
+    int currentDisplayAbsFrame() const;
+    int currentDisplayRelFrame() const;
 
     void handleMovePointMousePressEvent(const eMouseEvent &e);
     void handleMovePointMouseMove(const eMouseEvent &e);

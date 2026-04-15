@@ -39,6 +39,7 @@ public:
     ~HddCachableCont();
 
     int free_RAM_k() final;
+    bool hasRecoverableData() const;
 
     eTask* scheduleDeleteTmpFile();
     eTask* scheduleSaveToTmpFile();
@@ -56,6 +57,10 @@ protected:
 
     qsptr<QTemporaryFile> mTmpFile;
 private:
+    void cleanupFinishedTmpTasks();
+    void discardIfUnrecoverable();
+    void onTmpSaveTaskCanceled();
+    void onTmpLoadTaskCanceled();
     void clearTrackedTmpFile();
     void touchTrackedTmpFile();
     void trackTmpFile(qint64 tmpFileBytes);

@@ -69,6 +69,7 @@ public:
 
     void scheduleFrameRange(const FrameRange& range);
     SoundMerger * scheduleFrame(const int frameId);
+    SoundMerger * scheduleSecondIfNeeded(const int secondId);
     HddCachableCacheHandler& getCacheHandler() {
         return mSecondsCache;
     }

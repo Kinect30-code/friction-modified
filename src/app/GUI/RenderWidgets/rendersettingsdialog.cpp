@@ -202,30 +202,36 @@ void RenderSettingsDialog::updateValuesFromRes() {
 void RenderSettingsDialog::updateValuesFromWidth() {
     disconnectDims();
     qreal res;
+    int baseHeight;
     if(mCurrentScene) {
         res = qreal(mWidthSpin->value())/
                     mCurrentScene->getCanvasWidth();
+        baseHeight = mCurrentScene->getCanvasHeight();
     } else {
         res = qreal(mWidthSpin->value())/
                     mInitialSettings.fBaseWidth;
+        baseHeight = mInitialSettings.fBaseHeight;
     }
     mResolutionSpin->setValue(res*100);
-    mHeightSpin->setValue(qRound(mInitialSettings.fBaseHeight*res));
+    mHeightSpin->setValue(qRound(baseHeight*res));
     connectDims();
 }
 
 void RenderSettingsDialog::updateValuesFromHeight() {
     disconnectDims();
     qreal res;
+    int baseWidth;
     if(mCurrentScene) {
         res = qreal(mHeightSpin->value())/
                     mCurrentScene->getCanvasHeight();
+        baseWidth = mCurrentScene->getCanvasWidth();
     } else {
         res = qreal(mHeightSpin->value())/
                     mInitialSettings.fBaseHeight;
+        baseWidth = mInitialSettings.fBaseWidth;
     }
     mResolutionSpin->setValue(res*100);
-    mWidthSpin->setValue(qRound(mInitialSettings.fBaseWidth*res));
+    mWidthSpin->setValue(qRound(baseWidth*res));
     connectDims();
 }
 

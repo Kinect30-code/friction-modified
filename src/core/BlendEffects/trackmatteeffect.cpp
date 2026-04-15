@@ -29,13 +29,11 @@
 
 namespace {
 
-SkRect trackMatteCompositeBounds(const QRectF& targetBounds,
-                                 const QRectF& matteBounds) {
-    const QRectF unitedBounds = targetBounds.united(matteBounds);
-    return SkRect::MakeLTRB(unitedBounds.left(),
-                            unitedBounds.top(),
-                            unitedBounds.right(),
-                            unitedBounds.bottom());
+SkRect trackMatteCompositeBounds(const QRectF& targetBounds) {
+    return SkRect::MakeLTRB(targetBounds.left(),
+                            targetBounds.top(),
+                            targetBounds.right(),
+                            targetBounds.bottom());
 }
 
 }
@@ -122,15 +120,37 @@ void TrackMatteEffect::detachedBlendSetup(
                 TrackMatteDrawResolver::resolve(boxToDraw, relFrame, boxData);
         const auto matteDrawData =
                 TrackMatteDrawResolver::resolve(matte, matteRelFrame, matteData);
-        if(!boxDrawData || !matteDrawData) {
+        if(!boxDrawData) {
+            return true;
+        }
+
+        if(!matteDrawData) {
+            if(!isInverted) {
+                return true;
+            }
+
+            SkPaint boxPaint;
+            boxPaint.setFilterQuality(filter);
+            boxPaint.setBlendMode(boxDrawData.fBlendMode);
+            boxDrawData.fDrawRaw(canvas, boxPaint);
+            return true;
+        }
+
+        if(!boxDrawData.fBounds.intersects(matteDrawData.fBounds)) {
+            if(!isInverted) {
+                return true;
+            }
+
+            SkPaint boxPaint;
+            boxPaint.setFilterQuality(filter);
+            boxPaint.setBlendMode(boxDrawData.fBlendMode);
+            boxDrawData.fDrawRaw(canvas, boxPaint);
             return true;
         }
 
         SkPaint compositePaint;
         compositePaint.setBlendMode(boxDrawData.fBlendMode);
-        const auto compositeBounds =
-                trackMatteCompositeBounds(boxDrawData.fBounds,
-                                          matteDrawData.fBounds);
+        const auto compositeBounds = trackMatteCompositeBounds(boxDrawData.fBounds);
         canvas->saveLayer(&compositeBounds, &compositePaint);
 
         SkPaint mattePaint;

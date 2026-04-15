@@ -356,8 +356,29 @@ FrameRange LayerMaskEffect::prp_getIdenticalRelRange(const int relFrame) const
 SkPath LayerMaskEffect::effectivePath(const qreal relFrame) const
 {
     if (!isPathValid()) { return SkPath(); }
+    const int relFrameI = qRound(relFrame);
+    const auto * const owner = getFirstAncestor<BoundingBox>();
+    const auto * const source = maskPathSource();
+    const uint ownerStateId = owner ? owner->currentStateId() : 0;
+    const uint sourceStateId = source ? source->currentStateId() : 0;
+    const FrameRange identicalRange = prp_getIdenticalRelRange(relFrameI);
+    {
+        QReadLocker locker(&mEffectivePathCacheLock);
+        if(mEffectivePathCache.fValid &&
+           mEffectivePathCache.fOwnerStateId == ownerStateId &&
+           mEffectivePathCache.fSourceStateId == sourceStateId &&
+           mEffectivePathCache.fRange.inRange(relFrameI)) {
+            return mEffectivePathCache.fPath;
+        }
+    }
+
     auto path = clipPath(relFrame);
-    if (path.isEmpty()) { return SkPath(); }
+    if (path.isEmpty()) {
+        QWriteLocker locker(&mEffectivePathCacheLock);
+        mEffectivePathCache = {true, identicalRange, ownerStateId, sourceStateId,
+                               SkPath()};
+        return SkPath();
+    }
 
     if(mExpansion) {
         const qreal expansion = mExpansion->getEffectiveValue(relFrame);
@@ -379,6 +400,12 @@ SkPath LayerMaskEffect::effectivePath(const qreal relFrame) const
                 path = feathered;
             }
         }
+    }
+
+    {
+        QWriteLocker locker(&mEffectivePathCacheLock);
+        mEffectivePathCache = {true, identicalRange, ownerStateId, sourceStateId,
+                               path};
     }
     return path;
 }

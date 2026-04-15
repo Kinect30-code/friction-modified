@@ -30,6 +30,10 @@
 #include "canvas.h"
 #include "skia/skiahelpers.h"
 
+extern "C" {
+    #include <libavutil/pixdesc.h>
+}
+
 #define AV_RuntimeThrow(errId, message) \
 { \
     char * const errMsg = new char[AV_ERROR_MAX_STRING_SIZE]; \
@@ -172,6 +176,12 @@ static void sanitizeAudioSettings(OutputSettings &settings)
     }
 }
 
+static bool pixelFormatHasAlpha(const AVPixelFormat format)
+{
+    const AVPixFmtDescriptor * const desc = av_pix_fmt_desc_get(format);
+    return desc && (desc->flags & AV_PIX_FMT_FLAG_ALPHA);
+}
+
 }
 
 VideoEncoder::VideoEncoder() {
@@ -179,8 +189,8 @@ VideoEncoder::VideoEncoder() {
     sInstance = this;
 }
 
-void VideoEncoder::addContainer(const stdsptr<SceneFrameContainer>& cont) {
-    if(!cont) return;
+void VideoEncoder::addContainer(const QueuedVideoFrame& cont) {
+    if(!cont.fImage || !cont.fRange.isValid()) return;
     mNextContainers.append(cont);
     if(getState() < eTaskState::qued || getState() > eTaskState::processing) queTask();
 }
@@ -433,8 +443,9 @@ static AVFrame *getVideoFrame(OutputStream * const ost,
                                         nullptr, nullptr, nullptr);
     if(!ost->fSwsCtx) RuntimeThrow("Cannot initialize the conversion context");
 
-    // check if we need to convert to "unpremultiplied"
-    const bool unpremul = c->codec_id == AV_CODEC_ID_PNG; // for now only check for PNG
+    // Skia gives us premultiplied pixels. Straight-alpha export formats need
+    // unpremultiplied input to avoid dark edges around transparency.
+    const bool unpremul = pixelFormatHasAlpha(c->pix_fmt);
     if (unpremul) {
         SkImageInfo unpremulInfo = SkImageInfo::Make(pixmap.width(),
                                                      pixmap.height(),
@@ -1009,12 +1020,12 @@ void VideoEncoder::process() {
         }
         const bool encodeVideo = mEncodeVideo && hasVideo && videoAligned;
         if(encodeVideo) {
-            const auto cacheCont = _mContainers.at(_mCurrentContainerId);
-            const auto contRange = cacheCont->getRange()*_mRenderRange;
+            const auto &cacheCont = _mContainers.at(_mCurrentContainerId);
+            const auto contRange = cacheCont.fRange*_mRenderRange;
             const int nFrames = contRange.span();
             try {
                 writeVideoFrame(mFormatContext, &mVideoStream,
-                                cacheCont->getImage(), &hasVideo);
+                                cacheCont.fImage, &hasVideo);
             } catch(...) {
                 RuntimeThrow("Failed to write video frame");
             }
@@ -1067,9 +1078,10 @@ void VideoEncoder::beforeProcessing(const Hardware) {
 void VideoEncoder::afterProcessing() {
     const auto currCanvas = mRenderInstanceSettings->getTargetCanvas();
     if(_mCurrentContainerId != 0) {
-        const auto lastEncoded = _mContainers.at(_mCurrentContainerId - 1);
-        currCanvas->setSceneFrame(lastEncoded);
-        currCanvas->setMinFrameUseRange(lastEncoded->getRange().fMax + 1);
+        const auto &lastEncoded = _mContainers.at(_mCurrentContainerId - 1);
+        if(currCanvas) {
+            currCanvas->setMinFrameUseRange(lastEncoded.fRange.fMax + 1);
+        }
     }
 
     for(int i = _mContainers.count() - 1; i >= _mCurrentContainerId; i--) {
@@ -1110,7 +1122,7 @@ bool VideoEncoder::sStartEncoding(RenderInstanceSettings *settings) {
     return sInstance->startNewEncoding(settings);
 }
 
-void VideoEncoder::sAddCacheContainerToEncoder(const stdsptr<SceneFrameContainer> &cont) {
+void VideoEncoder::sAddCacheContainerToEncoder(const QueuedVideoFrame &cont) {
     sInstance->addContainer(cont);
 }
 

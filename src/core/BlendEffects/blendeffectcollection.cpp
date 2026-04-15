@@ -22,16 +22,23 @@ enum MaskMode {
     Difference = 6
 };
 
-SkPath resolveOwnerBoundsPath(const BlendEffectCollection* const collection) {
-    SkPath ownerBoundsPath;
+QRectF resolveOwnerBoundsRect(const BlendEffectCollection* const collection,
+                             const qreal relFrame) {
     if(!collection) {
-        return ownerBoundsPath;
+        return QRectF();
     }
     const auto owner = collection->getFirstAncestor<BoundingBox>();
     if(!owner) {
-        return ownerBoundsPath;
+        return QRectF();
     }
-    const auto rect = owner->getAbsBoundingRect();
+    return owner->getTotalTransformAtFrame(relFrame).mapRect(
+                owner->getRelBoundingRect());
+}
+
+SkPath resolveOwnerBoundsPath(const BlendEffectCollection* const collection,
+                              const qreal relFrame) {
+    SkPath ownerBoundsPath;
+    const auto rect = resolveOwnerBoundsRect(collection, relFrame);
     if(rect.isEmpty()) {
         return ownerBoundsPath;
     }
@@ -73,9 +80,35 @@ bool combineMaskPaths(const SkPath& lhs,
     return Op(lhs, rhs, op, out);
 }
 
-bool composeLayerMaskPath(const BlendEffectCollection* const collection,
-                          const qreal relFrame,
-                          SkPath* const outPath) {
+FrameRange layerMaskIdenticalRelRange(const BlendEffectCollection* const collection,
+                                      const int relFrame) {
+    if(!collection) {
+        return {FrameRange::EMIN, FrameRange::EMAX};
+    }
+
+    FrameRange range{FrameRange::EMIN, FrameRange::EMAX};
+    const int iMax = collection->ca_getNumberOfChildren();
+    for(int i = 0; i < iMax; i++) {
+        const auto effect = collection->getChild(i);
+        if(!effect->isVisible()) {
+            continue;
+        }
+        const auto layerMask = enve_cast<LayerMaskEffect*>(effect);
+        if(!layerMask) {
+            continue;
+        }
+        range *= layerMask->prp_getIdenticalRelRange(relFrame);
+        if(range.isUnary()) {
+            return range;
+        }
+    }
+
+    return range;
+}
+
+bool composeLayerMaskPathUncached(const BlendEffectCollection* const collection,
+                                  const qreal relFrame,
+                                  SkPath* const outPath) {
     if(!outPath) {
         return false;
     }
@@ -84,11 +117,11 @@ bool composeLayerMaskPath(const BlendEffectCollection* const collection,
     SkPath composedMaskPath;
     bool hasComposedMask = false;
     SkPath ownerBoundsPath;
-    bool ownerBoundsResolved = false;
+            bool ownerBoundsResolved = false;
 
     const auto ownerBounds = [&]() -> const SkPath& {
         if(!ownerBoundsResolved) {
-            ownerBoundsPath = resolveOwnerBoundsPath(collection);
+            ownerBoundsPath = resolveOwnerBoundsPath(collection, relFrame);
             ownerBoundsResolved = true;
         }
         return ownerBoundsPath;
@@ -184,7 +217,7 @@ void BlendEffectCollection::blendSetup(
         QList<ChildRenderData> &delayed) const {
     SkPath composedLayerMask;
     const bool hasLayerMask =
-            composeLayerMaskPath(this, relFrame, &composedLayerMask);
+            composedLayerMaskPath(relFrame, &composedLayerMask);
     if(hasLayerMask) {
         data.fClip.fClipOps.append(
                     {composedLayerMask, SkClipOp::kIntersect, true});
@@ -202,7 +235,7 @@ void BlendEffectCollection::blendSetup(
 void BlendEffectCollection::drawBlendSetup(SkCanvas * const canvas) {
     const qreal relFrame = anim_getCurrentRelFrame();
     SkPath composedMaskPath;
-    if(composeLayerMaskPath(this, relFrame, &composedMaskPath)) {
+    if(composedLayerMaskPath(relFrame, &composedMaskPath)) {
         if(composedMaskPath.isEmpty()) {
             canvas->clipRect(SkRect::MakeEmpty(), SkClipOp::kIntersect, true);
         } else {
@@ -242,6 +275,45 @@ void BlendEffectCollection::detachedBlendSetup(
         if(!effect->isVisible()) continue;
         effect->detachedBlendSetup(boxToDraw, relFrame, canvas, filter, drawId, delayed);
     }
+}
+
+bool BlendEffectCollection::composedLayerMaskPath(
+        const qreal relFrame,
+        SkPath * const outPath) const {
+    if(!outPath) {
+        return false;
+    }
+
+    const int relFrameI = qRound(relFrame);
+    const auto * const owner = getFirstAncestor<BoundingBox>();
+    const uint ownerStateId = owner ? owner->currentStateId() : 0;
+    const QRectF ownerBoundsRect = resolveOwnerBoundsRect(this, relFrame);
+    const FrameRange identicalRange = layerMaskIdenticalRelRange(this, relFrameI);
+    {
+        QReadLocker locker(&mLayerMaskPathCacheLock);
+        if(mLayerMaskPathCache.fResolved &&
+           mLayerMaskPathCache.fOwnerStateId == ownerStateId &&
+           mLayerMaskPathCache.fOwnerBoundsRect == ownerBoundsRect &&
+           mLayerMaskPathCache.fRange.inRange(relFrameI)) {
+            *outPath = mLayerMaskPathCache.fPath;
+            return mLayerMaskPathCache.fHasMask;
+        }
+    }
+
+    SkPath composedMaskPath;
+    const bool hasMask =
+            composeLayerMaskPathUncached(this, relFrame, &composedMaskPath);
+    {
+        QWriteLocker locker(&mLayerMaskPathCacheLock);
+        mLayerMaskPathCache = {true, hasMask, identicalRange, ownerStateId,
+                               ownerBoundsRect,
+                               composedMaskPath};
+    }
+    if(!hasMask) {
+        return false;
+    }
+    *outPath = composedMaskPath;
+    return true;
 }
 
 void BlendEffectCollection::prp_writeProperty_impl(eWriteStream &dst) const {

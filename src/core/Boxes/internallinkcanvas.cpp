@@ -123,13 +123,22 @@ void InternalLinkCanvas::setupRenderData(const qreal relFrame,
                 canvasData->setCachedSceneFrame(reusableFrame);
             } else {
                 if(cachedFrame && !cachedFrame->storesDataInMemory()) {
-                    cachedFrame->scheduleLoadFromTmpFile();
+                    if(cachedFrame->hasRecoverableData()) {
+                        cachedFrame->scheduleLoadFromTmpFile();
+                    } else {
+                        canvasTarget->getSceneFramesHandler().remove(
+                                    cachedFrame->getRange());
+                    }
                 }
                 const auto loadingFrame = canvasTarget->loadingSceneFrame();
                 if(loadingFrame &&
                    sceneFrameCoversTarget(loadingFrame, targetFrame) &&
                    !loadingFrame->storesDataInMemory()) {
-                    loadingFrame->scheduleLoadFromTmpFile();
+                    if(loadingFrame->hasRecoverableData()) {
+                        loadingFrame->scheduleLoadFromTmpFile();
+                    } else {
+                        canvasTarget->setLoadingSceneFrame(nullptr);
+                    }
                 }
                 processChildrenData(remapped, thisM, data, scene,
                                     data->fResolution);

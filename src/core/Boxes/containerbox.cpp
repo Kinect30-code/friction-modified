@@ -331,6 +331,36 @@ const QList<BoundingBox*> &ContainerBox::getContainedBoxes() const {
     return mContainedBoxes;
 }
 
+bool ContainerBox::usesTrackMatteSource(const BoundingBox * const box) const {
+    if(!box) {
+        return false;
+    }
+
+    const uint cacheStateId = currentStateId();
+    {
+        QReadLocker locker(&mTrackMatteSourceCacheLock);
+        if(mTrackMatteSourceCacheStateId == cacheStateId) {
+            return mTrackMatteSourceBoxes.contains(box);
+        }
+    }
+
+    QSet<const BoundingBox*> matteSources;
+    matteSources.reserve(mContainedBoxes.count());
+    for(const auto * const sibling : mContainedBoxes) {
+        if(!sibling) {
+            continue;
+        }
+        if(const auto * const matteSource = sibling->getTrackMatteTarget()) {
+            matteSources.insert(matteSource);
+        }
+    }
+
+    QWriteLocker locker(&mTrackMatteSourceCacheLock);
+    mTrackMatteSourceBoxes = matteSources;
+    mTrackMatteSourceCacheStateId = cacheStateId;
+    return mTrackMatteSourceBoxes.contains(box);
+}
+
 void ContainerBox::anim_scaleTime(const int pivotAbsFrame, const qreal scale) {
     BoundingBox::anim_scaleTime(pivotAbsFrame, scale);
 
@@ -831,7 +861,6 @@ void ContainerBox::drawContained(SkCanvas * const canvas,
                                  QList<BlendEffect::Delayed> &delayed) const {
     if(mContainedBoxes.isEmpty()) return;
     handleDelayed(delayed, drawId, nullptr, mContainedBoxes.last());
-
     const auto minMax = getContainedMinMax();
     for(int i = minMax.fMax; i >= minMax.fMin; i--) {
         const auto& box = mContainedBoxes.at(i);
@@ -1008,6 +1037,7 @@ void processChildData(BoundingBox * const child,
         }
         return;
     }
+
     stdsptr<BoxRenderData> boxRenderData;
     if(parentData->fParentIsTarget) {
         boxRenderData = child->getCurrentRenderData(childRelFrame,
