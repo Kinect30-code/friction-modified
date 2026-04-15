@@ -42,7 +42,7 @@ class MemoryHandler;
 class SceneFrameContainer;
 
 enum class PreviewState {
-    stopped, rendering, playing, paused
+    stopped, playing, paused
 };
 
 class RenderHandler : public QObject {
@@ -62,7 +62,6 @@ public:
     void stopPreview();
     void pausePreview();
     void resumePreview();
-    void renderPreview();
     void renderFromSettings(RenderInstanceSettings * const settings);
 
     void setPreviewFrame(const int &frame);
@@ -75,7 +74,6 @@ public:
 
     static RenderHandler* sInstance;
 signals:
-    void previewBeingRendered();
     void previewPaused();
     void previewBeingPlayed();
     void previewFinished();
@@ -106,10 +104,13 @@ private:
     int firstUnreadyPreviewFrameAtOrAfter(int frame, int maxFrame) const;
     bool previewFrameReady(int frame) const;
     int previewSteadyBufferFrames() const;
+    int previewRequiredBufferFrames(int anchorFrame, int desiredFrames) const;
     int previewBufferedAheadFrames(int anchorFrame, int maxFrames) const;
     bool previewHasBufferedAhead(int anchorFrame, int targetFrames) const;
-    qreal previewPlaybackRateForBufferedFrames(int bufferedFrames) const;
+    qreal previewPlaybackRateForBufferedFrames(int bufferedFrames,
+                                               int targetFrames) const;
     void updatePreviewPlaybackRate(int anchorFrame);
+    void syncPreviewUseRange(const FrameRange &baseRange);
     void restorePreviewResolution();
     void trimPreviewCaches(const FrameRange &activeRange);
     int warmPreviewFramesInMemory(const FrameRange &range, int maxFrames);
@@ -121,8 +122,6 @@ private:
     void setCurrentScene(Canvas * const scene);
 
     void finishEncoding();
-    void playPreviewAfterAllTasksCompleted();
-
     void nextSaveOutputFrame();
     void nextPreviewRenderFrame();
     void nextPreviewFrame();
@@ -152,7 +151,6 @@ private:
     void setPreviewPlayedRangeValue(const FrameRange &range);
     void appendPreviewPlayedFrameValue(int frame);
     bool backgroundCachingValue() const;
-    void setBackgroundCachingValue(bool backgroundCaching);
     bool previewRenderCursorRetargetedValue() const;
     void setPreviewRenderCursorRetargetedValue(bool retargeted);
 

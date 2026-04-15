@@ -1406,7 +1406,7 @@ void KeysView::handleMouseMove(const QPoint &pos,
         mFirstMove = false;
     } else updateHovered(posU);
 
-    if(mIsMouseGrabbing) Document::sInstance->updateScenes();
+    if(mIsMouseGrabbing) Document::sInstance->scheduleInteractiveScenesUpdate();
     else update();
     mLastMovePos = pos;
 }

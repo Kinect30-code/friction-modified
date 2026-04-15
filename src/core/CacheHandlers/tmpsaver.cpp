@@ -25,11 +25,39 @@
 
 #include "tmpsaver.h"
 
+#include <QDir>
+#include <QFileInfo>
+
+#include "../appsupport.h"
+#include "../Private/esettings.h"
+
+namespace {
+
+QString hddCacheDirectory() {
+    QString path = eSettings::instance().fHddCacheFolder.trimmed();
+    if(path.isEmpty()) {
+        path = QDir(AppSupport::getAppTempPath()).
+                filePath(QStringLiteral("friction-hdd-cache"));
+    }
+
+    QDir dir(path);
+    if(dir.exists() || dir.mkpath(QStringLiteral("."))) {
+        return dir.filePath(QStringLiteral("friction-XXXXXX.tmp"));
+    }
+
+    return QString();
+}
+
+}
+
 TmpSaver::TmpSaver(HddCachableCont* const target) :
     mTarget(target) {}
 
 void TmpSaver::process() {
-    mTmpFile = qsptr<QTemporaryFile>(new QTemporaryFile());
+    const QString fileTemplate = hddCacheDirectory();
+    mTmpFile = fileTemplate.isEmpty() ?
+                qsptr<QTemporaryFile>(new QTemporaryFile()) :
+                qsptr<QTemporaryFile>(new QTemporaryFile(fileTemplate));
     if(mTmpFile->open()) {
         eWriteStream dst(mTmpFile.get());
         write(dst);
@@ -43,5 +71,6 @@ void TmpSaver::process() {
 void TmpSaver::afterProcessing() {
     if(!mTarget) return;
     if(!mSavingSuccessful) return;
-    mTarget->setDataSavedToTmpFile(mTmpFile);
+    mTarget->setDataSavedToTmpFile(mTmpFile,
+                                   QFileInfo(mTmpFile->fileName()).size());
 }

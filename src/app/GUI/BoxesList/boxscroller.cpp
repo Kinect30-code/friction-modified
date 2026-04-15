@@ -562,8 +562,7 @@ void BoxScroller::mousePressEvent(QMouseEvent *event)
         }
     }
     const auto previewState = RenderHandler::sInstance->currentPreviewState();
-    if (previewState == PreviewState::playing ||
-        previewState == PreviewState::rendering) {
+    if (previewState == PreviewState::playing) {
         RenderHandler::sInstance->interruptPreview();
     }
     if (event->button() == Qt::RightButton) {

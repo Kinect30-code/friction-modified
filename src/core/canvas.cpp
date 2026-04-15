@@ -316,7 +316,7 @@ void Canvas::renderSk(SkCanvas* const canvas,
              mCurrentMode == CanvasMode::pointTransform ||
              mTransMode != TransformMode::none);
     const bool drawCanvas = !interactiveTransform &&
-                            mSceneFrame &&
+                            sceneFrameMatchesCurrentDisplayFrame(mSceneFrame.get()) &&
                             mSceneFrame->fBoxState == mStateId;
     const auto drawCanvasOutline = [&]() {
         if (mClipToCanvasSize) { return; }
@@ -924,12 +924,35 @@ void Canvas::setSceneFrame(const stdsptr<SceneFrameContainer>& cont) {
 }
 
 void Canvas::setLoadingSceneFrame(const stdsptr<SceneFrameContainer>& cont) {
-    if(mLoadingSceneFrame == cont) return;
+    setLoadingSceneFrame(cont, anim_getCurrentRelFrame());
+}
+
+void Canvas::setLoadingSceneFrame(const stdsptr<SceneFrameContainer>& cont,
+                                  int targetRelFrame) {
+    if(mLoadingSceneFrame == cont &&
+       mLoadingSceneFrameTargetValid == (cont != nullptr) &&
+       (!cont || mLoadingSceneFrameTargetRelFrame == targetRelFrame)) {
+        return;
+    }
     mLoadingSceneFrame = cont;
+    mLoadingSceneFrameTargetRelFrame = targetRelFrame;
+    mLoadingSceneFrameTargetValid = cont != nullptr;
     if(cont) {
         Q_ASSERT(!cont->storesDataInMemory());
         cont->scheduleLoadFromTmpFile();
     }
+}
+
+bool Canvas::sceneFrameMatchesCurrentDisplayFrame(
+        const SceneFrameContainer *cont) const {
+    return cont && cont->getRange().inRange(anim_getCurrentRelFrame());
+}
+
+bool Canvas::sceneFrameMatchesPendingDisplayFrame(
+        const SceneFrameContainer *cont) const {
+    return cont &&
+           mLoadingSceneFrameTargetValid &&
+           cont->getRange().inRange(mLoadingSceneFrameTargetRelFrame);
 }
 
 FrameRange Canvas::prp_getIdenticalRelRange(const int relFrame) const {
@@ -1309,10 +1332,11 @@ void Canvas::anim_setAbsFrame(const int frame)
         if (cont->storesDataInMemory()) {
             setSceneFrame(cont->ref<SceneFrameContainer>());
         } else {
-            setLoadingSceneFrame(cont->ref<SceneFrameContainer>());
+            setLoadingSceneFrame(cont->ref<SceneFrameContainer>(), newRelFrame);
         }
         mSceneFrameOutdated = !cont->storesDataInMemory();
     } else {
+        setLoadingSceneFrame(nullptr);
         mSceneFrameOutdated = true;
         planUpdate(UpdateReason::frameChange);
     }

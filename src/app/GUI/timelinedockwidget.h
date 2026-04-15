@@ -41,7 +41,6 @@
 #include <QToolBar>
 #include <QStackedWidget>
 #include <QToolButton>
-#include <QProgressBar>
 #include <QTimer>
 
 #include "smartPointers/ememory.h"
@@ -74,7 +73,6 @@ public:
     bool processKeyPress(QKeyEvent *event);
     void previewFinished();
     void previewBeingPlayed();
-    void previewBeingRendered();
     void previewPaused();
     void stepPreview();
 
@@ -108,9 +106,6 @@ private:
     void jumpToIntermediateFrame(bool forward);
 
     void playPreview();
-    void renderPreview();
-    void pausePreview();
-    void resumePreview();
     void setStepPreviewStop(const bool pause = false);
     void setStepPreviewStart();
     void gotoFrame(int frame);
@@ -121,8 +116,6 @@ private:
     void handleCurrentFrameChanged(int frame);
     void scheduleIdlePreviewCache();
     void processIdlePreviewCache();
-
-    void showRenderStatus(bool show);
 
     void addSpacer();
     void addBlankAction();
@@ -148,16 +141,12 @@ private:
     QAction *mCurrentFrameSpinAct;
     FrameSpinBox *mCurrentFrameSpin;
 
-    QAction *mRenderProgressAct;
-    QProgressBar *mRenderProgress;
-
     QTimer *mStepPreviewTimer;
     QTimer *mIdleCacheTimer;
 
     QList<TimelineWidget*> mTimelineWidgets;
     //AnimationDockWidget *mAnimationDockWidget;
 
-    QPair<bool,int> mPausedPreviewState;
 };
 
 #endif // BOXESLISTANIMATIONDOCKWIDGET_H

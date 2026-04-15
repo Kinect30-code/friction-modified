@@ -178,7 +178,7 @@ void CanvasWindow::queTasksAndUpdate()
 {
     updatePivotIfNeeded();
     update();
-    Document::sInstance->updateScenes();
+    mDocument.scheduleInteractiveScenesUpdate();
 }
 
 bool CanvasWindow::hasNoCanvas()

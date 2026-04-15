@@ -52,15 +52,33 @@
 
 #include "exceptions.h"
 #include "hardwareinfo.h"
+
+namespace {
+
+intKB cappedFreeThreshold(const intKB &totalRamKB,
+                          int percent,
+                          const intMB &maxThresholdMB) {
+    const intKB percentThreshold = totalRamKB*percent/100;
+    const intKB maxThresholdKB(maxThresholdMB);
+    return percentThreshold < maxThresholdKB ?
+                percentThreshold :
+                maxThresholdKB;
+}
+
+}
+
 MemoryChecker *MemoryChecker::mInstance;
 
 MemoryChecker::MemoryChecker(QObject * const parent) : QObject(parent) {
     mInstance = this;
 
     const intKB totRam = HardwareInfo::sRamKB();
-    mLowFreeKB = totRam*20/100;
-    mVeryLowFreeKB = totRam*15/100;
-    mCriticalFreeKB = totRam*10/100;
+    // Keep the original percentage behavior on smaller systems, but cap the
+    // threshold on large-memory machines so interactive preview caches are not
+    // flushed just because "free RAM" dipped below a huge percentage target.
+    mLowFreeKB = cappedFreeThreshold(totRam, 20, intMB(8192));
+    mVeryLowFreeKB = cappedFreeThreshold(totRam, 15, intMB(4096));
+    mCriticalFreeKB = cappedFreeThreshold(totRam, 10, intMB(2048));
 }
 
 char MemoryChecker::sLine[256];
@@ -69,7 +87,7 @@ void MemoryChecker::sGetFreeKB(intKB& procFreeKB,
                                intKB& sysFreeKB,
                                intKB& usedKB)
 {
-    const auto usageCap = eSettings::sInstance->fRamMBCap;
+    const auto usageCap = eSettings::sRamMBCap();
 
     longB enveUsedB(0);
     qint64 freeInternal = 0;
@@ -142,11 +160,7 @@ void MemoryChecker::sGetFreeKB(intKB& procFreeKB,
 #endif
 
     const intKB enveUsedKB(enveUsedB);
-    if (usageCap.fValue > 0) {
-        procFreeKB = intKB(usageCap) - enveUsedKB;
-    } else {
-        procFreeKB = HardwareInfo::sRamKB() - enveUsedKB;
-    }
+    procFreeKB = intKB(usageCap) - enveUsedKB;
 
     sysFreeKB = intKB(longB(freeInternal)) + freeExternal;
     usedKB = enveUsedKB;

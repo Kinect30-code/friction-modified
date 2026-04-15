@@ -24,6 +24,19 @@
 // Fork of enve - Copyright (C) 2016-2020 Maurycy Liebner
 
 #include "hddcachablecont.h"
+#include "../Private/esettings.h"
+
+namespace {
+
+QList<HddCachableCont*> sTrackedTmpFiles;
+qint64 sTrackedTmpFileBytes = 0;
+
+qint64 configuredHddCacheCapBytes() {
+    const auto cap = eSettings::instance().fHddCacheMBCap;
+    return cap.fValue > 0 ? longB(cap).fValue : 0;
+}
+
+}
 
 HddCachableCont::HddCachableCont() {}
 
@@ -47,12 +60,14 @@ int HddCachableCont::free_RAM_k() {
 eTask *HddCachableCont::scheduleDeleteTmpFile() {
     if(!mTmpFile) return nullptr;
     const auto updatable = enve::make_shared<TmpDeleter>(mTmpFile);
+    clearTrackedTmpFile();
     mTmpFile.reset();
     updatable->queTask();
     return updatable.get();
 }
 
 eTask *HddCachableCont::scheduleSaveToTmpFile() {
+    if(!eSettings::instance().fHddCache) return nullptr;
     if(mTmpSaveTask || mTmpFile) return nullptr;
     mTmpSaveTask = createTmpFileDataSaver();
     mTmpSaveTask->queTask();
@@ -63,6 +78,9 @@ eTask *HddCachableCont::scheduleLoadFromTmpFile() {
     if(storesDataInMemory()) return nullptr;
     if(mTmpLoadTask) return mTmpLoadTask.get();
     if(!mTmpSaveTask && !mTmpFile) return nullptr;
+    if(mTmpFile) {
+        touchTrackedTmpFile();
+    }
 
     mTmpLoadTask = createTmpFileDataLoader();
     if(mTmpSaveTask)
@@ -71,9 +89,12 @@ eTask *HddCachableCont::scheduleLoadFromTmpFile() {
     return mTmpLoadTask.get();
 }
 
-void HddCachableCont::setDataSavedToTmpFile(const qsptr<QTemporaryFile> &tmpFile) {
+void HddCachableCont::setDataSavedToTmpFile(const qsptr<QTemporaryFile> &tmpFile,
+                                            qint64 tmpFileBytes) {
     mTmpSaveTask.reset();
     mTmpFile = tmpFile;
+    trackTmpFile(tmpFileBytes);
+    trimTrackedTmpFiles(this);
 }
 
 void HddCachableCont::afterDataLoadedFromTmpFile() {
@@ -90,4 +111,57 @@ void HddCachableCont::afterDataReplaced() {
 
 void HddCachableCont::setDataInMemory(const bool dataInMemory) {
     mDataInMemory = dataInMemory;
+}
+
+void HddCachableCont::clearTrackedTmpFile() {
+    if(mTmpFileBytes > 0) {
+        sTrackedTmpFileBytes = qMax<qint64>(0, sTrackedTmpFileBytes - mTmpFileBytes);
+        mTmpFileBytes = 0;
+    }
+    sTrackedTmpFiles.removeAll(this);
+}
+
+void HddCachableCont::touchTrackedTmpFile() {
+    if(!mTmpFile) {
+        return;
+    }
+    sTrackedTmpFiles.removeAll(this);
+    sTrackedTmpFiles.append(this);
+}
+
+void HddCachableCont::trackTmpFile(qint64 tmpFileBytes) {
+    clearTrackedTmpFile();
+    mTmpFileBytes = qMax<qint64>(0, tmpFileBytes);
+    sTrackedTmpFileBytes += mTmpFileBytes;
+    sTrackedTmpFiles.append(this);
+}
+
+void HddCachableCont::trimTrackedTmpFiles(HddCachableCont *protectedCont) {
+    const qint64 capBytes = configuredHddCacheCapBytes();
+    if(capBytes <= 0) {
+        return;
+    }
+
+    int scanBudget = sTrackedTmpFiles.count();
+    while(sTrackedTmpFileBytes > capBytes &&
+          scanBudget > 0 &&
+          !sTrackedTmpFiles.isEmpty()) {
+        auto * const cont = sTrackedTmpFiles.takeFirst();
+        if(!cont) {
+            scanBudget--;
+            continue;
+        }
+        if(!cont->mTmpFile) {
+            cont->clearTrackedTmpFile();
+            scanBudget = sTrackedTmpFiles.count();
+            continue;
+        }
+        if(cont == protectedCont) {
+            sTrackedTmpFiles.append(cont);
+            scanBudget--;
+            continue;
+        }
+        cont->scheduleDeleteTmpFile();
+        scanBudget = sTrackedTmpFiles.count();
+    }
 }

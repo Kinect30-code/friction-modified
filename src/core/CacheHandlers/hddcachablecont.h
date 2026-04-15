@@ -44,7 +44,8 @@ public:
     eTask* scheduleSaveToTmpFile();
     eTask* scheduleLoadFromTmpFile();
 
-    void setDataSavedToTmpFile(const qsptr<QTemporaryFile> &tmpFile);
+    void setDataSavedToTmpFile(const qsptr<QTemporaryFile> &tmpFile,
+                               qint64 tmpFileBytes);
 
     bool storesDataInMemory() const { return mDataInMemory; }
     qsptr<QTemporaryFile> getTmpFile() const { return mTmpFile; }
@@ -55,7 +56,13 @@ protected:
 
     qsptr<QTemporaryFile> mTmpFile;
 private:
+    void clearTrackedTmpFile();
+    void touchTrackedTmpFile();
+    void trackTmpFile(qint64 tmpFileBytes);
+    static void trimTrackedTmpFiles(HddCachableCont *protectedCont);
+
     bool mDataInMemory = false;
+    qint64 mTmpFileBytes = 0;
     stdsptr<eTask> mTmpLoadTask;
     stdsptr<eTask> mTmpSaveTask;
 };

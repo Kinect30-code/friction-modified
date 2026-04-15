@@ -552,8 +552,12 @@ public:
     void setSceneFrame(const int relFrame);
     void setSceneFrame(const stdsptr<SceneFrameContainer> &cont);
     void setLoadingSceneFrame(const stdsptr<SceneFrameContainer> &cont);
+    void setLoadingSceneFrame(const stdsptr<SceneFrameContainer> &cont,
+                              int targetRelFrame);
     SceneFrameContainer *sceneFrame() const { return mSceneFrame.get(); }
     SceneFrameContainer *loadingSceneFrame() const { return mLoadingSceneFrame.get(); }
+    bool sceneFrameMatchesCurrentDisplayFrame(const SceneFrameContainer *cont) const;
+    bool sceneFrameMatchesPendingDisplayFrame(const SceneFrameContainer *cont) const;
 
     void setRenderingPreview(const bool bT);
 
@@ -941,6 +945,8 @@ protected:
     bool mSceneFrameOutdated = false;
     UseSharedPointer<SceneFrameContainer> mSceneFrame;
     UseSharedPointer<SceneFrameContainer> mLoadingSceneFrame;
+    int mLoadingSceneFrameTargetRelFrame = 0;
+    bool mLoadingSceneFrameTargetValid = false;
 
     bool mClipToCanvasSize = false;
     bool mRasterEffectsVisible = true;

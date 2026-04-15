@@ -136,6 +136,7 @@ public:
     bool fPivotPosForGizmosValid = false;
 
     void updateScenes();
+    void scheduleInteractiveScenesUpdate();
     void actionFinished();
 
     void replaceClipboard(const stdsptr<Clipboard>& container);
@@ -221,6 +222,8 @@ private:
     void readBookmarked(eReadStream &src);
 
     void readGradients(eReadStream& src);
+
+    bool mInteractiveScenesUpdateQueued = false;
 
 signals:
 

@@ -306,9 +306,8 @@ TimelineWidget::TimelineWidget(Document &document,
 //            qOverload<>(&FrameScrollBar::update));
     connect(mFrameScrollBar, &FrameScrollBar::triggeredFrameRangeChange,
             this, [this](const FrameRange& range){
-        const auto scene = mSceneChooser->getCurrentScene();
-        if(scene) scene->anim_setAbsFrame(range.fMin);
-        Document::sInstance->actionFinished();
+        if (!mSceneChooser->getCurrentScene()) { return; }
+        Document::sInstance->setActiveSceneFrame(range.fMin);
     });
     mMainLayout->addWidget(mFrameScrollBar, 0, 1);
 

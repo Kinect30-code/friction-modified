@@ -29,6 +29,7 @@
 
 #include <QVariant>
 #include <QColor>
+#include <QTimer>
 
 Document* Document::sInstance = nullptr;
 
@@ -119,6 +120,17 @@ void Document::updateScenes()
     processScheduledSimpleTasks();
     queueVisibleSceneTasks();
     scheduleVisibleSceneUpdates();
+}
+
+void Document::scheduleInteractiveScenesUpdate()
+{
+    if (mInteractiveScenesUpdateQueued) { return; }
+    mInteractiveScenesUpdateQueued = true;
+    QTimer::singleShot(0, this, [this]() {
+        mInteractiveScenesUpdateQueued = false;
+        queueVisibleSceneTasks();
+        scheduleVisibleSceneUpdates();
+    });
 }
 
 void Document::actionFinished()
@@ -371,8 +383,9 @@ int Document::getActiveSceneFrame() const
 void Document::setActiveSceneFrame(const int frame)
 {
     if (!fActiveScene) { return; }
-    if (fActiveScene->anim_getCurrentRelFrame() == frame) { return; }
+    if (fActiveScene->anim_getCurrentAbsFrame() == frame) { return; }
     fActiveScene->anim_setAbsFrame(frame);
+    scheduleInteractiveScenesUpdate();
     emit activeSceneFrameSet(frame);
 }
 

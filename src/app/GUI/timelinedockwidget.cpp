@@ -65,19 +65,14 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     , mFrameFastForwardAct(nullptr)
     , mCurrentFrameSpinAct(nullptr)
     , mCurrentFrameSpin(nullptr)
-    , mRenderProgressAct(nullptr)
-    , mRenderProgress(nullptr)
     , mStepPreviewTimer(nullptr)
     , mIdleCacheTimer(nullptr)
-    , mPausedPreviewState({false, 0})
 {
     setObjectName("AeTimelineDock");
     connect(RenderHandler::sInstance, &RenderHandler::previewFinished,
             this, &TimelineDockWidget::previewFinished);
     connect(RenderHandler::sInstance, &RenderHandler::previewBeingPlayed,
             this, &TimelineDockWidget::previewBeingPlayed);
-    connect(RenderHandler::sInstance, &RenderHandler::previewBeingRendered,
-            this, &TimelineDockWidget::previewBeingRendered);
     connect(RenderHandler::sInstance, &RenderHandler::previewPaused,
             this, &TimelineDockWidget::previewPaused);
 
@@ -86,8 +81,7 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     connect(Document::sInstance, &Document::canvasModeSet,
             this, [this](CanvasMode) {
         const auto state = RenderHandler::sInstance->currentPreviewState();
-        if (state == PreviewState::playing ||
-            state == PreviewState::rendering) {
+        if (state == PreviewState::playing) {
             interruptPreview();
         }
     });
@@ -114,8 +108,7 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
         if (jumpFrame) { // Go to previous scene quarter
             jumpToIntermediateFrame(false);
         } else { // Go to First Frame
-            scene->anim_setAbsFrame(scene->getFrameRange().fMin);
-            mDocument.actionFinished();
+            mDocument.setActiveSceneFrame(scene->getFrameRange().fMin);
         }
     });
 
@@ -134,8 +127,7 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
         if (jumpFrame) { // Go to next scene quarter
             jumpToIntermediateFrame(true);
         } else { // Go to Last Frame
-            scene->anim_setAbsFrame(scene->getFrameRange().fMax);
-            mDocument.actionFinished();
+            mDocument.setActiveSceneFrame(scene->getFrameRange().fMax);
         }
     });
 
@@ -144,10 +136,6 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
                                            this);
     connect(mPlayFromBeginningButton, &QAction::triggered,
             this, [this]() {
-        /*const auto scene = *mDocument.fActiveScene;
-        if (!scene) { return; }
-        scene->anim_setAbsFrame(scene->getFrameRange().fMin);
-        renderPreview();*/
         const auto state = RenderHandler::sInstance->currentPreviewState();
         setPreviewFromStart(state);
     });
@@ -241,9 +229,7 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     mPrevKeyframeAct->setData(mPrevKeyframeAct->toolTip());
     connect(mPrevKeyframeAct, &QAction::triggered,
             this, [this]() {
-        if (setPrevKeyframe()) {
-            mDocument.actionFinished();
-        }
+        setPrevKeyframe();
     });
 
     const auto mNextKeyframeAct = new QAction(QIcon::fromTheme("next_keyframe"),
@@ -253,24 +239,14 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     mNextKeyframeAct->setData(mNextKeyframeAct->toolTip());
     connect(mNextKeyframeAct, &QAction::triggered,
             this, [this]() {
-        if (setNextKeyframe()) {
-            mDocument.actionFinished();
-        }
+        setNextKeyframe();
     });
 
     mToolBar = new QToolBar(this);
     mToolBar->setObjectName("AeTimelineTransport");
     mToolBar->setMovable(false);
 
-    mRenderProgress = new QProgressBar(this);
-    mRenderProgress->setObjectName("RenderProgressBar");
-    mRenderProgress->setSizePolicy(QSizePolicy::Expanding,
-                                   QSizePolicy::Expanding);
-    mRenderProgress->setFixedWidth(mCurrentFrameSpin->width());
-    mRenderProgress->setFormat(tr("Cache %p%"));
-
     eSizesUI::widget.add(mToolBar, [this](const int size) {
-        //mRenderProgress->setFixedHeight(eSizesUI::button);
         mToolBar->setIconSize(QSize(size, size));
     });
 
@@ -296,7 +272,6 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     mToolBar->addAction(mNextKeyframeAct);
     mToolBar->addAction(mFrameFastForwardAct);
 
-    mRenderProgressAct = mToolBar->addWidget(mRenderProgress);
     addToolbarLabel(tr("TIME"), tr("Current time"));
     mCurrentFrameSpinAct = mToolBar->addWidget(mCurrentFrameSpin);
 
@@ -309,8 +284,6 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     addToolbarLabel(tr("OUT"), tr("Work area end"));
     mToolBar->addWidget(mFrameEndSpin);
     // end layout
-
-    mRenderProgressAct->setVisible(false);
 
     mMainWindow->cmdAddAction(mFrameRewindAct);
     mMainWindow->cmdAddAction(mPrevKeyframeAct);
@@ -353,7 +326,6 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
 
 void TimelineDockWidget::updateFrameRange(const FrameRange &range)
 {
-    mRenderProgress->setRange(range.fMin, range.fMax);
     if (range.fMin != mFrameStartSpin->value()) {
         mFrameStartSpin->blockSignals(true);
         mFrameStartSpin->setValue(range.fMin);
@@ -369,7 +341,6 @@ void TimelineDockWidget::updateFrameRange(const FrameRange &range)
 void TimelineDockWidget::handleCurrentFrameChanged(int frame)
 {
     mCurrentFrameSpin->setValue(frame);
-    if (mRenderProgress->isVisible()) { mRenderProgress->setValue(frame); }
     if (eSettings::instance().fPreviewCache &&
         RenderHandler::sInstance->currentPreviewState() == PreviewState::paused) {
         RenderHandler::sInstance->setPreviewFrame(frame);
@@ -381,7 +352,7 @@ void TimelineDockWidget::scheduleIdlePreviewCache()
 {
     if (!eSettings::instance().fPreviewCache || !mIdleCacheTimer) { return; }
     const auto state = RenderHandler::sInstance->currentPreviewState();
-    if (state == PreviewState::playing || state == PreviewState::rendering) {
+    if (state == PreviewState::playing) {
         mIdleCacheTimer->stop();
         return;
     }
@@ -393,7 +364,7 @@ void TimelineDockWidget::processIdlePreviewCache()
 {
     if (!eSettings::instance().fPreviewCache) { return; }
     const auto state = RenderHandler::sInstance->currentPreviewState();
-    if (state == PreviewState::playing || state == PreviewState::rendering) {
+    if (state == PreviewState::playing) {
         return;
     }
 
@@ -401,13 +372,6 @@ void TimelineDockWidget::processIdlePreviewCache()
     if (!scene) { return; }
 
     RenderHandler::sInstance->cacheAroundFrame(scene->anim_getCurrentAbsFrame());
-}
-
-void TimelineDockWidget::showRenderStatus(bool show)
-{
-    if (!show) { mRenderProgress->setValue(0); }
-    mCurrentFrameSpinAct->setVisible(!show);
-    mRenderProgressAct->setVisible(show);
 }
 
 void TimelineDockWidget::addSpacer()
@@ -476,11 +440,10 @@ bool TimelineDockWidget::processKeyPress(QKeyEvent *event)
             if (mStepPreviewTimer->isActive()) { stopPreview(); }
             else { playPreview(); }
         } else {
-            switch (state) {
-                case PreviewState::stopped: renderPreview(); break;
-                case PreviewState::rendering: playPreview(); break;
-                case PreviewState::playing: stopPreview(); break;
-                case PreviewState::paused: resumePreview(); break;
+            if (state == PreviewState::playing) {
+                stopPreview();
+            } else {
+                playPreview();
             }
         }
     } else if (ctrl && shift && key == Qt::Key_D) { // split clip
@@ -568,7 +531,6 @@ bool TimelineDockWidget::processKeyPress(QKeyEvent *event)
 void TimelineDockWidget::previewFinished()
 {
     if (mIdleCacheTimer) { mIdleCacheTimer->stop(); }
-    mPausedPreviewState.first = false;
     if (const auto scene = *mDocument.fActiveScene) {
         scene->setGizmosSuppressed(false);
     }
@@ -576,14 +538,13 @@ void TimelineDockWidget::previewFinished()
     mFrameStartSpin->setEnabled(true);
     mFrameEndSpin->setEnabled(true);
     mCurrentFrameSpinAct->setEnabled(true);
-    showRenderStatus(false);
     mPlayFromBeginningButton->setDisabled(false);
     mStopButton->setDisabled(true);
     mPlayButton->setIcon(QIcon::fromTheme("play"));
     mPlayButton->setText(tr("Play Preview"));
     disconnect(mPlayButton, nullptr, this, nullptr);
     connect(mPlayButton, &QAction::triggered,
-            this, &TimelineDockWidget::renderPreview);
+            this, &TimelineDockWidget::playPreview);
     scheduleIdlePreviewCache();
 }
 
@@ -596,7 +557,6 @@ void TimelineDockWidget::previewBeingPlayed()
     mFrameStartSpin->setEnabled(false);
     mFrameEndSpin->setEnabled(false);
     mCurrentFrameSpinAct->setEnabled(false);
-    showRenderStatus(false);
     mPlayFromBeginningButton->setDisabled(true);
     mStopButton->setDisabled(false);
     mPlayButton->setIcon(QIcon::fromTheme("stop"));
@@ -606,42 +566,9 @@ void TimelineDockWidget::previewBeingPlayed()
             this, &TimelineDockWidget::stopPreview);
 }
 
-void TimelineDockWidget::previewBeingRendered()
-{
-    if (mIdleCacheTimer) { mIdleCacheTimer->stop(); }
-    mFrameStartSpin->setEnabled(false);
-    mFrameEndSpin->setEnabled(false);
-    mCurrentFrameSpinAct->setEnabled(false);
-    showRenderStatus(true);
-    mPlayFromBeginningButton->setDisabled(true);
-    mStopButton->setDisabled(false);
-    mPlayButton->setIcon(QIcon::fromTheme("play"));
-    mPlayButton->setText(tr("Play Preview"));
-    disconnect(mPlayButton, nullptr, this, nullptr);
-    connect(mPlayButton, &QAction::triggered,
-            this, &TimelineDockWidget::playPreview);
-}
-
 void TimelineDockWidget::previewPaused()
 {
-    if (mIdleCacheTimer) { mIdleCacheTimer->stop(); }
-    mPausedPreviewState = {true, mDocument.getActiveSceneFrame()};
-
-    if (const auto scene = *mDocument.fActiveScene) {
-        scene->setGizmosSuppressed(false);
-    }
-    mFrameStartSpin->setEnabled(true);
-    mFrameEndSpin->setEnabled(true);
-    mCurrentFrameSpinAct->setEnabled(true);
-    showRenderStatus(false);
-    mPlayFromBeginningButton->setDisabled(true);
-    mStopButton->setDisabled(false);
-    mPlayButton->setIcon(QIcon::fromTheme("play"));
-    mPlayButton->setText(tr("Resume Preview"));
-    disconnect(mPlayButton, nullptr, this, nullptr);
-    connect(mPlayButton, &QAction::triggered,
-            this, &TimelineDockWidget::resumePreview);
-    scheduleIdlePreviewCache();
+    previewFinished();
 }
 
 bool TimelineDockWidget::setPreviewFromStart(PreviewState state)
@@ -650,7 +577,7 @@ bool TimelineDockWidget::setPreviewFromStart(PreviewState state)
     if (!scene) { return false; }
     if (state != PreviewState::stopped) { interruptPreview(); }
     scene->anim_setAbsFrame(scene->getFrameRange().fMin);
-    renderPreview();
+    playPreview();
     return true;
 }
 
@@ -662,8 +589,9 @@ bool TimelineDockWidget::setNextKeyframe()
     const int frame = mDocument.getActiveSceneFrame();
     if (scene->anim_nextRelFrameWithKey(frame, targetFrame)) {
         mDocument.setActiveSceneFrame(targetFrame);
+        return true;
     }
-    return true;
+    return false;
 }
 
 bool TimelineDockWidget::setPrevKeyframe()
@@ -674,23 +602,9 @@ bool TimelineDockWidget::setPrevKeyframe()
     const int frame = mDocument.getActiveSceneFrame();
     if (scene->anim_prevRelFrameWithKey(frame, targetFrame)) {
         mDocument.setActiveSceneFrame(targetFrame);
+        return true;
     }
-    return true;
-}
-
-void TimelineDockWidget::resumePreview()
-{
-    if (eSettings::instance().fPreviewCache) {
-        if (mPausedPreviewState.first) {
-            const int frame = mDocument.getActiveSceneFrame();
-            if (mPausedPreviewState.second != frame) {
-                qDebug() << "set new start frame for preview" << frame;
-                RenderHandler::sInstance->setPreviewFrame(frame);
-                mPausedPreviewState.first = false;
-            }
-        }
-        RenderHandler::sInstance->resumePreview();
-    } else { setStepPreviewStart(); }
+    return false;
 }
 
 void TimelineDockWidget::setStepPreviewStop(const bool pause)
@@ -724,10 +638,7 @@ void TimelineDockWidget::setStepPreviewStart()
 
 void TimelineDockWidget::gotoFrame(int frame)
 {
-    const auto scene = *mDocument.fActiveScene;
-    if (!scene) { return; }
-    scene->anim_setAbsFrame(frame);
-    mDocument.actionFinished();
+    mDocument.setActiveSceneFrame(frame);
 }
 
 void TimelineDockWidget::updateButtonsVisibility(const CanvasMode mode)
@@ -735,21 +646,7 @@ void TimelineDockWidget::updateButtonsVisibility(const CanvasMode mode)
     Q_UNUSED(mode)
 }
 
-void TimelineDockWidget::pausePreview()
-{
-    if (eSettings::instance().fPreviewCache) {
-        RenderHandler::sInstance->pausePreview();
-    } else { setStepPreviewStop(); }
-}
-
 void TimelineDockWidget::playPreview()
-{
-    if (eSettings::instance().fPreviewCache) {
-        RenderHandler::sInstance->playPreview();
-    } else { setStepPreviewStart(); }
-}
-
-void TimelineDockWidget::renderPreview()
 {
     if (eSettings::instance().fPreviewCache) {
         RenderHandler::sInstance->playPreview();
@@ -816,7 +713,6 @@ void TimelineDockWidget::stopPreview()
     switch (RenderHandler::sInstance->currentPreviewState()) {
     case PreviewState::paused:
     case PreviewState::playing:
-    case PreviewState::rendering:
         interruptPreview();
         break;
     default:;
@@ -1024,26 +920,25 @@ void TimelineDockWidget::jumpToIntermediateFrame(bool forward) {
     
     if (forward) {
         if (currentFrame < quarterFrame) {
-            scene->anim_setAbsFrame(quarterFrame);
+            mDocument.setActiveSceneFrame(quarterFrame);
         } else if (currentFrame < middleFrame) {
-            scene->anim_setAbsFrame(middleFrame);
+            mDocument.setActiveSceneFrame(middleFrame);
         } else if (currentFrame < threeQuarterFrame) {
-            scene->anim_setAbsFrame(threeQuarterFrame);
+            mDocument.setActiveSceneFrame(threeQuarterFrame);
         } else {
-            scene->anim_setAbsFrame(range.fMax);
+            mDocument.setActiveSceneFrame(range.fMax);
         }
     } else {
         if (currentFrame > threeQuarterFrame) {
-            scene->anim_setAbsFrame(threeQuarterFrame);
+            mDocument.setActiveSceneFrame(threeQuarterFrame);
         } else if (currentFrame > middleFrame) {
-            scene->anim_setAbsFrame(middleFrame);
+            mDocument.setActiveSceneFrame(middleFrame);
         } else if (currentFrame > quarterFrame) {
-            scene->anim_setAbsFrame(quarterFrame);
+            mDocument.setActiveSceneFrame(quarterFrame);
         } else {
-            scene->anim_setAbsFrame(range.fMin);
+            mDocument.setActiveSceneFrame(range.fMin);
         }
     }
-    mDocument.actionFinished();
 }
 
 void TimelineDockWidget::stepPreview()
@@ -1074,6 +969,5 @@ void TimelineDockWidget::stepPreview()
             return;
         }
     }
-    scene->anim_setAbsFrame(nextFrame);
-    mDocument.actionFinished();
+    mDocument.setActiveSceneFrame(nextFrame);
 }

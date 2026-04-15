@@ -1516,8 +1516,7 @@ void BoxSingleWidget::mousePressEvent(QMouseEvent *event) {
         }
     }
     const auto previewState = RenderHandler::sInstance->currentPreviewState();
-    if (previewState == PreviewState::playing ||
-        previewState == PreviewState::rendering) {
+    if (previewState == PreviewState::playing) {
         RenderHandler::sInstance->interruptPreview();
     }
     const auto bbox = enve_cast<BoundingBox*>(mTarget->getTarget());

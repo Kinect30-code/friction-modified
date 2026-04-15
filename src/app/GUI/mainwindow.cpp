@@ -1232,7 +1232,10 @@ bool MainWindow::processKeyEvent(QKeyEvent *event)
         } else {
             returnBool = KeyFocusTarget::KFT_handleKeyEvent(event);
         }
-        mDocument.actionFinished();
+        if (returnBool && event->type() == QEvent::KeyPress) {
+            // Shortcut routing and modifier releases should not commit actions.
+            mDocument.actionFinished();
+        }
         return returnBool;
     }
     return false;
