@@ -619,6 +619,12 @@ void Canvas::setFrameRange(const FrameRange &range,
     }
     mRange = range;
     emit newFrameRange(range);
+
+    const int currentFrame = anim_getCurrentAbsFrame();
+    const int clampedFrame = qBound(mRange.fMin, currentFrame, mRange.fMax);
+    if (clampedFrame != currentFrame) {
+        anim_setAbsFrame(clampedFrame);
+    }
 }
 
 void Canvas::setFrameIn(const bool enabled,
@@ -986,7 +992,17 @@ void Canvas::renderDataFinished(BoxRenderData *renderData) {
     const auto cont = enve::make_shared<SceneFrameContainer>(
                 this, renderData, range,
                 currentState ? &mSceneFramesHandler : nullptr);
-    if(currentState) mSceneFramesHandler.add(cont);
+    if(currentState) {
+        // Scene-frame cache ranges must never overlap. When an updated render
+        // resolves a different identical range for the same frame, the old
+        // range has to be evicted first or RangeMap will silently keep the
+        // stale container and reject the new one.
+        if(const auto existing =
+                mSceneFramesHandler.atFrame<SceneFrameContainer>(relFrame)) {
+            mSceneFramesHandler.remove(existing->getRange());
+        }
+        mSceneFramesHandler.add(cont);
+    }
 
     if(!mPreviewing && !mRenderingOutput){
         bool newerState = true;

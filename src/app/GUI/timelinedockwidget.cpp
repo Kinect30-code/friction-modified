@@ -169,7 +169,7 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     mFrameStartSpin->setAlignment(Qt::AlignHCenter);
     mFrameStartSpin->setFocusPolicy(Qt::ClickFocus);
     mFrameStartSpin->setToolTip(tr("Work area start"));
-    mFrameStartSpin->setRange(0, INT_MAX);
+    mFrameStartSpin->setRange(-INT_MAX, INT_MAX);
     connect(mFrameStartSpin,
             &QSpinBox::editingFinished,
             this, [this]() {
@@ -191,7 +191,7 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     mFrameEndSpin->setAlignment(Qt::AlignHCenter);
     mFrameEndSpin->setFocusPolicy(Qt::ClickFocus);
     mFrameEndSpin->setToolTip(tr("Work area end"));
-    mFrameEndSpin->setRange(1, INT_MAX);
+    mFrameEndSpin->setRange(-INT_MAX, INT_MAX);
     connect(mFrameEndSpin,
             &QSpinBox::editingFinished,
             this, [this]() {
@@ -356,12 +356,15 @@ void TimelineDockWidget::scheduleIdlePreviewCache()
 {
     if (!eSettings::instance().fPreviewCache || !mIdleCacheTimer) { return; }
     const auto state = RenderHandler::sInstance->currentPreviewState();
-    if (state == PreviewState::playing) {
+    if (state != PreviewState::paused) {
         mIdleCacheTimer->stop();
         return;
     }
     const auto scene = *mDocument.fActiveScene;
-    if (!scene || scene->isOutputRendering()) { return; }
+    if (!scene || scene->isOutputRendering()) {
+        mIdleCacheTimer->stop();
+        return;
+    }
     mIdleCacheTimer->start();
 }
 
@@ -369,14 +372,19 @@ void TimelineDockWidget::processIdlePreviewCache()
 {
     if (!eSettings::instance().fPreviewCache) { return; }
     const auto state = RenderHandler::sInstance->currentPreviewState();
-    if (state == PreviewState::playing) {
+    if (state != PreviewState::paused) {
         return;
     }
 
     const auto scene = *mDocument.fActiveScene;
     if (!scene || scene->isOutputRendering()) { return; }
+    const int currentFrame = scene->anim_getCurrentAbsFrame();
+    const auto range = scene->getFrameRange();
+    if (currentFrame < range.fMin || currentFrame > range.fMax) {
+        return;
+    }
 
-    RenderHandler::sInstance->cacheAroundFrame(scene->anim_getCurrentAbsFrame());
+    RenderHandler::sInstance->cacheAroundFrame(currentFrame);
 }
 
 void TimelineDockWidget::addSpacer()
@@ -675,7 +683,12 @@ void TimelineDockWidget::updateSettingsForCurrentCanvas(Canvas* const canvas)
 
     const auto range = canvas->getFrameRange();
     updateFrameRange(range);
-    handleCurrentFrameChanged(canvas->anim_getCurrentAbsFrame());
+    const int currentFrame = canvas->anim_getCurrentAbsFrame();
+    const int clampedFrame = qBound(range.fMin, currentFrame, range.fMax);
+    if (clampedFrame != currentFrame) {
+        mDocument.setActiveSceneFrame(clampedFrame);
+    }
+    handleCurrentFrameChanged(clampedFrame);
 
     mCurrentFrameSpin->setDisplayTimeCode(canvas->getDisplayTimecode());
     mFrameStartSpin->setDisplayTimeCode(canvas->getDisplayTimecode());

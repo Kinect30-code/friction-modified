@@ -383,10 +383,12 @@ int Document::getActiveSceneFrame() const
 void Document::setActiveSceneFrame(const int frame)
 {
     if (!fActiveScene) { return; }
-    if (fActiveScene->anim_getCurrentAbsFrame() == frame) { return; }
-    fActiveScene->anim_setAbsFrame(frame);
+    const auto range = fActiveScene->getFrameRange();
+    const int clampedFrame = qBound(range.fMin, frame, range.fMax);
+    if (fActiveScene->anim_getCurrentAbsFrame() == clampedFrame) { return; }
+    fActiveScene->anim_setAbsFrame(clampedFrame);
     scheduleInteractiveScenesUpdate();
-    emit activeSceneFrameSet(frame);
+    emit activeSceneFrameSet(clampedFrame);
 }
 
 void Document::incActiveSceneFrame()

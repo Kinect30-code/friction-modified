@@ -745,15 +745,6 @@ public:
 
     void setGizmosSuppressed(bool suppressed);
 
-    //! Used for clip to canvas, when frames are not really changed.
-    void sceneFramesUpToDate() const
-    {
-        for (const auto &cont : mSceneFramesHandler) {
-            const auto sceneCont = static_cast<SceneFrameContainer*>(cont.second.get());
-            sceneCont->fBoxState = mStateId;
-        }
-    }
-
     void addSelectedForGraph(const int widgetId,
                              GraphAnimator* const anim);
     bool removeSelectedForGraph(const int widgetId,

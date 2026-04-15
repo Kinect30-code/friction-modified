@@ -670,7 +670,6 @@ void Actions::setClipToCanvas(const bool clip) {
     if(mActiveScene->clipToCanvas() == clip) return;
     mActiveScene->setClipToCanvas(clip);
     mActiveScene->updateAllBoxes(UpdateReason::userChange);
-    mActiveScene->sceneFramesUpToDate();
     afterAction();
 }
 

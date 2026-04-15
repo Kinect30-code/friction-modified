@@ -50,6 +50,42 @@ TrackMatteEffect::TrackMatteEffect() :
 
     ca_addChild(mMode);
     ca_addChild(mMatteSource);
+
+    connect(mMatteSource.get(), &BoxTargetProperty::targetSet,
+            this, [this](BoundingBox* const newMatteBox) {
+        auto& conn = mMatteBox.assign(newMatteBox);
+        if(newMatteBox) {
+            conn << connect(newMatteBox, &Property::prp_currentFrameChanged,
+                            this, &Property::prp_currentFrameChanged);
+            conn << connect(newMatteBox, &Property::prp_absFrameRangeChanged,
+                            this, &Property::prp_afterChangedAbsRange);
+        }
+    });
+}
+
+bool TrackMatteEffect::prp_dependsOn(const Property * const prop) const {
+    if(BlendEffect::prp_dependsOn(prop)) {
+        return true;
+    }
+    const auto target = matteSource();
+    return target && target->prp_dependsOn(prop);
+}
+
+FrameRange TrackMatteEffect::prp_getIdenticalRelRange(const int relFrame) const {
+    const auto local = BlendEffect::prp_getIdenticalRelRange(relFrame);
+    const auto target = matteSource();
+    if(!target) {
+        return local;
+    }
+
+    const qreal absFrameF = prp_relFrameToAbsFrameF(relFrame);
+    const int targetRelFrame = qRound(target->prp_absFrameToRelFrameF(absFrameF));
+    const auto targetRange = target->prp_getIdenticalRelRange(targetRelFrame);
+    const int targetAbsMin = target->prp_relFrameToAbsFrame(targetRange.fMin);
+    const int targetAbsMax = target->prp_relFrameToAbsFrame(targetRange.fMax);
+    const FrameRange mapped = {prp_absFrameToRelFrame(targetAbsMin),
+                               prp_absFrameToRelFrame(targetAbsMax)};
+    return local * mapped;
 }
 
 TrackMatteMode TrackMatteEffect::getMode() const {

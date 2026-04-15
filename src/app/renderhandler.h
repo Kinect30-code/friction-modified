@@ -116,6 +116,8 @@ private:
     int warmPreviewFramesInMemory(const FrameRange &range, int maxFrames);
     void activateInteractivePreviewCaching();
     void suspendInteractivePreviewCaching();
+    void invalidateSceneFrameIfStale(int frame);
+    void ensureSceneFrameQueuedForCurrentRenderFrame();
 
     void setFrameAction(const int frame);
     void setInternalFrameAction(const int frame);

@@ -38,6 +38,9 @@ class CORE_EXPORT TrackMatteEffect : public BlendEffect {
 public:
     TrackMatteEffect();
 
+    bool prp_dependsOn(const Property* const prop) const override;
+    FrameRange prp_getIdenticalRelRange(const int relFrame) const override;
+
     void blendSetup(ChildRenderData &data,
                     const int index,
                     const qreal relFrame,
@@ -64,6 +67,7 @@ public:
 private:
     qsptr<ComboBoxProperty> mMode;
     qsptr<BoxTargetProperty> mMatteSource;
+    ConnContextQPtr<BoundingBox> mMatteBox;
 };
 
 #endif // TRACKMATTEEFFECT_H

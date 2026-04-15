@@ -323,6 +323,7 @@ void RenderHandler::nextCurrentRenderFrame() {
                         timingState.fBackgroundCacheVisibleFrame;
             const QSignalBlocker blocker(mCurrentScene);
             setInternalFrameAction(mCurrentRenderFrame);
+            ensureSceneFrameQueuedForCurrentRenderFrame();
             const auto visibleCont =
                     mCurrentScene->getSceneFramesHandler().
                     sharedAtFrame<SceneFrameContainer>(visibleFrame);
@@ -334,6 +335,7 @@ void RenderHandler::nextCurrentRenderFrame() {
             }
         } else {
             setInternalFrameAction(mCurrentRenderFrame);
+            ensureSceneFrameQueuedForCurrentRenderFrame();
         }
     }
 }
@@ -518,6 +520,15 @@ void RenderHandler::playPreview() {
     if(backgroundCachingValue()) {
         stopBackgroundCaching();
     }
+
+    const auto sceneRange = mCurrentScene->getFrameRange();
+    const int clampedCurrentFrame = qBound(sceneRange.fMin,
+                                           mCurrentScene->getCurrentFrame(),
+                                           sceneRange.fMax);
+    if(clampedCurrentFrame != mCurrentScene->getCurrentFrame()) {
+        mCurrentScene->anim_setAbsFrame(clampedCurrentFrame);
+    }
+
     if(!renderingPreviewValue()) {
         mSavedCurrentFrame = mCurrentScene->getCurrentFrame();
         auto timingState = previewTimingStateValue();
@@ -658,13 +669,20 @@ void RenderHandler::nextPreviewFrame() {
         timingState.fFrameAccumulator = 0;
         setPreviewTimingState(timingState);
         if(mLoop) {
+            const int loopStartFrame = frameState.fMinFrame;
+            ensurePreviewWindowQueued(loopStartFrame);
+            const int warmedMaxFrame =
+                    qMin(frameState.fMaxFrame,
+                         loopStartFrame + previewSteadyBufferFrames() - 1);
+            warmPreviewFramesInMemory({loopStartFrame, warmedMaxFrame},
+                                      previewSteadyBufferFrames());
             const int savedFrame = frameState.fCurrentFrame;
-            setCurrentPreviewFrameValue(frameState.fMinFrame - 1);
+            setCurrentPreviewFrameValue(loopStartFrame - 1);
             timingState.fFrameAccumulator = 1.0;
             setPreviewTimingState(timingState);
             mPreviewTickClock.restart();
             nextPreviewFrame();
-            if (currentPreviewFrameValue() == frameState.fMinFrame - 1) {
+            if (currentPreviewFrameValue() == loopStartFrame - 1) {
                 setCurrentPreviewFrameValue(savedFrame);
             } else {
                 stopAudio();
@@ -687,6 +705,7 @@ void RenderHandler::nextPreviewFrame() {
             // >= mMaxRenderFrame) while the cache is stale — a deadlock.
             // Detect this and force a re-render by resetting the render cursor.
             if(cachedFrame && !sceneFrameMatchesCurrentPreview(cachedFrame.get())) {
+                invalidateSceneFrameIfStale(nextFrame);
                 // Stale cache — scene state changed. Reset render cursor so
                 // ensurePreviewWindowQueued will re-activate caching.
                 mCurrentRenderFrame = qMax(mMinRenderFrame, nextFrame - 1);
@@ -1260,6 +1279,42 @@ void RenderHandler::suspendInteractivePreviewCaching() {
     TaskScheduler::sSetTaskUnderflowFunc(nullptr);
     TaskScheduler::sSetAllTasksFinishedFunc(nullptr);
     setRenderingPreview(false);
+}
+
+void RenderHandler::invalidateSceneFrameIfStale(int frame) {
+    if(!mCurrentScene) {
+        return;
+    }
+
+    auto &cacheHandler = mCurrentScene->getSceneFramesHandler();
+    const auto cont = cacheHandler.atFrame<SceneFrameContainer>(frame);
+    if(!cont) {
+        return;
+    }
+    if(sceneFrameMatchesCurrentPreview(cont) && cont->hasRecoverableData()) {
+        return;
+    }
+
+    cacheHandler.remove(cont->getRange());
+    if(mCurrentScene->loadingSceneFrame() == cont) {
+        mCurrentScene->setLoadingSceneFrame(nullptr);
+    }
+}
+
+void RenderHandler::ensureSceneFrameQueuedForCurrentRenderFrame() {
+    if(!mCurrentScene) {
+        return;
+    }
+
+    invalidateSceneFrameIfStale(mCurrentRenderFrame);
+    const auto cont = mCurrentScene->getSceneFramesHandler().
+            atFrame<SceneFrameContainer>(mCurrentRenderFrame);
+    if(cont && sceneFrameMatchesCurrentPreview(cont) &&
+       cont->hasRecoverableData()) {
+        return;
+    }
+
+    mCurrentScene->queRender(mCurrentRenderFrame, QMatrix());
 }
 
 PreviewState RenderHandler::previewStateValue() const {
