@@ -16,10 +16,10 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake ninja-build build-essential qtbase5-dev qtdeclarative5-dev qtmultimedia5-dev libqt5opengl5-dev libqt5svg5-dev libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
+        sudo apt-get install -y cmake ninja-build build-essential clang lld qtbase5-dev qtdeclarative5-dev qtmultimedia5-dev libqt5opengl5-dev libqt5svg5-dev libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
     - name: Build
       run: |
-        cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SKIA=ON
+        CC=clang CXX=clang++ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SKIA=ON
         ninja -C build -j2
     - name: Archive build
       uses: actions/upload-artifact@v4
