@@ -16,9 +16,14 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake ninja-build build-essential clang lld libunwind-dev qtbase5-dev qtdeclarative5-dev qtmultimedia5-dev libqt5opengl5-dev libqt5svg5-dev libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
+        sudo apt-get install -y cmake ninja-build build-essential clang lld libunwind-dev libfreetype-dev qtbase5-dev qtdeclarative5-dev qtmultimedia5-dev libqt5opengl5-dev libqt5svg5-dev libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
     - name: Build
       run: |
+        # First check if gperftools has CMakeLists.txt, if not, skip it temporarily
+        if [ ! -f src/gperftools/CMakeLists.txt ]; then
+          echo "gperftools CMakeLists.txt not found, modifying CMakeLists.txt to skip"
+          sed -i '63,66d' CMakeLists.txt  # Delete lines 63-66 that add gperftools
+        fi
         CC=clang CXX=clang++ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SKIA=ON
         ninja -C build -j2
     - name: Archive build
