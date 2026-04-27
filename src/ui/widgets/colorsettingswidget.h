@@ -143,6 +143,7 @@ private:
     ColorParameter mLastTriggered;
 
     ConnContextQPtr<ColorAnimator> mTarget;
+    ConnContext mPickConnections;
 
     QHBoxLayout *mColorModeLayout;// = new QHBoxLayout();
     QLabel *mColorModeLabel = new QLabel(tr("Mode"), this);

@@ -30,6 +30,7 @@
 #include "smartPointers/ememory.h"
 #include "CacheHandlers/usepointer.h"
 #include "CacheHandlers/cachecontainer.h"
+#include "conncontextptr.h"
 #include <QElapsedTimer>
 #include <QReadWriteLock>
 
@@ -118,12 +119,19 @@ private:
     void suspendInteractivePreviewCaching();
     void invalidateSceneFrameIfStale(int frame);
     void ensureSceneFrameQueuedForCurrentRenderFrame();
+    void handleActiveSceneChanged(Canvas *scene);
+    void handleCurrentSceneDestroyed(Canvas *destroyedScene);
+    void setScenePreviewDisplayFrame(int frame, bool emitFrameChanged);
+    void showScenePreviewFrame(int frame, bool emitFrameChanged);
+    void restoreSceneAnimationFrame(int frame);
 
     void setFrameAction(const int frame);
     void setInternalFrameAction(const int frame);
     void setCurrentScene(Canvas * const scene);
 
     void finishEncoding();
+    void queueFinishEncoding();
+    void queueNextSaveOutputFrame();
     void nextSaveOutputFrame();
     void nextPreviewRenderFrame();
     void nextPreviewFrame();
@@ -170,9 +178,11 @@ private:
     qptr<SoundComposition> mCurrentSoundComposition;
     // AUDIO
 
-    Canvas* mCurrentScene = nullptr;
+    ConnContextQPtr<Canvas> mCurrentScene;
     QTimer *mPreviewFPSTimer = nullptr;
     RenderInstanceSettings *mCurrentRenderSettings = nullptr;
+    bool mOutputAdvanceQueued = false;
+    bool mFinishEncodingQueued = false;
 
     int mCurrentPreviewFrame;
     int mMaxPreviewFrame;

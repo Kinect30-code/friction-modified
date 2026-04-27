@@ -136,7 +136,12 @@ protected:
 private:
     void openAudioStream() {
         const auto filePath = mDataHandler->getFilePath();
-        mAudioStreamsData = AudioStreamsData::sOpen(filePath);
+        try {
+            mAudioStreamsData = AudioStreamsData::sOpen(filePath);
+        } catch(const std::exception& e) {
+            qWarning() << "Failed to open audio stream:" << e.what();
+            mAudioStreamsData.reset();
+        }
     }
 
     SoundDataHandler* const mDataHandler;

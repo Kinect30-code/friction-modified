@@ -31,6 +31,8 @@
 
 #if defined(Q_OS_WIN)
     #include "windowsincludes.h"
+#elif defined(Q_OS_LINUX)
+    #include <sys/sysinfo.h>
 #elif defined(Q_OS_MACOS)
     #include <sys/types.h>
     #include <sys/sysctl.h>
@@ -65,9 +67,15 @@ intKB getTotalRamBytes() {
             }
         }
         fclose(meminfo);
-        RuntimeThrow("'MemTotal' missing from /proc/meminfo");
     }
-    RuntimeThrow("Failed to open /proc/meminfo");
+    struct sysinfo info = {};
+    if(sysinfo(&info) == 0) {
+        const longB totalBytes(static_cast<qint64>(info.totalram)*
+                               static_cast<qint64>(info.mem_unit));
+        return intKB(totalBytes);
+    }
+    qWarning() << "HardwareInfo: failed to query RAM size";
+    return intKB(0);
 #elif defined(Q_OS_MACOS)
     int mib [] = { CTL_HW, HW_MEMSIZE };
     int64_t bytes = 0;

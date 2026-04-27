@@ -45,6 +45,54 @@
 
 #include <QJSEngine>
 
+#include <csignal>
+#include <cstdlib>
+#include <cstring>
+#include <execinfo.h>
+#include <unistd.h>
+#include <QMessageBox>
+
+static void crashHandler(int sig)
+{
+    const char* names[] = {
+        "", "SIGHUP", "SIGINT", "SIGQUIT", "SIGILL",
+        "SIGTRAP", "SIGABRT", "SIGBUS", "SIGFPE",
+        "", "", "SIGSEGV", "SIGPIPE"
+    };
+    const char* name = (sig > 0 && sig < 14) ? names[sig] : "UNKNOWN";
+    char buf[4096];
+    int len = snprintf(buf, sizeof(buf),
+                       "Friction crashed with signal %d (%s)\n\nStack trace:\n", sig, name);
+
+    void* stack[64];
+    int frames = backtrace(stack, 64);
+    char** symbols = backtrace_symbols(stack, frames);
+    for (int i = 0; i < frames && len < (int)sizeof(buf) - 256; i++) {
+        len += snprintf(buf + len, sizeof(buf) - len, "  #%d %s\n", i, symbols[i]);
+    }
+    free(symbols);
+
+    snprintf(buf + len, sizeof(buf) - len,
+             "\nCrash log saved to /tmp/friction-crash.log\n"
+             "Please include this when reporting the issue.");
+
+    FILE* f = fopen("/tmp/friction-crash.log", "w");
+    if (f) { fputs(buf, f); fclose(f); }
+
+    fprintf(stderr, "%s\n", buf);
+    QMessageBox::critical(nullptr, "Friction Crashed", buf);
+    _exit(1);
+}
+
+static void installCrashHandler()
+{
+    signal(SIGSEGV, crashHandler);
+    signal(SIGABRT, crashHandler);
+    signal(SIGFPE, crashHandler);
+    signal(SIGILL, crashHandler);
+    signal(SIGBUS, crashHandler);
+}
+
 #define GPU_NOT_COMPATIBLE gPrintException("Your GPU drivers do not seem to be compatible.")
 
 void setDefaultFormat()
@@ -76,6 +124,9 @@ void generateAlphaMesh(QPixmap& alphaMesh,
 
 int main(int argc, char *argv[])
 {
+    // install crash handler BEFORE anything else
+    installCrashHandler();
+
     // check if cli renderer (not supported yet)
     const bool isRenderer = false; // AppSupport::hasArg(argc, argv, "--renderer");
 

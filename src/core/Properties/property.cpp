@@ -287,18 +287,18 @@ QString Property::prp_sFixName(const QString &name) {
     for (const QChar ch : result) {
         if (ch == QChar::fromLatin1('_') ||
             ch == QChar::fromLatin1(' ') ||
+            ch == QChar::fromLatin1('-') ||
+            ch == QChar::fromLatin1('.') ||
             ch.isLetterOrNumber()) {
             filtered.append(ch);
         }
     }
     result = filtered;
     while(!result.isEmpty() &&
-          (result.front() == ' ' ||
-           result.front().isDigit() ||
-           !result.front().isLetter())) {
+          (result.front() == ' ')) {
         result.remove(0, 1);
     }
-    if(result.isEmpty()) return "Object 0";
+    if(result.isEmpty()) return QObject::tr("Object");
     return result;
 }
 

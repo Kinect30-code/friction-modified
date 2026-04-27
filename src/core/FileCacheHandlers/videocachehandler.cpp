@@ -119,7 +119,6 @@ void VideoFrameHandler::frameLoaderCanceled(const int frameId) {
 
 void VideoFrameHandler::frameLoaderFailed(const int frameId) {
     removeFrameLoader(frameId);
-    mDataHandler->setFrameCount(frameId);
 }
 
 VideoDataHandler *VideoFrameHandler::getDataHandler() const {
@@ -137,7 +136,9 @@ VideoFrameLoader *VideoFrameHandler::getFrameLoader(const int frame) {
 VideoFrameLoader *VideoFrameHandler::addFrameLoader(
         const int frameId,
         const VideoFrameAccessMode accessMode) {
-    openVideoStream();
+    if(!openVideoStream()) {
+        return nullptr;
+    }
     const auto loader = enve::make_shared<VideoFrameLoader>(
                     this, mVideoStreamsData, frameId, accessMode);
     mDataHandler->addFrameLoader(frameId, loader);
@@ -153,7 +154,9 @@ VideoFrameLoader *VideoFrameHandler::addFrameLoader(
 
 VideoFrameLoader *VideoFrameHandler::addFrameConverter(
         const int frameId,  AVFrame * const frame) {
-    openVideoStream();
+    if(!openVideoStream()) {
+        return nullptr;
+    }
     const auto loader = enve::make_shared<VideoFrameLoader>(
                     this, mVideoStreamsData, frameId, frame);
     mDataHandler->addFrameLoader(frameId, loader);
@@ -165,13 +168,20 @@ void VideoFrameHandler::removeFrameLoader(const int frame) {
     mNeededFrames.erase(frame);
 }
 
-void VideoFrameHandler::openVideoStream()
+bool VideoFrameHandler::openVideoStream()
 {
     if(mVideoStreamsData && mVideoStreamsData->fOpened) {
-        return;
+        return true;
     }
     const auto filePath = mDataHandler->getFilePath();
-    mVideoStreamsData = VideoStreamsData::sOpen(filePath);
+    try {
+        mVideoStreamsData = VideoStreamsData::sOpen(filePath);
+        return mVideoStreamsData && mVideoStreamsData->fOpened;
+    } catch(const std::exception& e) {
+        mVideoStreamsData.reset();
+        gPrintExceptionCritical(e);
+    }
+    return false;
 }
 
 eTask* VideoFrameHandler::scheduleFrameLoad(const int frame) {
@@ -199,26 +209,18 @@ eTask *VideoFrameHandler::scheduleFrameLoadInternal(
         const int frame,
         const bool throwOnOutOfRange,
         const VideoFrameAccessMode accessMode) {
+    Q_UNUSED(throwOnOutOfRange)
     if(frame < 0) {
-        if(throwOnOutOfRange) {
-            RuntimeThrow("Frame outside of range " + std::to_string(frame));
-        }
         return nullptr;
     }
 
     const int frameCount = getFrameCount();
     if(frameCount <= 0) {
         mDataHandler->ensureSourceInfo();
-        if(throwOnOutOfRange && !mDataHandler->sourceInfoPending()) {
-            RuntimeThrow("Frame outside of range " + std::to_string(frame));
-        }
         return nullptr;
     }
 
     if(frame >= frameCount) {
-        if(throwOnOutOfRange && !mDataHandler->sourceInfoPending()) {
-            RuntimeThrow("Frame outside of range " + std::to_string(frame));
-        }
         return nullptr;
     }
 
@@ -228,6 +230,7 @@ eTask *VideoFrameHandler::scheduleFrameLoadInternal(
     const auto loadTask = mDataHandler->scheduleFrameHddCacheLoad(frame);
     if(loadTask) return loadTask;
     const auto loader = addFrameLoader(frame, accessMode);
+    if(!loader) return nullptr;
     loader->queTask();
     return loader;
 }
@@ -360,9 +363,6 @@ void VideoDataHandler::frameLoaderFinished(const int frame,
     if(image) {
         mFramesCache.add(enve::make_shared<ImageCacheContainer>(
                              image, FrameRange{frame, frame}, &mFramesCache));
-    } else {
-        mFrameCount = frame;
-        emit frameCountUpdated(mFrameCount);
     }
 }
 

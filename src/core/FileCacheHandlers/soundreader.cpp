@@ -70,11 +70,13 @@ void seek(const int tryN, const int secondId,
 void SoundReader::readFrame() {
     if(!mOpenedAudio->fOpened)
         RuntimeThrow("Cannot read frame from closed AudioStream");
-    const int dstSampleRate = mSettings.fSampleRate;
+    int dstSampleRate = mSettings.fSampleRate;
+    if (dstSampleRate <= 0) dstSampleRate = 44100;
     const AVSampleFormat dstSampleFormat = mSettings.fSampleFormat;
     const uint64_t dstChLayout = mSettings.fChannelLayout;
     const uint dstSampleSize = static_cast<uint>(mSettings.bytesPerSample());
-    const int dstChCount = Friction::FFmpegCompat::channelCountForMask(dstChLayout);
+    int dstChCount = Friction::FFmpegCompat::channelCountForMask(dstChLayout);
+    if (dstChCount <= 0) dstChCount = 2;
     const bool dstPlanar = mSettings.planarFormat();
 
     const auto formatContext = mOpenedAudio->fFormatContext;
@@ -87,6 +89,11 @@ void SoundReader::readFrame() {
     const auto decodedFrame = mOpenedAudio->fDecodedFrame;
     const auto codecContext = mOpenedAudio->fCodecContext;
     const auto swrContext = mOpenedAudio->fSwrContext;
+    if(!swrContext) {
+        mSamples = enve::make_shared<Samples>(mSampleRange, dstSampleRate,
+                                               dstSampleFormat, 0);
+        return;
+    }
 
     const int firstSample = mSecondId*dstSampleRate;
 

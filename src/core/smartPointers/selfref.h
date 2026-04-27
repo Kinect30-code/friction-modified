@@ -51,7 +51,9 @@ private:
     template<class T>
     QSharedPointer<T> iniRef() {
         Q_ASSERT_X(mThisWeak.isNull(), "SelfRef::iniRef", "reinitialization");
-        QSharedPointer<T> thisRef = QSharedPointer<T>(static_cast<T*>(this));
+        QSharedPointer<T> thisRef(
+                    static_cast<T*>(this),
+                    &enve::detail::destroyMallocAllocated<T>);
         this->mThisWeak = qSharedPointerCast<SelfRef>(thisRef).toWeakRef();
         return thisRef;
     }

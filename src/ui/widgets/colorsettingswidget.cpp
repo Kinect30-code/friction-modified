@@ -283,22 +283,46 @@ void ColorSettingsWidget::moveAlphaWidgetToTab(const int tabId) {
 
 void ColorSettingsWidget::startColorPicking()
 {
-    const auto scene = *Document::sInstance->fActiveScene;
-    if (!scene) { return; }
-    CanvasMode lastMode = Document::sInstance->fCanvasMode;
+    if (!Document::sInstance || !*Document::sInstance->fActiveScene) {
+        return;
+    }
+
+    const CanvasMode lastMode = Document::sInstance->fCanvasMode;
+    mPickConnections.clear();
     Document::sInstance->setCanvasMode(CanvasMode::pickFillStrokeEvent);
-    auto conn = std::make_shared<QMetaObject::Connection>();
-    *conn = connect(scene, &Canvas::currentPickedColor,
-                    this, [this, conn, lastMode](const QColor &color) {
-        qDebug() << "selected color" << color << color.isValid();
+
+    mPickConnections << connect(Document::sInstance,
+                                &Document::currentPickedPixelColor,
+                                this,
+                                [this, lastMode](const QColor &color) {
         if (color.isValid()) {
             emitStartFullColorChangedSignal();
             setDisplayedColor(color);
             emitFinishFullColorChangedSignal();
         }
-        disconnect(*conn);
-        Document::sInstance->setCanvasMode(lastMode);
+        mPickConnections.clear();
+        if (Document::sInstance &&
+            Document::sInstance->fCanvasMode == CanvasMode::pickFillStrokeEvent) {
+            Document::sInstance->setCanvasMode(lastMode);
+        }
     });
+
+    mPickConnections << connect(Document::sInstance,
+                                &Document::canvasModeSet,
+                                this,
+                                [this](const CanvasMode mode) {
+        if (mode != CanvasMode::pickFillStrokeEvent) {
+            mPickConnections.clear();
+        }
+    });
+
+    for (QWidget *widget = this; widget; widget = widget->parentWidget()) {
+        if (qobject_cast<QMenu*>(widget) ||
+            (widget != this && (widget->windowFlags() & Qt::Popup))) {
+            widget->hide();
+            break;
+        }
+    }
 }
 
 ColorSettingsWidget::ColorSettingsWidget(QWidget *parent)

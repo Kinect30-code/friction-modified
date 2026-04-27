@@ -75,6 +75,7 @@ public:
     }
 
     bool hasAnySounds() const { return !mSounds.isEmpty(); }
+    bool isOpen() const { return QIODevice::isOpen(); }
 private:
     SoundMerger * scheduleSecond(const int secondId);
 

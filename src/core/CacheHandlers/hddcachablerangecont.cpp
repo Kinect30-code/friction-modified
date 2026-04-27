@@ -28,8 +28,12 @@
 
 void HddCachableRangeCont::noDataLeft_k() {
     if(!mParentCacheHandler_k) return;
-    const auto thisRef = ref<HddCachableRangeCont>();
-    mParentCacheHandler_k->remove(thisRef);
+    try {
+        const auto thisRef = ref<HddCachableRangeCont>();
+        if(!thisRef) return;
+        mParentCacheHandler_k->remove(thisRef);
+    } catch(...) {
+    }
 }
 
 int HddCachableRangeCont::getRangeMin() const {

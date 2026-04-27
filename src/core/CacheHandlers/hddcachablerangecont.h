@@ -33,6 +33,7 @@ class HddCachableCacheHandler;
 
 class CORE_EXPORT HddCachableRangeCont : public HddCachableCont {
     friend class SoundContainerTmpFileDataSaver;
+    friend class HddCachableCacheHandler;
 protected:
     HddCachableRangeCont(const FrameRange &range,
                          HddCachableCacheHandler * const parent) :
@@ -54,6 +55,7 @@ public:
 private:
     FrameRange mRange;
     HddCachableCacheHandler * const mParentCacheHandler_k;
+    int mCacheGeneration = 0;
 };
 
 #endif // HddCACHABLERANGECONT_H

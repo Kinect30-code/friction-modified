@@ -36,9 +36,14 @@ CacheContainer::~CacheContainer() {
 }
 
 int CacheContainer::free_RAM_k() {
-    const int bytes = getByteCount();
-    noDataLeft_k();
-    return bytes;
+    try {
+        const int bytes = getByteCount();
+        noDataLeft_k();
+        return bytes;
+    } catch(...) {
+        qWarning() << "free_RAM_k noDataLeft_k threw, object was being destroyed";
+        return 0;
+    }
 }
 
 void CacheContainer::addToMemoryManagment() {

@@ -631,19 +631,61 @@ void Animator::prp_drawTimelineControls(
 }
 
 #include "typemenu.h"
+#include "Boxes/boundingbox.h"
+#include "Animators/complexanimator.h"
+#include "canvas.h"
+
+static QList<Animator*> findAllCorrespondingAnimators(Animator* source) {
+    QList<Animator*> result {source};
+    const auto scene = source->getParentScene();
+    if (!scene || scene->selectedBoxesCount() <= 1) return result;
+
+    QStringList path;
+    source->prp_getFullPath(path);
+
+    BoundingBox* ownerBox = nullptr;
+    for (Property* p = source; p; p = p->getParent<Property>()) {
+        const auto box = enve_cast<BoundingBox*>(p);
+        if (box) { ownerBox = box; break; }
+    }
+    if (!ownerBox || path.size() < 2) return result;
+
+    const auto selected = scene->getSelectedBoxes();
+    for (const auto box : selected) {
+        if (!box || box == ownerBox) continue;
+        Property* prop = box;
+        for (int i = 1; i < path.size() && prop; i++) {
+            const auto name = path.at(i);
+            Property* found = nullptr;
+            if (const auto ca = enve_cast<ComplexAnimator*>(prop)) {
+                for (int j = 0; j < ca->ca_getNumberOfChildren(); j++) {
+                    const auto child = ca->ca_getChildAt(j);
+                    if (child && child->prp_getName() == name) { found = child; break; }
+                }
+            }
+            prop = found;
+        }
+        const auto siblingAnim = enve_cast<Animator*>(prop);
+        if (siblingAnim) result.append(siblingAnim);
+    }
+    return result;
+}
+
 void Animator::prp_setupTreeViewMenu(PropertyMenu * const menu) {
     if(menu->hasActionsForType<Animator>()) return;
     menu->addedActionsForType<Animator>();
 
     const PropertyMenu::PlainSelectedOp<Animator> aOp =
     [](Animator * animTarget) {
-        animTarget->anim_saveCurrentValueAsKey();
+        for (const auto a : findAllCorrespondingAnimators(animTarget))
+            a->anim_saveCurrentValueAsKey();
     };
     menu->addPlainAction(QIcon::fromTheme("plus"), tr("Add Key(s)"), aOp)->setDisabled(anim_getKeyOnCurrentFrame());
 
     const PropertyMenu::PlainSelectedOp<Animator> dOp =
     [](Animator * animTarget) {
-        animTarget->anim_deleteCurrentKeyAction();
+        for (const auto a : findAllCorrespondingAnimators(animTarget))
+            a->anim_deleteCurrentKeyAction();
     };
     menu->addPlainAction(QIcon::fromTheme("trash"), tr("Delete Key(s)"), dOp)->setEnabled(anim_getKeyOnCurrentFrame());
 

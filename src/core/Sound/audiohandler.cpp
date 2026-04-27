@@ -28,6 +28,7 @@
 #include "appsupport.h"
 
 #include <iostream>
+#include <QProcess>
 
 AudioHandler* AudioHandler::sInstance = nullptr;
 
@@ -45,8 +46,12 @@ QAudioFormat::SampleType toQtAudioFormat(const AVSampleFormat avFormat)
         return QAudioFormat::SignedInt;
     } else if (avFormat == AV_SAMPLE_FMT_FLT) {
         return QAudioFormat::Float;
-    } else { RuntimeThrow("Unsupported sample format " +
-                          av_get_sample_fmt_name(avFormat)); }
+    } else if (avFormat == AV_SAMPLE_FMT_U8) {
+        return QAudioFormat::UnSignedInt;
+    }
+    qWarning() << "Unknown AV sample format" << avFormat
+               << "falling back to SignedInt";
+    return QAudioFormat::SignedInt;
 }
 
 AVSampleFormat toAVAudioFormat(const QAudioFormat::SampleType qFormat)
@@ -55,8 +60,12 @@ AVSampleFormat toAVAudioFormat(const QAudioFormat::SampleType qFormat)
         return AV_SAMPLE_FMT_S32;
     } else if (qFormat == QAudioFormat::Float) {
         return AV_SAMPLE_FMT_FLT;
-    } else { RuntimeThrow("Unsupported sample format " +
-                          QString::number(qFormat)); }
+    } else if (qFormat == QAudioFormat::UnSignedInt) {
+        return AV_SAMPLE_FMT_U8;
+    }
+    qWarning() << "Unknown audio sample type" << qFormat
+               << "falling back to S32";
+    return AV_SAMPLE_FMT_S32;
 }
 
 void AudioHandler::initializeAudio(eSoundSettingsData& soundSettings,
@@ -69,27 +78,26 @@ void AudioHandler::initializeAudio(eSoundSettingsData& soundSettings,
     mAudioDevice = findDevice(deviceName);
     qDebug() << "Using audio device" << mAudioDevice.deviceName();
 
-    mAudioFormat.setSampleRate(soundSettings.fSampleRate);
-    mAudioFormat.setChannelCount(soundSettings.channelCount());
-    mAudioFormat.setSampleSize(8*soundSettings.bytesPerSample());
+    mAudioFormat.setSampleRate(qMax(1, soundSettings.fSampleRate));
+    mAudioFormat.setChannelCount(qMax(1, soundSettings.channelCount()));
+    mAudioFormat.setSampleSize(8*qMax(1, soundSettings.bytesPerSample()));
     mAudioFormat.setCodec("audio/pcm");
     mAudioFormat.setByteOrder(QAudioFormat::LittleEndian);
     mAudioFormat.setSampleType(toQtAudioFormat(soundSettings.fSampleFormat));
 
     QAudioDeviceInfo info(mAudioDevice);
     if (!info.isFormatSupported(mAudioFormat)) {
-        const auto oldFormat = mAudioFormat;
         mAudioFormat = info.nearestFormat(mAudioFormat);
-        /*std::cout << "Using:" << std::endl <<
-                     "    Sample rate: " << mAudioFormat.sampleRate() << std::endl <<
-                     "    Channel count: " << mAudioFormat.channelCount() << std::endl <<
-                     "    Sample size: " << mAudioFormat.sampleSize() << std::endl <<
-                     "    Codec: " << mAudioFormat.codec().toStdString() << std::endl <<
-                     "    Sample Type: " << mAudioFormat.sampleType() << std::endl <<
-                     "    Byte order: " << mAudioFormat.byteOrder() << std::endl;*/
-        soundSettings.fSampleRate = mAudioFormat.sampleRate();
-        soundSettings.fSampleFormat = toAVAudioFormat(mAudioFormat.sampleType());
     }
+
+    if (mAudioFormat.sampleRate() <= 0) mAudioFormat.setSampleRate(44100);
+    if (mAudioFormat.channelCount() <= 0) mAudioFormat.setChannelCount(2);
+    if (mAudioFormat.sampleSize() <= 0) mAudioFormat.setSampleSize(32);
+    if (mAudioFormat.sampleType() == QAudioFormat::Unknown)
+        mAudioFormat.setSampleType(QAudioFormat::SignedInt);
+
+    soundSettings.fSampleRate = mAudioFormat.sampleRate();
+    soundSettings.fSampleFormat = toAVAudioFormat(mAudioFormat.sampleType());
 
     mAudioOutput = new QAudioOutput(mAudioDevice, mAudioFormat, this);
     mAudioOutput->setNotifyInterval(128);
@@ -122,9 +130,13 @@ void AudioHandler::initializeAudio(const QString &deviceName,
 }
 
 void AudioHandler::startAudio() {
-    //if (!QAudioDeviceInfo::availableDevices(QAudio::AudioOutput)
-        //.contains(mAudioDevice)) { initializeAudio(); }
     mAudioIOOutput = mAudioOutput->start();
+    if (!mAudioIOOutput) {
+        qWarning() << "QAudioOutput::start() returned null — audio will not play"
+                   << "device:" << mAudioDevice.deviceName()
+                   << "state:" << mAudioOutput->state()
+                   << "error:" << mAudioOutput->error();
+    }
 }
 
 void AudioHandler::pauseAudio()
@@ -163,11 +175,21 @@ const QString AudioHandler::getDeviceName()
 
 QAudioDeviceInfo AudioHandler::findDevice(const QString &deviceName)
 {
-    if (deviceName.isEmpty()) { return QAudioDeviceInfo::defaultOutputDevice(); }
-    const auto deviceInfos = QAudioDeviceInfo::availableDevices(QAudio::AudioOutput);
-    for (const QAudioDeviceInfo &deviceInfo : deviceInfos) {
-        if (deviceInfo.deviceName() == deviceName) { return deviceInfo; }
+    if (!deviceName.isEmpty() && deviceName != QString::fromUtf8("System Default")) {
+        const auto deviceInfos = QAudioDeviceInfo::availableDevices(QAudio::AudioOutput);
+        for (const QAudioDeviceInfo &deviceInfo : deviceInfos) {
+            if (deviceInfo.deviceName() == deviceName) return deviceInfo;
+        }
     }
+
+    const auto deviceInfos = QAudioDeviceInfo::availableDevices(QAudio::AudioOutput);
+    for (const QAudioDeviceInfo &di : deviceInfos) {
+        if (!di.deviceName().isEmpty()) return di;
+    }
+
+    const auto defaultDev = QAudioDeviceInfo::defaultOutputDevice();
+    if (!defaultDev.deviceName().isEmpty()) return defaultDev;
+
     return QAudioDeviceInfo::defaultOutputDevice();
 }
 
@@ -176,7 +198,30 @@ const QStringList AudioHandler::listDevices()
     QStringList devices;
     const auto deviceInfos = QAudioDeviceInfo::availableDevices(QAudio::AudioOutput);
     for (const QAudioDeviceInfo &deviceInfo : deviceInfos) {
-        devices << deviceInfo.deviceName();
+        const auto name = deviceInfo.deviceName();
+        if (!name.isEmpty()) devices << name;
+    }
+    if (devices.isEmpty()) {
+        QProcess pactl;
+        pactl.start(QString::fromUtf8("pactl"), {QString::fromUtf8("list"), QString::fromUtf8("short"), QString::fromUtf8("sinks")});
+        pactl.waitForFinished(2000);
+        const auto lines = QString::fromUtf8(pactl.readAllStandardOutput()).split('\n');
+        for (const auto& line : lines) {
+            const auto parts = line.split('\t');
+            if (parts.size() >= 2) {
+                const auto name = parts.at(1).trimmed();
+                if (!name.isEmpty()) devices << name;
+            }
+        }
+    }
+    if (devices.isEmpty()) {
+        const auto defaultDevice = QAudioDeviceInfo::defaultOutputDevice();
+        const auto defaultName = defaultDevice.deviceName();
+        if (!defaultName.isEmpty()) {
+            devices << defaultName;
+        } else {
+            devices << QString::fromUtf8("System Default");
+        }
     }
     return devices;
 }

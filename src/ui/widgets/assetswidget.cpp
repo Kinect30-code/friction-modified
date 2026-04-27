@@ -679,6 +679,10 @@ AssetsWidget::AssetsWidget(QWidget *parent)
     }
 }
 
+// Forward declarations
+static QTreeWidgetItem *ensureFootageFolder(QTreeWidget *tree);
+static QTreeWidgetItem *ensureCompositionsFolder(QTreeWidget *tree);
+
 void AssetsWidget::addScene(Canvas *scene)
 {
     if (!scene || !mTree) { return; }
@@ -712,7 +716,10 @@ void AssetsWidget::addScene(Canvas *scene)
         updateProjectFolderItemSummary(packageItem);
         packageItem->setExpanded(true);
     } else {
-        mTree->insertTopLevelItem(0, item);
+        auto *compsFolder = ensureCompositionsFolder(mTree);
+        compsFolder->insertChild(0, item);
+        compsFolder->setExpanded(true);
+        compsFolder->setText(1, tr("Compositions"));
     }
 
     connect(scene, &Canvas::prp_nameChanged, this, [item](const QString &name) {
@@ -747,10 +754,31 @@ void AssetsWidget::removeScene(Canvas *scene)
     }
 }
 
+static QTreeWidgetItem *ensureFootageFolder(QTreeWidget *tree)
+{
+    if (!tree) { return nullptr; }
+    static const QString footageId = QStringLiteral("system:footage");
+    return ensureProjectFolderItem(tree,
+                                   footageId,
+                                   QObject::tr("Footage"),
+                                   projectFolderTypeSystem(),
+                                   QString());
+}
+
+static QTreeWidgetItem *ensureCompositionsFolder(QTreeWidget *tree)
+{
+    if (!tree) { return nullptr; }
+    static const QString compsId = QStringLiteral("system:compositions-root");
+    return ensureProjectFolderItem(tree,
+                                   compsId,
+                                   QObject::tr("Compositions"),
+                                   projectFolderTypeSystem(),
+                                   QString());
+}
+
 void AssetsWidget::addCacheHandler(FileCacheHandler *handler)
 {
     if (!handler) { return; }
-    qDebug() << "addCacheHandler" << handler->path();
     mCacheList << handler;
     QString oraGroupDir;
     if (oraAssetGroupDirForPath(handler->path(), &oraGroupDir)) {
@@ -763,8 +791,9 @@ void AssetsWidget::addCacheHandler(FileCacheHandler *handler)
         return;
     }
 
-    auto *item = new AssetsWidgetItem(static_cast<QTreeWidget*>(nullptr), handler);
-    mTree->addTopLevelItem(item);
+    auto *footageFolder = ensureFootageFolder(mTree);
+    new AssetsWidgetItem(footageFolder, handler);
+    footageFolder->setExpanded(false);
 }
 
 void AssetsWidget::showContextMenu(const QPoint &pos)

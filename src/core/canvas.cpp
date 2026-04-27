@@ -59,6 +59,16 @@
 
 using namespace Friction::Core;
 
+namespace {
+
+bool exportDebugEnabled()
+{
+    static const bool enabled = qEnvironmentVariableIsSet("FRICTION_EXPORT_DEBUG");
+    return enabled;
+}
+
+}
+
 Canvas::Canvas(Document &document,
                const int canvasWidth,
                const int canvasHeight,
@@ -127,6 +137,9 @@ qreal Canvas::getResolution() const
 
 void Canvas::setResolution(const qreal percent)
 {
+    if (isZero6Dec(mResolution - percent)) {
+        return;
+    }
     mResolution = percent;
     prp_afterWholeInfluenceRangeChanged();
     updateAllBoxes(UpdateReason::userChange);
@@ -174,7 +187,11 @@ void Canvas::addSelectedForGraph(const int widgetId,
         const auto list = std::make_shared<ConnContextObjList<GraphAnimator*>>();
         mSelectedForGraph.insert({widgetId, list});
     }
-    auto &connCtxt = mSelectedForGraph[widgetId]->addObj(anim);
+    auto &list = mSelectedForGraph[widgetId];
+    if (!list || list->contains(anim)) {
+        return;
+    }
+    auto &connCtxt = list->addObj(anim);
     connCtxt << connect(anim, &QObject::destroyed,
                         this, [this, widgetId, anim]() {
         removeSelectedForGraph(widgetId, anim);
@@ -184,7 +201,15 @@ void Canvas::addSelectedForGraph(const int widgetId,
 bool Canvas::removeSelectedForGraph(const int widgetId,
                                     GraphAnimator* const anim)
 {
-    return mSelectedForGraph[widgetId]->removeObj(anim);
+    const auto it = mSelectedForGraph.find(widgetId);
+    if (it == mSelectedForGraph.end() || !it->second) {
+        return false;
+    }
+    const bool removed = it->second->removeObj(anim);
+    if (it->second->isEmpty()) {
+        mSelectedForGraph.erase(it);
+    }
+    return removed;
 }
 
 const ConnContextObjList<GraphAnimator*>* Canvas::getSelectedForGraph(const int widgetId) const
@@ -992,16 +1017,32 @@ void Canvas::renderDataFinished(BoxRenderData *renderData) {
     const auto cont = enve::make_shared<SceneFrameContainer>(
                 this, renderData, range,
                 currentState ? &mSceneFramesHandler : nullptr);
+    bool added = false;
     if(currentState) {
-        // Scene-frame cache ranges must never overlap. When an updated render
-        // resolves a different identical range for the same frame, the old
-        // range has to be evicted first or RangeMap will silently keep the
-        // stale container and reject the new one.
         if(const auto existing =
                 mSceneFramesHandler.atFrame<SceneFrameContainer>(relFrame)) {
-            mSceneFramesHandler.remove(existing->getRange());
+            const FrameRange existingRange = existing->getRange();
+            if(existingRange.fMin <= range.fMin &&
+               existingRange.fMax >= range.fMax &&
+               existing->storesDataInMemory() &&
+               existing->hasImage()) {
+                /* existing range is a superset – keep it */
+            } else {
+                mSceneFramesHandler.remove(existingRange);
+                mSceneFramesHandler.add(cont);
+                added = true;
+            }
+        } else {
+            mSceneFramesHandler.add(cont);
+            added = true;
         }
-        mSceneFramesHandler.add(cont);
+        if(added && exportDebugEnabled() && mRenderingOutput) {
+            qWarning() << "[export-debug] canvas-render-finished"
+                       << "frame" << relFrame
+                       << "range=[" << range.fMin << "," << range.fMax << "]"
+                       << "hasImage" << cont->hasImage()
+                       << "currentState" << currentState;
+        }
     }
 
     if(!mPreviewing && !mRenderingOutput){
@@ -1359,7 +1400,7 @@ void Canvas::anim_setAbsFrame(const int frame)
 
     const auto cont = mSceneFramesHandler.atFrame<SceneFrameContainer>(newRelFrame);
     if (cont) {
-        if (cont->storesDataInMemory()) {
+        if (cont->storesDataInMemory() && cont->hasImage()) {
             setSceneFrame(cont->ref<SceneFrameContainer>());
         } else if(cont->hasRecoverableData()) {
             setLoadingSceneFrame(cont->ref<SceneFrameContainer>(), newRelFrame);
@@ -1373,7 +1414,7 @@ void Canvas::anim_setAbsFrame(const int frame)
             schedulePivotUpdate();
             return;
         }
-        mSceneFrameOutdated = !cont->storesDataInMemory();
+        mSceneFrameOutdated = !cont->storesDataInMemory() || !cont->hasImage();
     } else {
         setLoadingSceneFrame(nullptr);
         mSceneFrameOutdated = true;
@@ -1532,14 +1573,29 @@ bool Canvas::SWT_shouldBeVisible(const SWT_RulesCollection &rules,
 
 int Canvas::getCurrentFrame() const
 {
+    return getDisplayFrame();
+}
+
+int Canvas::getDisplayFrame() const
+{
     return currentDisplayAbsFrame();
+}
+
+int Canvas::getAnimationFrame() const
+{
+    return anim_getCurrentAbsFrame();
+}
+
+bool Canvas::hasPreviewDisplayFrame() const
+{
+    return mPreviewDisplayFrameValid;
 }
 
 int Canvas::currentDisplayAbsFrame() const
 {
     return mPreviewDisplayFrameValid ?
                 mPreviewDisplayAbsFrame :
-                anim_getCurrentAbsFrame();
+                getAnimationFrame();
 }
 
 int Canvas::currentDisplayRelFrame() const
@@ -1661,13 +1717,11 @@ void Canvas::addUndoRedo(const QString& name,
                          const stdfunc<void()>& undo,
                          const stdfunc<void()>& redo)
 {
-    qDebug() << "addUndoRedo" << name;
     mUndoRedoStack->addUndoRedo(name, undo, redo);
 }
 
 void Canvas::pushUndoRedoName(const QString& name) const
 {
-    qDebug() << "pushUndoRedoName" << name;
     mUndoRedoStack->pushName(name);
 }
 

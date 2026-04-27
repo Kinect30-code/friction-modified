@@ -246,7 +246,7 @@ QColor KeysView::sGetAnimatorColor(const int i) {
 }
 
 bool KeysView::graphIsSelected(GraphAnimator * const anim) {
-    if(mCurrentScene) {
+    if(mCurrentScene && mBoxesListWidget) {
         const int id = mBoxesListWidget->getId();
         const auto all = mCurrentScene->getSelectedForGraph(id);
         if(all) return all->contains(anim);
@@ -314,7 +314,6 @@ bool KeysView::graphEasingApplyExpression(QrealAnimator *anim,
                                           const QString &easing)
 {
     if (!anim || easing.isEmpty()) { return false; }
-    qDebug() << "graphEasingApplyExpression" << anim->prp_getName() << range.fMin << range.fMax << easing;
 
     const auto preset = eSettings::sInstance->fExpressions.getExpr(easing);
     if (!preset.valid || !preset.enabled) { return false; }
@@ -796,14 +795,14 @@ void KeysView::graphAddToViewedAnimatorList(GraphAnimator * const animator) {
 
 void KeysView::graphUpdateVisible()
 {
-    qDebug() << "graphUpdateVisible";
     //mGraphAnimators.clear();
-    if (mCurrentScene) {
+    if (mCurrentScene && mBoxesListWidget) {
         const int id = mBoxesListWidget->getId();
         const auto all = mCurrentScene->getSelectedForGraph(id);
         if (all) {
-            qDebug() << "selected for graph" << all->count();
-            for (auto anim : *all) {
+            const QList<GraphAnimator*> selectedAnimators = all->getList();
+            for (auto *anim : selectedAnimators) {
+                if (!anim) { continue; }
                 if (graphValidateVisible(anim)) { graphAddToViewedAnimatorList(anim); }
                 else {
                     anim->prp_setSelected(false);
@@ -819,7 +818,7 @@ void KeysView::graphUpdateVisible()
 }
 
 void KeysView::graphAddViewedAnimator(GraphAnimator * const animator) {
-    if(!mCurrentScene) return Q_ASSERT(false);
+    if(!mCurrentScene || !mBoxesListWidget) return;
     const int id = mBoxesListWidget->getId();
     mCurrentScene->addSelectedForGraph(id, animator);
     if(graphValidateVisible(animator)) {
@@ -833,9 +832,10 @@ void KeysView::graphAddViewedAnimator(GraphAnimator * const animator) {
 
 void KeysView::graphRemoveViewedAnimator(GraphAnimator * const animator) {
     if (!mGraphAnimators.contains(animator)) { return; }
-    if(!mCurrentScene) return Q_ASSERT(false);
-    const int id = mBoxesListWidget->getId();
-    mCurrentScene->removeSelectedForGraph(id, animator);
+    if(mCurrentScene && mBoxesListWidget) {
+        const int id = mBoxesListWidget->getId();
+        mCurrentScene->removeSelectedForGraph(id, animator);
+    }
     if(mGraphAnimators.removeObj(animator)) {
         graphUpdateDimensions();
         graphResetHorizontalRangeIfNeeded();

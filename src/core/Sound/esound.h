@@ -36,6 +36,8 @@ class CORE_EXPORT eSound : public eBoxOrSound {
 protected:
     eSound();
 public:
+    ~eSound();
+public:
     virtual qreal durationSeconds() const = 0;
     virtual QrealSnapshot getVolumeSnap() const = 0;
     virtual stdsptr<Samples> getSamplesForSecond(const int relSecondId) = 0;

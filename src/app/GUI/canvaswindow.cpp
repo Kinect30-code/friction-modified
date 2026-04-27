@@ -52,6 +52,20 @@
 
 #include <QMessageBox>
 
+namespace {
+
+void activateSceneWorkspace(Document &document, Canvas *scene)
+{
+    if (!scene) { return; }
+    if (auto *window = MainWindow::sGetInstance()) {
+        window->activateSceneWorkspace(scene);
+    } else {
+        document.setActiveScene(scene);
+    }
+}
+
+}
+
 CanvasWindow::CanvasWindow(Document &document,
                            QWidget * const parent)
     : GLWindow(parent)
@@ -105,7 +119,6 @@ void CanvasWindow::setCurrentCanvas(Canvas * const canvas)
     }
     const bool hadScene = mCurrentCanvas;
     auto& conn = mCurrentCanvas.assign(canvas);
-    if (KFT_hasFocus()) { mDocument.setActiveScene(mCurrentCanvas);}
     if (mCurrentCanvas) {
         if (isVisible()) { mDocument.addVisibleScene(mCurrentCanvas); }
         // this signal is never connected to anything ... ???
@@ -613,7 +626,7 @@ void CanvasWindow::mouseDoubleClickEvent(QMouseEvent *event)
 
 void CanvasWindow::KFT_setFocusToWidget()
 {
-    if (mCurrentCanvas) { mDocument.setActiveScene(mCurrentCanvas); }
+    activateSceneWorkspace(mDocument, mCurrentCanvas);
     setFocus();
     update();
 }
@@ -980,9 +993,13 @@ bool CanvasWindow::KFT_keyPressEvent(QKeyEvent *event)
 void CanvasWindow::setResolution(const qreal fraction)
 {
     if (!mCurrentCanvas) { return; }
+    if (isZero6Dec(mCurrentCanvas->getResolution() - fraction)) {
+        return;
+    }
+    if (RenderHandler::sInstance) {
+        RenderHandler::sInstance->interruptPreview();
+    }
     mCurrentCanvas->setResolution(fraction);
-    mCurrentCanvas->prp_afterWholeInfluenceRangeChanged();
-    mCurrentCanvas->updateAllBoxes(UpdateReason::userChange);
     finishAction();
 }
 

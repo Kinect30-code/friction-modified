@@ -141,6 +141,7 @@ void TaskScheduler::queHddTask(const stdsptr<eTask>& task) {
 
 void TaskScheduler::queCpuTask(const stdsptr<eTask>& task) {
     mQuedCGTasks.addTask(task);
+    if(mCriticalMemoryState) return;
     if(task->readyToBeProcessed()) {
         if(task->hardwareSupport() == HardwareSupport::cpuOnly ||
            !processNextQuedGpuTask()) {
@@ -189,6 +190,7 @@ void TaskScheduler::queTasks() {
 }
 
 void TaskScheduler::queScheduledCpuTasks() {
+    if(mCriticalMemoryState) return;
     if(!mAlwaysQue && !shouldQueMoreCpuTasks()) return;
     mCpuQueing = true;
     mQuedCGTasks.beginQue();
@@ -211,6 +213,7 @@ void TaskScheduler::afterHddTaskFinished(const stdsptr<eTask>& finishedTask) {
 }
 
 void TaskScheduler::processNextQuedHddTask() {
+    if(mCriticalMemoryState) return;
     bool finished = false;
     QList<stdsptr<eTask>> tasks;
     for(int i = 0; i < mQuedHddTasks.count(); i++) {
@@ -241,6 +244,7 @@ void TaskScheduler::processNextTasks() {
 }
 
 bool TaskScheduler::processNextQuedGpuTask() {
+    if(mCriticalMemoryState) return false;
     bool finished = false;
     QList<stdsptr<eTask>> tasks;
     const int count = qMax(0, maxGpuQueuedTasks() - GpuTaskExecutor::sWaitingTasks());
@@ -356,6 +360,7 @@ void TaskScheduler::waitTillFinished() {
 }
 
 void TaskScheduler::processNextQuedCpuTask() {
+    if(mCriticalMemoryState) return;
     bool finished = false;
     QList<stdsptr<eTask>> tasks;
     const int count = 3*mCpuExecs.count() - CpuTaskExecutor::sWaitingTasks();

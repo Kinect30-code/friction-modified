@@ -34,6 +34,7 @@
 #include <QShortcut>
 #include <QFrame>
 #include <QCursor>
+#include <QSignalBlocker>
 #include <QSet>
 
 #include "timelinewidget.h"
@@ -61,6 +62,20 @@
 #include "Boxes/nullobject.h"
 #include "Boxes/containerbox.h"
 #include "paintsettings.h"
+
+namespace {
+
+void activateSceneWorkspace(Document &document, Canvas *scene)
+{
+    if (!scene) { return; }
+    if (auto *window = MainWindow::sGetInstance()) {
+        window->activateSceneWorkspace(scene);
+    } else {
+        document.setActiveScene(scene);
+    }
+}
+
+}
 
 TimelineWidget::TimelineWidget(Document &document,
                                QWidget * const menu,
@@ -285,7 +300,10 @@ TimelineWidget::TimelineWidget(Document &document,
              this, &TimelineWidget::setViewedFrameRange);
 
     connect(mSceneChooser, &SceneChooser::currentChanged,
-            this, &TimelineWidget::setCurrentScene);
+            this, [this](Canvas * const scene) {
+        setCurrentScene(scene);
+        activateSceneWorkspace(mDocument, scene);
+    });
 
     eSizesUI::widget.add(mBoxesListScrollArea, [this](const int size) {
         mBoxesListScrollArea->setFixedWidth(20*size);
@@ -613,7 +631,7 @@ bool TimelineWidget::handleTimelineLayerRectSelection(
 BoundingBox *TimelineWidget::createSolidLayer()
 {
     if (!mCurrentScene) { return nullptr; }
-    mDocument.setActiveScene(mCurrentScene);
+    activateSceneWorkspace(mDocument, mCurrentScene);
     auto *group = mCurrentScene->getCurrentGroup();
     if (!group) { group = mCurrentScene; }
 
@@ -639,7 +657,7 @@ BoundingBox *TimelineWidget::createSolidLayer()
 BoundingBox *TimelineWidget::createShapeLayer()
 {
     if (!mCurrentScene) { return nullptr; }
-    mDocument.setActiveScene(mCurrentScene);
+    activateSceneWorkspace(mDocument, mCurrentScene);
     auto *group = mCurrentScene->getCurrentGroup();
     if (!group) { group = mCurrentScene; }
 
@@ -669,7 +687,7 @@ BoundingBox *TimelineWidget::createShapeLayer()
 BoundingBox *TimelineWidget::createTextLayer()
 {
     if (!mCurrentScene) { return nullptr; }
-    mDocument.setActiveScene(mCurrentScene);
+    activateSceneWorkspace(mDocument, mCurrentScene);
     auto *group = mCurrentScene->getCurrentGroup();
     if (!group) { group = mCurrentScene; }
 
@@ -687,7 +705,7 @@ BoundingBox *TimelineWidget::createTextLayer()
 BoundingBox *TimelineWidget::createNullLayer()
 {
     if (!mCurrentScene) { return nullptr; }
-    mDocument.setActiveScene(mCurrentScene);
+    activateSceneWorkspace(mDocument, mCurrentScene);
     auto *group = mCurrentScene->getCurrentGroup();
     if (!group) { group = mCurrentScene; }
 
@@ -901,6 +919,12 @@ void TimelineWidget::showGroupFlowPopup()
                                 ? MainWindow::sGetInstance()->sceneNavigationChain()
                                 : QList<Canvas*>();
 
+    auto addArrow = [popup, layout]() {
+        auto *arrow = new QLabel(QStringLiteral(">"), popup);
+        arrow->setObjectName(QStringLiteral("AeTimelineFlowArrow"));
+        layout->addWidget(arrow);
+    };
+
     auto addNode = [popup, layout](const QString &name,
                                    const bool current,
                                    const std::function<void()> &fn) {
@@ -914,47 +938,59 @@ void TimelineWidget::showGroupFlowPopup()
         layout->addWidget(button);
     };
 
+    // Build group chain for the CURRENT scene (groups within composition)
+    QList<ContainerBox*> groupChain;
+    auto *cursor = mCurrentScene->getCurrentGroup();
+    while (cursor && cursor != mCurrentScene) {
+        groupChain.prepend(cursor);
+        cursor = cursor->getParentGroup();
+    }
+
+    const bool hasGroups = !groupChain.isEmpty();
+
+    // Always show scene chain breadcrumbs (multi-comp navigation)
     if (sceneChain.count() > 1) {
         for (int i = 0; i < sceneChain.count(); ++i) {
             if (i > 0) {
-                auto *arrow = new QLabel(QStringLiteral(">"), popup);
-                arrow->setObjectName(QStringLiteral("AeTimelineFlowArrow"));
-                layout->addWidget(arrow);
+                addArrow();
             }
 
             auto *scene = sceneChain.at(i);
+            const bool isCurrentScene = (scene == mCurrentScene);
             addNode(scene->prp_getName(),
-                    scene == mCurrentScene,
+                    isCurrentScene && !hasGroups,
                     [scene]() {
-                if (auto *window = MainWindow::sGetInstance()) {
-                    window->activateSceneWorkspace(scene);
-                } else {
-                    Document::sInstance->setActiveScene(scene);
-                }
+                activateSceneWorkspace(*Document::sInstance, scene);
             });
+
+            // If this is the current scene and we're inside a group,
+            // show the group path after the scene name
+            if (isCurrentScene && hasGroups) {
+                for (int g = 0; g < groupChain.count(); ++g) {
+                    auto *group = groupChain.at(g);
+                    addArrow();
+                    addNode(group->prp_getName(),
+                            g == groupChain.count() - 1,
+                            [group, scene]() {
+                        activateSceneWorkspace(*Document::sInstance, scene);
+                        scene->setCurrentBoxesGroup(group);
+                    });
+                }
+            }
         }
     } else {
-        QList<ContainerBox*> chain;
-        auto *cursor = mCurrentScene->getCurrentGroup();
-        while (cursor && cursor != mCurrentScene) {
-            chain.prepend(cursor);
-            cursor = cursor->getParentGroup();
-        }
-
-        addNode(tr("Composition"), chain.isEmpty(), [this]() {
+        // Single composition — just the scene name + group path
+        addNode(mCurrentScene->prp_getName(), !hasGroups, [this]() {
             mCurrentScene->setCurrentBoxesGroup(mCurrentScene);
             clearAeRevealPreset();
             setTarget(SWT_Target::canvas);
         });
 
-        for (int i = 0; i < chain.count(); ++i) {
-            auto *arrow = new QLabel(QStringLiteral(">"), popup);
-            arrow->setObjectName(QStringLiteral("AeTimelineFlowArrow"));
-            layout->addWidget(arrow);
-
-            auto *group = chain.at(i);
+        for (int i = 0; i < groupChain.count(); ++i) {
+            addArrow();
+            auto *group = groupChain.at(i);
             addNode(group->prp_getName(),
-                    i == chain.count() - 1,
+                    i == groupChain.count() - 1,
                     [this, group]() { enterGroup(group); });
         }
     }
@@ -975,6 +1011,7 @@ void TimelineWidget::setCurrentScene(Canvas * const scene) {
     }
 
     mCurrentScene = scene;
+    const QSignalBlocker chooserBlocker(mSceneChooser);
     mSceneChooser->setCurrentScene(scene);
     mFrameScrollBar->setCurrentCanvas(scene);
     mFrameRangeScrollBar->setCurrentCanvas(scene);
@@ -1266,6 +1303,7 @@ void TimelineWidget::ensureCurrentFrameVisible(const int frame)
     const int span = qMax(1, viewed.fMax - viewed.fMin);
     const int margin = qMax(3, span/24);
     if (frame >= viewed.fMin + margin && frame <= viewed.fMax - margin) {
+        mKeysView->update();
         return;
     }
 

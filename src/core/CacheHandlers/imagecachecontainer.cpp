@@ -41,7 +41,15 @@ ImageCacheContainer::ImageCacheContainer(const sk_sp<SkImage> &img,
 
 void ImageCacheContainer::replaceImage(const sk_sp<SkImage> &img) {
     ImageDataHandler::replaceImage(img);
-    afterDataReplaced();
+    if(img) {
+        afterDataReplaced();
+    } else {
+        setDataInMemory(false);
+        removeFromMemoryManagment();
+        if(mTmpFile) {
+            scheduleDeleteTmpFile();
+        }
+    }
 }
 
 int ImageCacheContainer::getByteCount() {
@@ -49,8 +57,16 @@ int ImageCacheContainer::getByteCount() {
 }
 
 void ImageCacheContainer::setDataLoadedFromTmpFile(const sk_sp<SkImage> &img) {
-    replaceImage(img);
-    afterDataLoadedFromTmpFile();
+    ImageDataHandler::replaceImage(img);
+    if(img) {
+        afterDataLoadedFromTmpFile();
+    } else {
+        setDataInMemory(false);
+        removeFromMemoryManagment();
+        if(mTmpFile) {
+            scheduleDeleteTmpFile();
+        }
+    }
 }
 
 int ImageCacheContainer::clearMemory() {

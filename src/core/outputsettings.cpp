@@ -297,7 +297,7 @@ void OutputSettingsProfile::load(const QString &path)
                                                          .data());
             mSettings.fVideoBitrate = profile.value(QString::fromUtf8("video_bitrate")).toInt();
             mSettings.fVideoProfile = profile.value(QString::fromUtf8("video_profile"),
-                                                    FF_PROFILE_UNKNOWN).toInt();
+                                                    AV_PROFILE_UNKNOWN).toInt();
 
             const auto options = FormatOptionsList{profile.value("video_options_types").toStringList(),
                                                    profile.value("video_options_keys").toStringList(),

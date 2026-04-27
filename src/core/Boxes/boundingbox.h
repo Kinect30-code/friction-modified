@@ -525,6 +525,7 @@ signals:
     void timelineColorChanged(const QColor &);
     void brushChanged(SimpleBrushWrapper* brush);
     void blendEffectChanged();
+    void stateChanged();
 protected:
     void setRelBoundingRect(const QRectF& relRect);
 

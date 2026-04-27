@@ -161,7 +161,6 @@ void VideoStreamsData::close() {
     if(fSwsContext) sws_freeContext(fSwsContext);
     fSwsContext = nullptr;
     if(fCodecContext) {
-        avcodec_close(fCodecContext);
         avcodec_free_context(&fCodecContext);
     }
     if(fFormatContext) avformat_close_input(&fFormatContext);

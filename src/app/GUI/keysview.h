@@ -282,7 +282,7 @@ private:
 
     TimelineHighlightWidget* mHighlighter = nullptr;
 
-    BoxScrollWidget *mBoxesListWidget;
+    QPointer<BoxScrollWidget> mBoxesListWidget;
     QRectF mSelectionRect;
     bool mSelecting = false;
     bool mGraphViewed = false;

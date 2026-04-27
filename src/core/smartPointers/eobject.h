@@ -26,6 +26,8 @@
 #ifndef EOBJECT_H
 #define EOBJECT_H
 
+#include <cstdlib>
+
 #include "../core_global.h"
 
 #define e_PROHIBIT_HEAP \
@@ -49,5 +51,18 @@ private: \
         return u.to##className(); \
     } \
     className* to##className() final { return this; }
+
+namespace enve {
+namespace detail {
+
+template <typename T>
+inline void destroyMallocAllocated(T *ptr) {
+    if(!ptr) return;
+    ptr->~T();
+    std::free(static_cast<void*>(ptr));
+}
+
+}
+}
 
 #endif // EOBJECT_H

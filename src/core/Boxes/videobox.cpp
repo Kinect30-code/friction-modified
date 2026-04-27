@@ -103,7 +103,9 @@ void VideoBox::fileHandlerAfterAssigned(VideoFileHandler *obj) {
     getAnimationDurationRect()->setRasterCacheHandler(cacheHandler);
 
     soundDataChanged();
-    animationDataChanged();
+    if (!frameHandler || frameHandler->getFrameCount() > 0) {
+        animationDataChanged();
+    }
 }
 
 void VideoBox::writeBoundingBox(eWriteStream& dst) const {

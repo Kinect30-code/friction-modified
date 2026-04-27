@@ -39,6 +39,10 @@ extern "C" {
 #define FRICTION_HAS_AVCHANNEL_LAYOUT 0
 #endif
 
+#ifndef AV_CH_LAYOUT_NATIVE
+#define AV_CH_LAYOUT_NATIVE 0x8000000000000000ULL
+#endif
+
 namespace Friction {
 namespace FFmpegCompat {
 

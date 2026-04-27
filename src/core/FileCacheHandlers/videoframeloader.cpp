@@ -216,6 +216,10 @@ void VideoFrameLoader::readFrame() {
 }
 
 void VideoFrameLoader::afterProcessing() {
+    // Handler callbacks may drop the handler-owned loader entry. Keep the task
+    // alive explicitly until this callback unwinds.
+    const auto keepAlive = ref<VideoFrameLoader>();
+    Q_UNUSED(keepAlive)
     if(!mCacheHandler) return;
     mCacheHandler->frameLoaderFinished(mFrameId, mLoadedFrame);
     for(auto& excess : mExcessFrames) {
@@ -235,28 +239,33 @@ void VideoFrameLoader::afterProcessing() {
         } else {
             const auto newFL = mCacheHandler->addFrameConverter(
                         excess.first, excess.second);
-            newFL->queTask();
+            if(newFL) {
+                newFL->queTask();
+            } else {
+                av_frame_unref(excess.second);
+                av_frame_free(&excess.second);
+            }
         }
     }
     mExcessFrames.clear();
 }
 
 void VideoFrameLoader::afterCanceled() {
+    const auto keepAlive = ref<VideoFrameLoader>();
+    Q_UNUSED(keepAlive)
     if(!mCacheHandler) return;
     mCacheHandler->frameLoaderCanceled(mFrameId);
 }
 
 bool VideoFrameLoader::handleException() {
+    const auto keepAlive = ref<VideoFrameLoader>();
+    Q_UNUSED(keepAlive)
     if(!mCacheHandler) return false;
     takeException();
-    if(mFrameId <= 0) {
-        finishedProcessing();
-        return false;
-    }
-    const auto moved = mCacheHandler->addFrameLoader(mFrameId - 1);
-    moveDependent(moved);
-    mCacheHandler->frameLoaderFailed(mFrameId);
-    moved->queTask();
+    // Preserve exact-frame semantics. Falling back to the previous frame and
+    // shrinking the frame count turns a local decode failure into persistent
+    // preview/export corruption.
+    finishedProcessing();
     return true;
 }
 

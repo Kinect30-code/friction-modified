@@ -40,6 +40,12 @@ SceneFrameContainer::SceneFrameContainer(
 stdsptr<eHddTask> SceneFrameContainer::createTmpFileDataLoader() {
     const ImgLoader::Func func = [this](sk_sp<SkImage> img) {
         setDataLoadedFromTmpFile(img);
+        if(!hasImage()) {
+            if(mScene && mScene->loadingSceneFrame() == this) {
+                mScene->setLoadingSceneFrame(nullptr);
+            }
+            return;
+        }
         if(mScene && mScene->sceneFrame() == this) {
             mScene->setSceneFrame(ref<SceneFrameContainer>());
         } else if(mScene &&

@@ -43,6 +43,10 @@ extern "C" {
     #include <libavutil/opt.h>
 }
 
+#ifndef AV_CH_LAYOUT_NATIVE
+#define AV_CH_LAYOUT_NATIVE 0x8000000000000000ULL
+#endif
+
 struct CORE_EXPORT OutputSettings
 {
     static const std::map<int, QString> sSampleFormatNames;
@@ -61,7 +65,7 @@ struct CORE_EXPORT OutputSettings
     const AVCodec *fVideoCodec = nullptr;
     AVPixelFormat fVideoPixelFormat = AV_PIX_FMT_NONE;
     int fVideoBitrate = 0;
-    int fVideoProfile = FF_PROFILE_UNKNOWN;
+    int fVideoProfile = AV_PROFILE_UNKNOWN;
     Friction::Core::FormatOptions fVideoOptions;
 
     bool fAudioEnabled = false;

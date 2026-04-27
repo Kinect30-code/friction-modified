@@ -519,6 +519,9 @@ public:
     void applyPaintSettingToSelected(const PaintSettingsApplier &setting);
 
     int getCurrentFrame() const;
+    int getDisplayFrame() const;
+    int getAnimationFrame() const;
+    bool hasPreviewDisplayFrame() const;
     FrameRange getFrameRange() const
     {
         return mRange;

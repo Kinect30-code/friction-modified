@@ -91,6 +91,7 @@ void AnimationBox::updateAnimationRange() {
         int frameCount;
         if(mSrcFramesCache) frameCount = mSrcFramesCache->getFrameCount();
         else frameCount = 0;
+        if (frameCount <= 0) return;
         qreal durationScale = 1.0;
         if(mSrcFramesCache) {
             const qreal sourceFps = mSrcFramesCache->getSourceFps();
@@ -438,6 +439,6 @@ AnimationBoxRenderData::AnimationBoxRenderData(
 
 void AnimationBoxRenderData::loadImageFromHandler() {
     if(!fSrcCacheHandler) return;
-    const auto cont = fSrcCacheHandler->getFrameAtOrBeforeFrame(fAnimFrame);
+    const auto cont = fSrcCacheHandler->getFrameAtFrame(fAnimFrame);
     setContainer(cont);
 }

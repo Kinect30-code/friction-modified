@@ -103,6 +103,9 @@ public:
         prop->prp_setSelected(true);
     }
 
+    int selectedBoxesCount() const { return mSelectedBoxes.count(); }
+    QList<BoundingBox*> getSelectedBoxes() const { return mSelectedBoxes.getList(); }
+
     void removeFromSelectedProps(Property* const prop) {
         mSelectedProps.removeObj(prop);
         prop->prp_setSelected(false);

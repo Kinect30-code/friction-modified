@@ -952,6 +952,12 @@ void MainWindow::updateCanvasModeButtonsChecked()
 void MainWindow::setResolutionValue(const qreal value)
 {
     if (!mDocument.fActiveScene) { return; }
+    if (isZero6Dec(mDocument.fActiveScene->getResolution() - value)) {
+        return;
+    }
+    if (RenderHandler::sInstance) {
+        RenderHandler::sInstance->interruptPreview();
+    }
     mDocument.fActiveScene->setResolution(value);
     mDocument.actionFinished();
 }
@@ -1082,14 +1088,18 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *e)
             return QMainWindow::eventFilter(obj, e);
         }
         const auto keyEvent = static_cast<QKeyEvent*>(e);
-        const bool effectsDeleteContext =
-                isTimelineInputContext() || isEffectControlsInputContext();
-        if (keyEvent->key() == Qt::Key_Delete &&
-            effectsDeleteContext &&
-            deleteSelectedEffectProperties()) {
-            return true;
+        const bool timelineContext = isTimelineInputContext();
+        const bool effectControlsContext = isEffectControlsInputContext();
+        if (keyEvent->key() == Qt::Key_Delete) {
+            if (effectControlsContext) {
+                deleteSelectedEffectProperties();
+                return true;
+            }
+            if (timelineContext && deleteSelectedEffectProperties()) {
+                return true;
+            }
         }
-        if (isTimelineInputContext() && mTimeline &&
+        if (timelineContext && mTimeline &&
             mTimeline->processKeyPress(keyEvent)) {
             return true;
         }
@@ -1107,6 +1117,8 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *e)
         }
         const auto keyEvent = static_cast<QKeyEvent*>(e);
         const int key = keyEvent->key();
+        const bool timelineContext = isTimelineInputContext();
+        const bool effectControlsContext = isEffectControlsInputContext();
         if (key == Qt::Key_Tab) {
             if (enve_cast<QLineEdit*>(focusWidget)) { return true; }
             return true;
@@ -1119,7 +1131,10 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *e)
             key == Qt::Key_D) {
             return processKeyEvent(keyEvent);
         }
-        if (isTimelineInputContext()) {
+        if (effectControlsContext && key == Qt::Key_Delete) {
+            return true;
+        }
+        if (timelineContext) {
             const bool plainTimelineKey =
                     !(keyEvent->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) &&
                     (key == Qt::Key_A || key == Qt::Key_U || key == Qt::Key_T ||
@@ -1637,9 +1652,7 @@ void MainWindow::setupPropertiesWidgets()
         const auto scenePtr = mBottomTabs->tabBar()->tabData(index).value<quintptr>();
         if (scenePtr == 0) { return; }
         if (auto *scene = reinterpret_cast<Canvas*>(scenePtr)) {
-            attachTimelineToBottomScene(scene);
-            mTimeline->updateSettingsForCurrentCanvas(scene);
-            mDocument.setActiveScene(scene);
+            activateSceneWorkspace(scene);
         }
     });
     connect(mBottomTabs, &QTabWidget::tabCloseRequested,
@@ -1663,7 +1676,6 @@ void MainWindow::setupPropertiesWidgets()
             attachTimelineToBottomScene(scene);
             selectBottomSceneTab(scene);
         }
-        mTimeline->updateSettingsForCurrentCanvas(scene);
         updateWorkspaceTabTitles();
         if (scene) {
             connect(scene, &Canvas::prp_nameChanged,
@@ -1941,9 +1953,11 @@ void MainWindow::activateSceneWorkspace(Canvas *scene)
     if (!scene) { return; }
     ensureBottomSceneTab(scene);
     attachTimelineToBottomScene(scene);
-    mTimeline->updateSettingsForCurrentCanvas(scene);
-    mDocument.setActiveScene(scene);
-    selectBottomSceneTab(scene);
+    if (*mDocument.fActiveScene != scene) {
+        mDocument.setActiveScene(scene);
+    } else {
+        selectBottomSceneTab(scene);
+    }
 }
 
 void MainWindow::selectBottomSceneTab(Canvas *scene)
@@ -2047,6 +2061,13 @@ void MainWindow::updateSceneNavigationChain(Canvas *scene)
             mSceneNavigationChain.removeLast();
         }
     } else {
+        if (!mSceneNavigationChain.isEmpty()) {
+            const auto lastOraChain = OraModule::sceneNavigationChainIds(
+                mSceneNavigationChain.last());
+            if (!lastOraChain.isEmpty()) {
+                mSceneNavigationChain.clear();
+            }
+        }
         mSceneNavigationChain.append(scene);
     }
 }

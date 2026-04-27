@@ -44,6 +44,7 @@ public:
     void applySettings();
     void updateSettings(bool restore = false);
     void updateAudioDevices();
+    void checkDependencies();
 
 private:
     void setupRasterEffectWidgets();
@@ -69,6 +70,7 @@ private:
     QComboBox *mMsaa = nullptr;
 
     QComboBox *mAudioDevicesCombo;
+    QLabel *mDepsStatusLabel = nullptr;
 
     QList<QComboBox*> mRasterEffectsHardwareSupport;
 };

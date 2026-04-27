@@ -46,36 +46,36 @@ public:
 
     void SWT_setupAbstraction(SWT_Abstraction *abstraction,
                               const UpdateFuncs &updateFuncs,
-                              const int visiblePartWidgetId);
+                              const int visiblePartWidgetId) override;
 
     bool SWT_shouldBeVisible(const SWT_RulesCollection &rules,
                              const bool parentSatisfies,
-                             const bool parentMainTarget) const;
+                             const bool parentMainTarget) const override;
 
 
-    void SWT_setChildrenAncestorDisabled(const bool bT);
+    void SWT_setChildrenAncestorDisabled(const bool bT) override;
 
-    void anim_setAbsFrame(const int frame);
+    void anim_setAbsFrame(const int frame) override;
 
-    bool prp_dependsOn(const Property* const prop) const;
+    bool prp_dependsOn(const Property* const prop) const override;
 
-    void prp_startTransform();
-    void prp_finishTransform();
-    void prp_cancelTransform();
+    void prp_startTransform() override;
+    void prp_finishTransform() override;
+    void prp_cancelTransform() override;
 
     void prp_afterFrameShiftChanged(const FrameRange& oldAbsRange,
-                                    const FrameRange& newAbsRange);
+                                    const FrameRange& newAbsRange) override;
 
-    FrameRange prp_getIdenticalRelRange(const int relFrame) const;
-    FrameRange prp_nextNonUnaryIdenticalRelRange(const int relFrame) const;
+    FrameRange prp_getIdenticalRelRange(const int relFrame) const override;
+    FrameRange prp_nextNonUnaryIdenticalRelRange(const int relFrame) const override;
 
     stdsptr<Key> anim_createKey() final
     { return nullptr; }
 
-    bool anim_isDescendantRecording() const;
-    void anim_addKeyAtRelFrame(const int relFrame);
-    void anim_setRecording(const bool rec);
-    void anim_shiftAllKeys(const int shift);
+    bool anim_isDescendantRecording() const override;
+    void anim_addKeyAtRelFrame(const int relFrame) override;
+    void anim_setRecording(const bool rec) override;
+    void anim_shiftAllKeys(const int shift) override;
 
     void ca_swapChildren(Property * const child1, Property * const child2);
     void ca_swapChildren(const int id1, const int id2);

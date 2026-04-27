@@ -40,6 +40,12 @@ public:
 
     HddCachableCacheHandler() : mUsedRange(this) {}
 
+    int cacheGeneration() const { return mCacheGeneration; }
+
+    void invalidateAll() {
+        mCacheGeneration++;
+    }
+
     void drawCacheOnTimeline(QPainter * const p,
                              const QRectF &drawRect,
                              const int startFrame,
@@ -48,15 +54,26 @@ public:
                              const int maxX = INT_MAX/2) const;
 
     int firstEmptyFrameAtOrAfter(const int frame) const {
-        return mConts.firstEmptyRangeLowerBound(frame).fMin;
+        auto range = mConts.firstEmptyRangeLowerBound(frame);
+        return range.fMin;
+    }
+
+    int firstStaleOrEmptyFrameAtOrAfter(const int frame, const int maxFrame) const {
+        for (int f = frame; f <= maxFrame; f++) {
+            const auto cont = atFrame(f);
+            if (!cont) return f;
+        }
+        return maxFrame + 1;
     }
 
     void add(const stdsptr<Cont>& cont) {
+        cont->mCacheGeneration = mCacheGeneration;
         const auto ret = mConts.insert({cont->getRange(), cont});
         if(ret.second) mUsedRange.addIfInRange(cont.get());
     }
 
     void clear() {
+        invalidateAll();
         mConts.clear();
     }
 
@@ -72,21 +89,27 @@ public:
     T * atFrame(const int relFrame) const {
         const auto it = mConts.atFrame(relFrame);
         if(it == mConts.end()) return nullptr;
-        return static_cast<T*>(it->second.get());
+        const auto cont = static_cast<T*>(it->second.get());
+        if(cont->mCacheGeneration != mCacheGeneration) return nullptr;
+        return cont;
     }
 
     template <class T = Cont>
     stdsptr<T> sharedAtFrame(const int relFrame) const {
         const auto it = mConts.atFrame(relFrame);
         if(it == mConts.end()) return nullptr;
-        return std::static_pointer_cast<T>(it->second);
+        const auto cont = std::static_pointer_cast<T>(it->second);
+        if(cont->mCacheGeneration != mCacheGeneration) return nullptr;
+        return cont;
     }
 
     template <class T = Cont>
     T * atOrBeforeFrame(const int relFrame) const {
         const auto it = mConts.atOrBeforeFrame(relFrame);
         if(it == mConts.end()) return nullptr;
-        return static_cast<T*>(it->second.get());
+        const auto cont = static_cast<T*>(it->second.get());
+        if(cont->mCacheGeneration != mCacheGeneration) return nullptr;
+        return cont;
     }
 
     void setUseRange(const iValueRange& range) {
@@ -105,6 +128,17 @@ public:
         mUsedRange.clearRange();
     }
 
+    void evictStaleEntries() {
+        auto it = mConts.begin();
+        while (it != mConts.end()) {
+            if (it->second->mCacheGeneration != mCacheGeneration) {
+                it = mConts.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
     int freeUnusedMemoryOutsideRange(const iValueRange &range,
                                      int maxToFree = INT_MAX);
 
@@ -113,6 +147,7 @@ public:
 private:
     RangeMap<stdsptr<Cont>> mConts;
     UsedRange mUsedRange;
+    int mCacheGeneration = 0;
 };
 
 #endif // HddCACHABLECACHEHANDLER_H

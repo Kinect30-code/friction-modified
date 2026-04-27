@@ -65,6 +65,62 @@ intKB cappedFreeThreshold(const intKB &totalRamKB,
                 maxThresholdKB;
 }
 
+#if defined(Q_OS_LINUX)
+bool readLinuxAvailableMemoryKB(intKB &freeExternal)
+{
+    char line[256];
+    FILE * const meminfo = fopen("/proc/meminfo", "r");
+    if(!meminfo) {
+        return false;
+    }
+
+    intKB memAvailable(0);
+    intKB freeSum(0);
+    bool foundAvailable = false;
+    int foundLegacy = 0;
+    while(fgets(line, sizeof(line), meminfo)) {
+        int ramPartKB = 0;
+        if(sscanf(line, "MemAvailable: %d kB", &ramPartKB) == 1) {
+            memAvailable.fValue = ramPartKB;
+            foundAvailable = true;
+            break;
+        }
+        if(sscanf(line, "MemFree: %d kB", &ramPartKB) == 1 ||
+           sscanf(line, "Cached: %d kB", &ramPartKB) == 1 ||
+           sscanf(line, "Buffers: %d kB", &ramPartKB) == 1) {
+            freeSum.fValue += ramPartKB;
+            foundLegacy++;
+        }
+    }
+    fclose(meminfo);
+
+    if(foundAvailable) {
+        freeExternal = memAvailable;
+        return true;
+    }
+    if(foundLegacy == 3) {
+        freeExternal = freeSum;
+        return true;
+    }
+    return false;
+}
+
+bool fallbackLinuxAvailableMemoryKB(intKB &freeExternal)
+{
+    struct sysinfo info = {};
+    if(sysinfo(&info) != 0) {
+        return false;
+    }
+
+    const longB freeRamBytes(static_cast<qint64>(info.freeram)*
+                             static_cast<qint64>(info.mem_unit));
+    const longB bufferBytes(static_cast<qint64>(info.bufferram)*
+                            static_cast<qint64>(info.mem_unit));
+    freeExternal = intKB(freeRamBytes + bufferBytes);
+    return true;
+}
+#endif
+
 }
 
 MemoryChecker *MemoryChecker::mInstance;
@@ -132,21 +188,17 @@ void MemoryChecker::sGetFreeKB(intKB& procFreeKB,
     enveUsedB = longB(static_cast<qint64>(bytes_in_use_by_app));
 
 #if defined(Q_OS_LINUX)
-        freeInternal = physical_memory_used - bytes_in_use_by_app;
-        int found = 0;
-        FILE * const meminfo = fopen("/proc/meminfo", "r");
-        if (!meminfo) { RuntimeThrow("Failed to open /proc/meminfo"); }
-        while(fgets(sLine, sizeof(sLine), meminfo)) {
-            int ramPartKB;
-            if (sscanf(sLine, "MemFree: %d kB", &ramPartKB) == 1) {
-            } else if(sscanf(sLine, "Cached: %d kB", &ramPartKB) == 1) {
-            } else if(sscanf(sLine, "Buffers: %d kB", &ramPartKB) == 1) {
-            } else { continue; }
-            freeExternal.fValue += ramPartKB;
-            if(++found == 3) break;
+        const qint64 physicalMemoryUsed =
+                static_cast<qint64>(physical_memory_used);
+        const qint64 appBytes =
+                static_cast<qint64>(bytes_in_use_by_app);
+        freeInternal = qMax<qint64>(0, physicalMemoryUsed - appBytes);
+
+        if(!readLinuxAvailableMemoryKB(freeExternal) &&
+           !fallbackLinuxAvailableMemoryKB(freeExternal)) {
+            qWarning() << "MemoryChecker: failed to query available RAM,"
+                          " using allocator-only estimate";
         }
-        fclose(meminfo);
-        if(found != 3) RuntimeThrow("Entries missing from /proc/meminfo");
 #elif defined(Q_OS_MACOS)
         mach_msg_type_number_t count = HOST_VM_INFO_COUNT;
         vm_statistics_data_t vmstat;

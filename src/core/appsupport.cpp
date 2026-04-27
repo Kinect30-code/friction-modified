@@ -995,7 +995,7 @@ void AppSupport::checkFFmpeg(const bool &isRenderer)
                                         "Use at own risk and don't report any issues upstream.")
                                 .arg(getAppDisplayName());
     // Ubuntu 24.04 ships FFmpeg 6.1.x (libavutil 58.x), which this build links against.
-    if (version < 3800000 || version >= 3900000) {
+    if (version < 3800000) {
         if (isRenderer) { qWarning() << warning; }
         else {
             QMessageBox::critical(nullptr,

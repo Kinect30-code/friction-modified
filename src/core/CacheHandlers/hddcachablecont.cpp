@@ -26,10 +26,13 @@
 #include "hddcachablecont.h"
 #include "../Private/esettings.h"
 #include "Tasks/etask.h"
+#include <QMutex>
+#include <QMutexLocker>
 
 namespace {
 
 QList<HddCachableCont*> sTrackedTmpFiles;
+QMutex sTrackedTmpMutex(QMutex::Recursive);
 qint64 sTrackedTmpFileBytes = 0;
 
 qint64 configuredHddCacheCapBytes() {
@@ -58,8 +61,8 @@ bool tmpTaskCanStillProduceData(const stdsptr<eTask> &task) {
 
 HddCachableCont::HddCachableCont() {}
 
-HddCachableCont::~HddCachableCont() {
-    if(mTmpFile) scheduleDeleteTmpFile();
+HddCachableCont::~HddCachableCont() noexcept {
+    mTmpFile.reset();
 }
 
 int HddCachableCont::free_RAM_k() {
@@ -80,17 +83,25 @@ int HddCachableCont::free_RAM_k() {
 }
 
 eTask *HddCachableCont::scheduleDeleteTmpFile() {
-    cleanupFinishedTmpTasks();
-    if(!mTmpFile) {
+    try {
+        cleanupFinishedTmpTasks();
+        if(!mTmpFile) {
+            discardIfUnrecoverable();
+            return nullptr;
+        }
+        const auto updatable = enve::make_shared<TmpDeleter>(mTmpFile);
+        clearTrackedTmpFile();
+        mTmpFile.reset();
+        updatable->queTask();
         discardIfUnrecoverable();
+        return updatable.get();
+    } catch(const std::exception& e) {
+        qWarning() << "scheduleDeleteTmpFile failed:" << e.what();
+        return nullptr;
+    } catch(...) {
+        qWarning() << "scheduleDeleteTmpFile failed (unknown)";
         return nullptr;
     }
-    const auto updatable = enve::make_shared<TmpDeleter>(mTmpFile);
-    clearTrackedTmpFile();
-    mTmpFile.reset();
-    updatable->queTask();
-    discardIfUnrecoverable();
-    return updatable.get();
 }
 
 eTask *HddCachableCont::scheduleSaveToTmpFile() {
@@ -172,10 +183,10 @@ void HddCachableCont::cleanupFinishedTmpTasks() {
     }
 }
 
-void HddCachableCont::discardIfUnrecoverable() {
+void HddCachableCont::discardIfUnrecoverable() noexcept {
     cleanupFinishedTmpTasks();
     if(!mDataInMemory && !mTmpFile && !mTmpLoadTask && !mTmpSaveTask) {
-        noDataLeft_k();
+        try { noDataLeft_k(); } catch(...) {}
     }
 }
 
@@ -190,6 +201,7 @@ void HddCachableCont::onTmpLoadTaskCanceled() {
 }
 
 void HddCachableCont::clearTrackedTmpFile() {
+    QMutexLocker lock(&sTrackedTmpMutex);
     if(mTmpFileBytes > 0) {
         sTrackedTmpFileBytes = qMax<qint64>(0, sTrackedTmpFileBytes - mTmpFileBytes);
         mTmpFileBytes = 0;
@@ -201,12 +213,14 @@ void HddCachableCont::touchTrackedTmpFile() {
     if(!mTmpFile) {
         return;
     }
+    QMutexLocker lock(&sTrackedTmpMutex);
     sTrackedTmpFiles.removeAll(this);
     sTrackedTmpFiles.append(this);
 }
 
 void HddCachableCont::trackTmpFile(qint64 tmpFileBytes) {
     clearTrackedTmpFile();
+    QMutexLocker lock(&sTrackedTmpMutex);
     mTmpFileBytes = qMax<qint64>(0, tmpFileBytes);
     sTrackedTmpFileBytes += mTmpFileBytes;
     sTrackedTmpFiles.append(this);
@@ -218,6 +232,7 @@ void HddCachableCont::trimTrackedTmpFiles(HddCachableCont *protectedCont) {
         return;
     }
 
+    sTrackedTmpMutex.lock();
     int scanBudget = sTrackedTmpFiles.count();
     while(sTrackedTmpFileBytes > capBytes &&
           scanBudget > 0 &&
@@ -237,7 +252,10 @@ void HddCachableCont::trimTrackedTmpFiles(HddCachableCont *protectedCont) {
             scanBudget--;
             continue;
         }
+        sTrackedTmpMutex.unlock();
         cont->scheduleDeleteTmpFile();
+        sTrackedTmpMutex.lock();
         scanBudget = sTrackedTmpFiles.count();
     }
+    sTrackedTmpMutex.unlock();
 }

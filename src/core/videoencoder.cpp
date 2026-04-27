@@ -52,6 +52,12 @@ VideoEncoder *VideoEncoder::sInstance = nullptr;
 
 namespace {
 
+bool exportDebugEnabled()
+{
+    static const bool enabled = qEnvironmentVariableIsSet("FRICTION_EXPORT_DEBUG");
+    return enabled;
+}
+
 static bool sampleFormatSupported(const AVCodec *codec,
                                   const AVSampleFormat format)
 {
@@ -192,17 +198,34 @@ VideoEncoder::VideoEncoder() {
 void VideoEncoder::addContainer(const QueuedVideoFrame& cont) {
     if(!cont.fImage || !cont.fRange.isValid()) return;
     mNextContainers.append(cont);
+    if(exportDebugEnabled()) {
+        qWarning() << "[export-debug] encoder-enqueue-video"
+                   << "range=[" << cont.fRange.fMin << "," << cont.fRange.fMax << "]"
+                   << "queuedVideo" << mNextContainers.count()
+                   << "state" << static_cast<int>(getState());
+    }
     if(getState() < eTaskState::qued || getState() > eTaskState::processing) queTask();
 }
 
 void VideoEncoder::addContainer(const stdsptr<Samples>& cont) {
     if(!cont) return;
     mNextSoundConts.append(cont);
+    if(exportDebugEnabled()) {
+        qWarning() << "[export-debug] encoder-enqueue-audio"
+                   << "sampleRange=[" << cont->fSampleRange.fMin << "," << cont->fSampleRange.fMax << "]"
+                   << "queuedAudio" << mNextSoundConts.count()
+                   << "state" << static_cast<int>(getState());
+    }
     if(getState() < eTaskState::qued || getState() > eTaskState::processing) queTask();
 }
 
 void VideoEncoder::allAudioProvided() {
     mAllAudioProvided = true;
+    if(exportDebugEnabled()) {
+        qWarning() << "[export-debug] encoder-all-audio-provided"
+                   << "state" << static_cast<int>(getState())
+                   << "queuedAudio" << mNextSoundConts.count();
+    }
     if(getState() < eTaskState::qued || getState() > eTaskState::processing) queTask();
 }
 
@@ -213,59 +236,59 @@ bool VideoEncoder::isValidProfile(const AVCodec *codec,
     switch (codec->id) {
     case AV_CODEC_ID_H264:
         switch (profile) {
-        case FF_PROFILE_H264_BASELINE:
-        case FF_PROFILE_H264_MAIN:
-        case FF_PROFILE_H264_HIGH:
+        case AV_PROFILE_H264_BASELINE:
+        case AV_PROFILE_H264_MAIN:
+        case AV_PROFILE_H264_HIGH:
             return true;
         default:;
         }
         break;
     case AV_CODEC_ID_PRORES:
         switch (profile) {
-        case FF_PROFILE_PRORES_PROXY:
-        case FF_PROFILE_PRORES_LT:
-        case FF_PROFILE_PRORES_STANDARD:
-        case FF_PROFILE_PRORES_HQ:
-        case FF_PROFILE_PRORES_4444:
-        case FF_PROFILE_PRORES_XQ:
+        case AV_PROFILE_PRORES_PROXY:
+        case AV_PROFILE_PRORES_LT:
+        case AV_PROFILE_PRORES_STANDARD:
+        case AV_PROFILE_PRORES_HQ:
+        case AV_PROFILE_PRORES_4444:
+        case AV_PROFILE_PRORES_XQ:
             return true;
         default:;
         }
         break;
     case AV_CODEC_ID_AV1:
         switch (profile) {
-        case FF_PROFILE_AV1_MAIN:
-        case FF_PROFILE_AV1_HIGH:
-        case FF_PROFILE_AV1_PROFESSIONAL:
+        case AV_PROFILE_AV1_MAIN:
+        case AV_PROFILE_AV1_HIGH:
+        case AV_PROFILE_AV1_PROFESSIONAL:
             return true;
         default:;
         }
         break;
     case AV_CODEC_ID_VP9:
         switch (profile) {
-        case FF_PROFILE_VP9_0:
-        case FF_PROFILE_VP9_1:
-        case FF_PROFILE_VP9_2:
-        case FF_PROFILE_VP9_3:
+        case AV_PROFILE_VP9_0:
+        case AV_PROFILE_VP9_1:
+        case AV_PROFILE_VP9_2:
+        case AV_PROFILE_VP9_3:
             return true;
         default:;
         }
         break;
     case AV_CODEC_ID_MPEG4:
         switch (profile) {
-        case FF_PROFILE_MPEG4_SIMPLE:
-        case FF_PROFILE_MPEG4_CORE:
-        case FF_PROFILE_MPEG4_MAIN:
+        case AV_PROFILE_MPEG4_SIMPLE:
+        case AV_PROFILE_MPEG4_CORE:
+        case AV_PROFILE_MPEG4_MAIN:
             return true;
         default:;
         }
         break;
     case AV_CODEC_ID_VC1:
         switch (profile) {
-        case FF_PROFILE_VC1_SIMPLE:
-        case FF_PROFILE_VC1_MAIN:
-        case FF_PROFILE_VC1_COMPLEX:
-        case FF_PROFILE_VC1_ADVANCED:
+        case AV_PROFILE_VC1_SIMPLE:
+        case AV_PROFILE_VC1_MAIN:
+        case AV_PROFILE_VC1_COMPLEX:
+        case AV_PROFILE_VC1_ADVANCED:
             return true;
         default:;
         }
@@ -443,6 +466,10 @@ static AVFrame *getVideoFrame(OutputStream * const ost,
                                         nullptr, nullptr, nullptr);
     if(!ost->fSwsCtx) RuntimeThrow("Cannot initialize the conversion context");
 
+    // Keep the temporary bitmap alive until after sws_scale() if pixmap
+    // is redirected to its pixels.
+    SkBitmap unpremulBitmap;
+
     // Skia gives us premultiplied pixels. Straight-alpha export formats need
     // unpremultiplied input to avoid dark edges around transparency.
     const bool unpremul = pixelFormatHasAlpha(c->pix_fmt);
@@ -452,7 +479,6 @@ static AVFrame *getVideoFrame(OutputStream * const ost,
                                                      kRGBA_8888_SkColorType,
                                                      kUnpremul_SkAlphaType,
                                                      pixmap.info().refColorSpace());
-        SkBitmap unpremulBitmap;
         if (unpremulBitmap.tryAllocPixels(unpremulInfo)) {
             const bool converted = rasterImage->readPixels(unpremulInfo,
                                                            unpremulBitmap.getPixels(),
@@ -870,19 +896,25 @@ static void flushStream(OutputStream * const ost,
                         AVFormatContext * const formatCtx) {
     if(!ost) return;
     if(!ost->fCodec) return;
-    qWarning() << "flushStream begin"
-               << "codec" << (ost->fCodec->codec ? ost->fCodec->codec->name : "null")
-               << "next_pts" << ost->fNextPts;
+    if(exportDebugEnabled()) {
+        qWarning() << "flushStream begin"
+                   << "codec" << (ost->fCodec->codec ? ost->fCodec->codec->name : "null")
+                   << "next_pts" << ost->fNextPts;
+    }
     int ret = avcodec_send_frame(ost->fCodec, nullptr);
     if(ret == AVERROR_EOF) {
-        qWarning() << "flushStream already drained"
-                   << "codec" << (ost->fCodec->codec ? ost->fCodec->codec->name : "null");
+        if(exportDebugEnabled()) {
+            qWarning() << "flushStream already drained"
+                       << "codec" << (ost->fCodec->codec ? ost->fCodec->codec->name : "null");
+        }
         return;
     }
     if(ret < 0) {
-        qWarning() << "flushStream send null frame failed"
-                   << "codec" << (ost->fCodec->codec ? ost->fCodec->codec->name : "null")
-                   << "ret" << ret;
+        if(exportDebugEnabled()) {
+            qWarning() << "flushStream send null frame failed"
+                       << "codec" << (ost->fCodec->codec ? ost->fCodec->codec->name : "null")
+                       << "ret" << ret;
+        }
         return;
     }
     while(ret >= 0) {
@@ -890,9 +922,11 @@ static void flushStream(OutputStream * const ost,
         ret = avcodec_receive_packet(ost->fCodec, &pkt);
         if(ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
             av_packet_unref(&pkt);
-            qWarning() << "flushStream end"
-                       << "codec" << (ost->fCodec->codec ? ost->fCodec->codec->name : "null")
-                       << "ret" << ret;
+            if(exportDebugEnabled()) {
+                qWarning() << "flushStream end"
+                           << "codec" << (ost->fCodec->codec ? ost->fCodec->codec->name : "null")
+                           << "ret" << ret;
+            }
             break;
         }
         if(ret < 0) {
@@ -930,7 +964,6 @@ static void flushStream(OutputStream * const ost,
 static void closeStream(OutputStream * const ost) {
     if(!ost) return;
     if(ost->fCodec) {
-        avcodec_close(ost->fCodec);
         avcodec_free_context(&ost->fCodec);
     }
     if(ost->fDstFrame) av_frame_free(&ost->fDstFrame);
@@ -943,10 +976,12 @@ static void closeStream(OutputStream * const ost) {
 void VideoEncoder::finishEncodingNow() {
     if(!mCurrentlyEncoding) return;
 
-    qWarning() << "finishEncodingNow begin"
-               << "video" << mEncodeVideo
-               << "audio" << mEncodeAudio
-               << "success" << mEncodingSuccesfull;
+    if(exportDebugEnabled()) {
+        qWarning() << "finishEncodingNow begin"
+                   << "video" << mEncodeVideo
+                   << "audio" << mEncodeAudio
+                   << "success" << mEncodingSuccesfull;
+    }
 
     if(mEncodeVideo) flushStream(&mVideoStream, mFormatContext);
     if(mEncodeAudio) flushStream(&mAudioStream, mFormatContext);
@@ -962,9 +997,13 @@ void VideoEncoder::finishEncodingNow() {
     }
 
     if(mEncodingSuccesfull) {
-        qWarning() << "av_write_trailer begin";
+        if(exportDebugEnabled()) {
+            qWarning() << "av_write_trailer begin";
+        }
         const int trailerRet = av_write_trailer(mFormatContext);
-        qWarning() << "av_write_trailer end" << trailerRet;
+        if(exportDebugEnabled()) {
+            qWarning() << "av_write_trailer end" << trailerRet;
+        }
     }
 
     /* Close each codec. */
@@ -992,7 +1031,9 @@ void VideoEncoder::finishEncodingNow() {
     clearContainers();
 
     eSoundSettings::sRestore();
-    qWarning() << "finishEncodingNow end";
+    if(exportDebugEnabled()) {
+        qWarning() << "finishEncodingNow end";
+    }
 }
 
 void VideoEncoder::clearContainers() {
@@ -1010,6 +1051,16 @@ void VideoEncoder::process() {
             hasAudio = mSoundIterator.hasSamples(mAudioStream.fSrcFrame->nb_samples);
         }
     } else hasAudio = false;
+    if(exportDebugEnabled()) {
+        qWarning() << "[export-debug] encoder-process-begin"
+                   << "containers" << _mContainers.count()
+                   << "currentContainerId" << _mCurrentContainerId
+                   << "hasVideo" << hasVideo
+                   << "hasAudio" << hasAudio
+                   << "allAudioProvided" << _mAllAudioProvided
+                   << "pendingVideo" << mNextContainers.count()
+                   << "pendingAudio" << mNextSoundConts.count();
+    }
     while((mEncodeVideo && hasVideo) || (mEncodeAudio && hasAudio)) {
         bool videoAligned = true;
         if(mEncodeVideo && mEncodeAudio) {
@@ -1053,7 +1104,23 @@ void VideoEncoder::process() {
             hasAudio = _mAllAudioProvided ? mSoundIterator.hasValue() :
                                             mSoundIterator.hasSamples(mAudioStream.fSrcFrame->nb_samples);
         }
-        if(!encodeVideo && !encodeAudio) break;
+        if(!encodeVideo && !encodeAudio) {
+            if(exportDebugEnabled()) {
+                qWarning() << "[export-debug] encoder-process-stall"
+                           << "currentContainerId" << _mCurrentContainerId
+                           << "containerCount" << _mContainers.count()
+                           << "hasVideo" << hasVideo
+                           << "hasAudio" << hasAudio
+                           << "videoAligned" << videoAligned
+                           << "audioAligned" << audioAligned
+                           << "nextVideoPts" << (mEncodeVideo ? mVideoStream.fNextPts : -1)
+                           << "nextAudioPts" << (mEncodeAudio ? mAudioStream.fNextPts : -1)
+                           << "allAudioProvided" << _mAllAudioProvided
+                           << "pendingVideo" << mNextContainers.count()
+                           << "pendingAudio" << mNextSoundConts.count();
+            }
+            break;
+        }
     }
 }
 
@@ -1089,6 +1156,18 @@ void VideoEncoder::afterProcessing() {
         mNextContainers.prepend(cont);
     }
     _mContainers.clear();
+    const bool pendingVideo = !mNextContainers.isEmpty();
+    const bool pendingAudio = !mNextSoundConts.isEmpty();
+    const bool audioProvisionUpdated = mAllAudioProvided != _mAllAudioProvided;
+    if(exportDebugEnabled()) {
+        qWarning() << "[export-debug] encoder-after-processing"
+                   << "pendingVideo" << pendingVideo
+                   << "pendingAudio" << pendingAudio
+                   << "audioProvisionUpdated" << audioProvisionUpdated
+                   << "encodingFinished" << mEncodingFinished
+                   << "interrupt" << mInterruptEncoding
+                   << "currentContainerId" << _mCurrentContainerId;
+    }
 
     if(mInterruptEncoding) {
         interrupEncoding();
@@ -1099,7 +1178,15 @@ void VideoEncoder::afterProcessing() {
         finishEncodingNow();
         mEmitter.encodingFailed();
     } else if(mEncodingFinished) finishEncodingSuccess();
-    else if(!mNextContainers.isEmpty()) queTask();
+    else if(pendingVideo || pendingAudio || audioProvisionUpdated) {
+        if(exportDebugEnabled()) {
+            qWarning() << "[export-debug] encoder-requeue"
+                       << "reasonVideo" << pendingVideo
+                       << "reasonAudio" << pendingAudio
+                       << "reasonAudioState" << audioProvisionUpdated;
+        }
+        queTask();
+    }
 }
 
 void VideoEncoder::sFinishEncoding() {

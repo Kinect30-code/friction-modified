@@ -36,7 +36,7 @@ protected:
     virtual stdsptr<eHddTask> createTmpFileDataSaver() = 0;
     virtual stdsptr<eHddTask> createTmpFileDataLoader() = 0;
 public:
-    ~HddCachableCont();
+    ~HddCachableCont() noexcept;
 
     int free_RAM_k() final;
     bool hasRecoverableData() const;
@@ -58,7 +58,7 @@ protected:
     qsptr<QTemporaryFile> mTmpFile;
 private:
     void cleanupFinishedTmpTasks();
-    void discardIfUnrecoverable();
+    void discardIfUnrecoverable() noexcept;
     void onTmpSaveTaskCanceled();
     void onTmpLoadTaskCanceled();
     void clearTrackedTmpFile();

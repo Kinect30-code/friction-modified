@@ -100,6 +100,11 @@ protected:
 
     Samples(const stdsptr<Samples>& src) : Samples(src.get()) {}
 public:
+    Samples(const Samples&) = delete;
+    Samples& operator=(const Samples&) = delete;
+    Samples(Samples&&) = delete;
+    Samples& operator=(Samples&&) = delete;
+
     ~Samples() {
         if(fPlanar) {
             for(uint i = 0; i < fNChannels; i++)

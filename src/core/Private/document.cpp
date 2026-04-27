@@ -343,6 +343,8 @@ void Document::setActiveScene(Canvas * const scene)
     if (fActiveScene) {
         conn << connect(fActiveScene, &Canvas::currentBoxChanged,
                         this, &Document::currentBoxChanged);
+        conn << connect(fActiveScene, &Canvas::currentFrameChanged,
+                        this, &Document::activeSceneFrameSet);
         conn << connect(fActiveScene, &Canvas::selectedPaintSettingsChanged,
                         this, &Document::selectedPaintSettingsChanged);
         conn << connect(fActiveScene, &Canvas::destroyed,
@@ -363,10 +365,17 @@ void Document::setActiveScene(Canvas * const scene)
                         this, [this](const QColor &color) {
             emit currentPixelColor(color);
         });
+        conn << connect(fActiveScene, &Canvas::currentPickedColor,
+                        this, [this](const QColor &color) {
+            emit currentPickedPixelColor(color);
+        });
         emit currentBoxChanged(fActiveScene->getCurrentBox());
         emit selectedPaintSettingsChanged();
     }
     emit activeSceneSet(scene);
+    if (fActiveScene) {
+        emit activeSceneFrameSet(fActiveScene->getDisplayFrame());
+    }
 }
 
 void Document::clearActiveScene()
@@ -377,7 +386,7 @@ void Document::clearActiveScene()
 int Document::getActiveSceneFrame() const
 {
     if (!fActiveScene) { return 0; }
-    return fActiveScene->anim_getCurrentAbsFrame();
+    return fActiveScene->getDisplayFrame();
 }
 
 void Document::setActiveSceneFrame(const int frame)
@@ -385,10 +394,9 @@ void Document::setActiveSceneFrame(const int frame)
     if (!fActiveScene) { return; }
     const auto range = fActiveScene->getFrameRange();
     const int clampedFrame = qBound(range.fMin, frame, range.fMax);
-    if (fActiveScene->anim_getCurrentAbsFrame() == clampedFrame) { return; }
+    if (fActiveScene->getAnimationFrame() == clampedFrame) { return; }
     fActiveScene->anim_setAbsFrame(clampedFrame);
     scheduleInteractiveScenesUpdate();
-    emit activeSceneFrameSet(clampedFrame);
 }
 
 void Document::incActiveSceneFrame()

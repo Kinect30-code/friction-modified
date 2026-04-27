@@ -164,6 +164,10 @@ ConnContext &ILBB::assignLinkTarget(BoxT * const linkTarget) {
                                  this, [this](const UpdateReason reason) {
             this->planUpdate(reason);
         });
+        conn << QObject::connect(linkTarget, &BoundingBox::stateChanged,
+                                 this, [this]() {
+            this->planUpdate(UpdateReason::userChange);
+        });
     } else if(!mInnerLink) this->rename("Empty Link 0");
     return conn;
 }

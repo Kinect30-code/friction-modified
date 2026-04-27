@@ -50,15 +50,20 @@ ImageSequenceBox::ImageSequenceBox() :
 
 void ImageSequenceBox::fileHandlerConnector(ConnContext &conn,
                                             ImageSequenceFileHandler *obj) {
-    Q_UNUSED(conn)
-    Q_UNUSED(obj)
+    conn << connect(obj, &ImageSequenceFileHandler::reloaded,
+                    this, [this]() {
+        animationDataChanged();
+        prp_afterWholeInfluenceRangeChanged();
+    });
 }
 
 void ImageSequenceBox::fileHandlerAfterAssigned(ImageSequenceFileHandler *obj) {
     qsptr<ImageSequenceCacheHandler> frameHandler;
     if(obj) frameHandler = enve::make_shared<ImageSequenceCacheHandler>(obj);
     setAnimationFramesHandler(frameHandler);
-    animationDataChanged();
+    if (!frameHandler || frameHandler->getFrameCount() > 0) {
+        animationDataChanged();
+    }
 }
 
 void ImageSequenceBox::setFolderPath(const QString &folderPath) {

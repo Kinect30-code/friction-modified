@@ -150,6 +150,10 @@ void BoxRenderData::processGpu(QGL33 * const gl,
     const auto surf = SkSurface::MakeFromBackendTexture(
                 grContext, grTex, kTopLeft_GrSurfaceOrigin, 0,
                 kRGBA_8888_SkColorType, nullptr, nullptr);
+    if(!surf) {
+        grContext->deleteBackendTexture(grTex);
+        return;
+    }
 
     const auto canvas = surf->getCanvas();
     transformRenderCanvas(*canvas);
@@ -159,9 +163,12 @@ void BoxRenderData::processGpu(QGL33 * const gl,
     fRenderedImage = SkImage::MakeFromAdoptedTexture(grContext, grTex,
                                                      kTopLeft_GrSurfaceOrigin,
                                                      kRGBA_8888_SkColorType);
+    if(!fRenderedImage) return;
     if(mEffectsRenderer.isEmpty() ||
-       mEffectsRenderer.nextHardwareSupport() == HardwareSupport::cpuOnly)
-        fRenderedImage = fRenderedImage->makeRasterImage();
+       mEffectsRenderer.nextHardwareSupport() == HardwareSupport::cpuOnly) {
+        const auto raster = fRenderedImage->makeRasterImage();
+        if(raster) fRenderedImage = raster;
+    }
     else mEffectsRenderer.processGpu(gl, context, this);
 //    if(mEffectsRenderer.isEmpty()) return;
 //    const auto nextEffectHw = mEffectsRenderer.nextHardwareSupport();
@@ -178,7 +185,7 @@ void BoxRenderData::process() {
 
     const auto info = SkiaHelpers::getPremulRGBAInfo(fGlobalRect.width(),
                                                      fGlobalRect.height());
-    mBitmap.allocPixels(info);
+    if(!mBitmap.tryAllocPixels(info)) return;
     mBitmap.eraseColor(eraseColor());
     SkCanvas canvas(mBitmap);
     transformRenderCanvas(canvas);

@@ -110,7 +110,7 @@ void FrameScrollBar::paintEvent(QPaintEvent *) {
     const int hLeftFrames = mFirstViewedFrame - minFrame;
     const qreal handleFixedWidth = 16;
     const qreal handleWidth = (mViewedFramesSpan*pixPerFrame);
-    const qreal handleLeft = mBottom ? (hLeftFrames*pixPerFrame + x0) : ((hLeftFrames*pixPerFrame + x0)+(handleWidth/2)-(handleFixedWidth/2));
+    const qreal handleLeft = mBottom ? (hLeftFrames*pixPerFrame + x0) : (hLeftFrames*pixPerFrame + x0 - handleFixedWidth/2);
 
     handleRect.setLeft(handleLeft);
     handleRect.setTop(mBottom ? 2 : 0);
@@ -195,17 +195,19 @@ void FrameScrollBar::paintEvent(QPaintEvent *) {
             }
         }
 
-        // draw handle
+        // draw playhead — triangle pointing down, X aligned with KeysView
         if (!mGrabbedMarker.enabled) {
-            const qreal handleCenterX = handleRect.left() + (handleRect.width() / 2);
+            const qreal playheadX = x0 + (mFirstViewedFrame - minFrame + 0.5) * pixPerFrame;
+            const qreal arrowSize = qMax(4., pixPerFrame * 2.);
+            const qreal ApexY = height()/3;
             QPainterPath path;
-            path.moveTo(handleCenterX, handleRect.bottom());
-            path.lineTo(handleRect.topLeft());
-            path.lineTo(handleRect.topRight());
-            path.lineTo(handleCenterX, handleRect.bottom());
+            path.moveTo(playheadX - arrowSize, 0);
+            path.lineTo(playheadX + arrowSize, 0);
+            path.lineTo(playheadX, ApexY);
+            path.lineTo(playheadX - arrowSize, 0);
             p.setPen(QPen(ThemeSupport::getThemeHighlightColor(), 2));
-            p.drawLine(QPointF(handleCenterX, handleRect.bottom() - 1),
-                       QPointF(handleCenterX, height()));
+            p.drawLine(QPointF(playheadX, ApexY - 1),
+                       QPointF(playheadX, height()));
             p.fillPath(path, ThemeSupport::getThemeHighlightColor());
         }
     }

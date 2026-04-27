@@ -44,6 +44,7 @@
 #include <QTimer>
 
 #include "smartPointers/ememory.h"
+#include "conncontextptr.h"
 #include "framerange.h"
 #include "timelinebasewrappernode.h"
 #include "GUI/BoxesList/boxscrollwidget.h"
@@ -143,6 +144,7 @@ private:
 
     QTimer *mStepPreviewTimer;
     QTimer *mIdleCacheTimer;
+    ConnContextPtr<Canvas> mObservedCanvas;
 
     QList<TimelineWidget*> mTimelineWidgets;
     //AnimationDockWidget *mAnimationDockWidget;

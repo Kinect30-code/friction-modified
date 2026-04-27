@@ -32,6 +32,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QSignalBlocker>
 #include <QStatusBar>
 #include <QToolButton>
 #include <QComboBox>
@@ -46,13 +47,28 @@ public:
         mSceneMenu = new SceneChooser(mDocument, false, this);
         addMenu(mSceneMenu);
         connect(mSceneMenu, &SceneChooser::currentChanged,
-                this, &CanvasWrapperMenuBar::setCurrentScene);
+                this, &CanvasWrapperMenuBar::activateScene);
         connect(window, &CanvasWindow::currentSceneChanged,
-                mSceneMenu, qOverload<Canvas*>(&SceneChooser::setCurrentScene));
+                this, &CanvasWrapperMenuBar::syncCurrentScene);
     }
 
-    void setCurrentScene(Canvas * const scene) {
+    void activateScene(Canvas * const scene) {
+        if (!scene) {
+            syncCurrentScene(nullptr);
+            return;
+        }
+        mCurrentScene = scene;
         mWindow->setCurrentCanvas(scene);
+        if (auto *window = MainWindow::sGetInstance()) {
+            window->activateSceneWorkspace(scene);
+        } else {
+            mDocument.setActiveScene(scene);
+        }
+    }
+
+    void syncCurrentScene(Canvas * const scene) {
+        mCurrentScene = scene;
+        const QSignalBlocker blocker(mSceneMenu);
         mSceneMenu->setCurrentScene(scene);
     }
 
@@ -254,12 +270,12 @@ CanvasWrapperNode::CanvasWrapperNode(Canvas* const scene) :
     layout->addWidget(new CanvasWrapperFooter(mCanvasWindow, central));
     setMenuBar(mMenu);
     setCentralWidget(central);
-    mMenu->setCurrentScene(scene);
+    mMenu->syncCurrentScene(scene);
 }
 
 void CanvasWrapperNode::readData(eReadStream &src) {
     mCanvasWindow->readState(src);
-    mMenu->setCurrentScene(mCanvasWindow->getCurrentCanvas());
+    mMenu->syncCurrentScene(mCanvasWindow->getCurrentCanvas());
 }
 
 void CanvasWrapperNode::writeData(eWriteStream &dst) {
@@ -271,7 +287,7 @@ void CanvasWrapperNode::readDataXEV(XevReadBoxesHandler& boxReadHandler,
                                     RuntimeIdToWriteId& objListIdConv) {
     Q_UNUSED(objListIdConv)
     mCanvasWindow->readStateXEV(boxReadHandler, ele);
-    mMenu->setCurrentScene(mCanvasWindow->getCurrentCanvas());
+    mMenu->syncCurrentScene(mCanvasWindow->getCurrentCanvas());
 }
 
 void CanvasWrapperNode::writeDataXEV(QDomElement& ele, QDomDocument& doc,

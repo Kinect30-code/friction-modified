@@ -27,26 +27,38 @@
 
 #include "skia/skiahelpers.h"
 
+namespace {
+    constexpr int kMaxImageCopies = 8;
+}
+
 ImageDataHandler::ImageDataHandler() {}
 
 ImageDataHandler::ImageDataHandler(const sk_sp<SkImage>& img) :
     mImage(img) {}
 
+int ImageDataHandler::sImageByteCount(const sk_sp<SkImage>& img) {
+    if(!img) return 0;
+    SkPixmap pixmap;
+    if(img->peekPixels(&pixmap)) {
+        return pixmap.width()*pixmap.height()*
+               pixmap.info().bytesPerPixel();
+    }
+    return 0;
+}
+
 int ImageDataHandler::clearImageMemory() {
-    const int bytes = getImageByteCount();
+    QMutexLocker locker(&mCopyMutex);
+    int bytes = getImageByteCount();
+    for(const auto& copy : mImageCopies) {
+        bytes += sImageByteCount(copy);
+    }
     mImage.reset();
     mImageCopies.clear();
     return bytes;
 }
 
 int ImageDataHandler::getImageByteCount() const {
-    if(!mImage) return 0;
-    SkPixmap pixmap;
-    if(mImage->peekPixels(&pixmap)) {
-        return pixmap.width()*pixmap.height()*
-               pixmap.info().bytesPerPixel();
-    }
-    return 0;
+    return sImageByteCount(mImage);
 }
 
 void ImageDataHandler::drawImage(SkCanvas * const canvas,
@@ -61,15 +73,22 @@ const sk_sp<SkImage>& ImageDataHandler::getImage() const {
 }
 
 sk_sp<SkImage> ImageDataHandler::requestImageCopy() {
+    QMutexLocker locker(&mCopyMutex);
     if(mImageCopies.isEmpty()) return mImage;
-    else return mImageCopies.takeLast();
+    return mImageCopies.takeLast();
 }
 
 void ImageDataHandler::addImageCopy(const sk_sp<SkImage> &img) {
+    if(!img) return;
+    QMutexLocker locker(&mCopyMutex);
+    if(mImageCopies.size() >= kMaxImageCopies) {
+        mImageCopies.removeFirst();
+    }
     mImageCopies << img;
 }
 
 void ImageDataHandler::replaceImage(const sk_sp<SkImage> &img) {
+    QMutexLocker locker(&mCopyMutex);
     mImage = img;
     mImageCopies.clear();
 }

@@ -44,19 +44,19 @@ public:
     void blendSetup(ChildRenderData &data,
                     const int index,
                     const qreal relFrame,
-                    QList<ChildRenderData> &delayed) const;
+                    QList<ChildRenderData> &delayed) const override;
 
     void detachedBlendUISetup(const qreal relFrame,
                               const int drawId,
-                              QList<UIDelayed> &delayed);
+                              QList<UIDelayed> &delayed) override;
     void detachedBlendSetup(const BoundingBox* const boxToDraw,
                         const qreal relFrame,
                         SkCanvas * const canvas,
                         const SkFilterQuality filter,
                         const int drawId,
-                        QList<Delayed> &delayed) const;
+                        QList<Delayed> &delayed) const override;
     void drawBlendSetup(const qreal relFrame,
-                        SkCanvas * const canvas) const;
+                        SkCanvas * const canvas) const override;
 
     TrackMatteMode getMode() const;
     void setModeAction(TrackMatteMode mode);

@@ -762,6 +762,7 @@ void BoundingBox::planUpdate(const UpdateReason reason,
         if(!causedByDescendant) {
             mRenderDataHandler.clear();
         }
+        emit stateChanged();
     }
 
     mDrawRenderContainer.setExpired(true);
@@ -1045,7 +1046,7 @@ void BoundingBox::startSelectedStrokeColorTransform() {
 }
 
 void BoundingBox::startSelectedFillColorTransform() {
-    const auto fillSettings = getStrokeSettings();
+    const auto fillSettings = getFillSettings();
     if(!fillSettings) return;
     fillSettings->getColorAnimator()->prp_startTransform();
 }

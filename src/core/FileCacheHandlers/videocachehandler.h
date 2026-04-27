@@ -128,7 +128,7 @@ protected:
     VideoFrameLoader * addFrameConverter(const int frameId, AVFrame * const frame);
     void removeFrameLoader(const int frame);
 
-    void openVideoStream();
+    bool openVideoStream();
     eTask *scheduleFrameLoadInternal(int frame,
                                      bool throwOnOutOfRange,
                                      VideoFrameAccessMode accessMode);

@@ -60,7 +60,9 @@ private:
     template<class T>
     std::shared_ptr<T> iniRef() {
         if(!mThisWeak.expired()) RuntimeThrow("Shared pointer reinitialization");
-        std::shared_ptr<T> thisRef = std::shared_ptr<T>(static_cast<T*>(this));
+        std::shared_ptr<T> thisRef(
+                    static_cast<T*>(this),
+                    &enve::detail::destroyMallocAllocated<T>);
         this->mThisWeak = std::static_pointer_cast<StdSelfRef>(thisRef);
         return thisRef;
     }

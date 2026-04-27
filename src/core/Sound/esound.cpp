@@ -31,13 +31,26 @@ eSound::eSound() : eBoxOrSound("sound") {
     connect(this, &eBoxOrSound::aboutToChangeAncestor, this, [this]() {
         const auto pScene = getParentScene();
         if(!pScene) return;
-        pScene->getSoundComposition()->removeSound(ref<eSound>());
+        try {
+            pScene->getSoundComposition()->removeSound(ref<eSound>());
+        } catch(...) {
+        }
     });
     connect(this, &eBoxOrSound::prp_ancestorChanged, this, [this]() {
         const auto pScene = getParentScene();
         if(!pScene) return;
         pScene->getSoundComposition()->addSound(ref<eSound>());
     });
+}
+
+eSound::~eSound() {
+    const auto pScene = getParentScene();
+    if(!pScene) return;
+    try {
+        if(auto snd = ref<eSound>())
+            pScene->getSoundComposition()->removeSound(snd);
+    } catch(...) {
+    }
 }
 
 SampleRange eSound::relSampleRange() const {

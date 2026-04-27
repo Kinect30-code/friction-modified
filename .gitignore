@@ -47,3 +47,4 @@ linuxdeploy-*
 linuxdeploy-plugin-qt-*
 build_runfix_clang/
 编译
+.claude/

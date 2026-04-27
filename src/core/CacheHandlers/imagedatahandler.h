@@ -30,6 +30,7 @@
 #include "../core_global.h"
 
 #include <QList>
+#include <QMutex>
 
 class CORE_EXPORT ImageDataHandler {
 protected:
@@ -49,8 +50,11 @@ public:
     sk_sp<SkImage> requestImageCopy();
     void addImageCopy(const sk_sp<SkImage> &img);
 private:
+    static int sImageByteCount(const sk_sp<SkImage>& img);
+
     sk_sp<SkImage> mImage;
     QList<sk_sp<SkImage>> mImageCopies;
+    mutable QMutex mCopyMutex;
 };
 
 #endif // IMAGEDATAHANDLER_H

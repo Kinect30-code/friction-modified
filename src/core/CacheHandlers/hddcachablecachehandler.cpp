@@ -50,6 +50,7 @@ void HddCachableCacheHandler::drawCacheOnTimeline(QPainter * const p,
     //bool lastStoresInMemory = true;
     for(auto it = mConts.atOrAfterFrame(uStartFrame); it != mConts.end(); it++) {
         const auto cont = it->second.get();
+        if(!cont) continue;
         const int minFrame = qMax(startFrame - 1,
                                   qRound(cont->getRangeMin()*unit));
         if(minFrame > endFrame + 1) break;

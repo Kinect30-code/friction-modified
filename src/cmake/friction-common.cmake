@@ -51,7 +51,7 @@ if(NOT APPLE)
 endif()
 
 if(UNIX)
-    add_compile_options(-Wall -Wextra -Wno-unused-private-field)
+    add_compile_options(-Wall -Wextra -Wno-unused-private-field -Wno-deprecated-declarations)
     if(NOT ${LINUX_DEPLOY})
         add_compile_options(-Wno-deprecated-copy-with-user-provided-copy)
     endif()

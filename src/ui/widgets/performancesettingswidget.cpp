@@ -36,6 +36,13 @@
 #include <QTimer>
 #include <QGroupBox>
 #include <QScrollArea>
+#include <QProcess>
+#include <QAudioDeviceInfo>
+#include <QAudioOutput>
+
+extern "C" {
+#include <libavutil/avutil.h>
+}
 
 #define RASTER_HW_SUPPORT_ID Qt::UserRole + 1
 
@@ -145,17 +152,22 @@ PerformanceSettingsWidget::PerformanceSettingsWidget(QWidget *parent)
 
     const auto audioLayout = new QHBoxLayout(audioWidget);
 
-    //QLabel *audioLabel = new QLabel(tr("Output"), this);
     mAudioDevicesCombo = new QComboBox(this);
     mAudioDevicesCombo->setSizePolicy(QSizePolicy::Preferred,
                                       QSizePolicy::Preferred);
     mAudioDevicesCombo->setFocusPolicy(Qt::NoFocus);
-    mAudioDevicesCombo->setEnabled(false);
 
-    //audioLayout->addWidget(audioLabel);
     audioLayout->addWidget(mAudioDevicesCombo);
 
     addWidget(audioWidget);
+
+    const auto depsGroup = new QGroupBox(tr("System Dependencies"), this);
+    depsGroup->setObjectName("BlueBox");
+    const auto depsLayout = new QVBoxLayout(depsGroup);
+    mDepsStatusLabel = new QLabel(this);
+    mDepsStatusLabel->setWordWrap(true);
+    depsLayout->addWidget(mDepsStatusLabel);
+    addWidget(depsGroup);
 
     setupRasterEffectWidgets();
 
@@ -168,6 +180,8 @@ PerformanceSettingsWidget::PerformanceSettingsWidget(QWidget *parent)
 
     QTimer::singleShot(250, this,
                        &PerformanceSettingsWidget::updateAudioDevices);
+    QTimer::singleShot(300, this,
+                       &PerformanceSettingsWidget::checkDependencies);
     connect(AudioHandler::sInstance, &AudioHandler::deviceChanged,
             this, [this]() { updateAudioDevices(); });
 }
@@ -219,13 +233,14 @@ void PerformanceSettingsWidget::updateSettings(bool restore)
 void PerformanceSettingsWidget::updateAudioDevices()
 {
     const auto mAudioHandler = AudioHandler::sInstance;
+    if (!mAudioHandler) return;
     mAudioDevicesCombo->blockSignals(true);
     mAudioDevicesCombo->clear();
     mAudioDevicesCombo->addItems(mAudioHandler->listDevices());
     if (mAudioDevicesCombo->count() > 0) {
         mAudioDevicesCombo->setCurrentText(mAudioHandler->getDeviceName());
-        mAudioDevicesCombo->setEnabled(true);
-    } else { mAudioDevicesCombo->setEnabled(false); }
+    }
+    mAudioDevicesCombo->setEnabled(mAudioDevicesCombo->count() > 0);
     mAudioDevicesCombo->blockSignals(false);
 }
 
@@ -328,4 +343,51 @@ void PerformanceSettingsWidget::updateAccPreferenceDesc()
     }
     mAccPreferenceDescLabel->setToolTip(gSingleLineTooltip(toolTip));
     mAccPreferenceSlider->setToolTip(gSingleLineTooltip(toolTip));
+}
+
+void PerformanceSettingsWidget::checkDependencies()
+{
+    QStringList ok, missing;
+
+    QProcess pactl;
+    pactl.start(QString::fromUtf8("pactl"), {QString::fromUtf8("list"), QString::fromUtf8("short"), QString::fromUtf8("sinks")});
+    if (pactl.waitForFinished(2000) && !pactl.readAllStandardOutput().trimmed().isEmpty()) {
+        ok << QString::fromUtf8("PulseAudio / PipeWire-Pulse");
+    } else {
+        missing << QString::fromUtf8("pipewire-pulse (sudo apt install pipewire-pulse)");
+    }
+
+    const auto devices = QAudioDeviceInfo::availableDevices(QAudio::AudioOutput);
+    bool hasValidDevice = false;
+    for (const auto& d : devices) {
+        if (!d.deviceName().isEmpty()) { hasValidDevice = true; break; }
+    }
+    if (!hasValidDevice) {
+        const auto def = QAudioDeviceInfo::defaultOutputDevice();
+        if (!def.deviceName().isEmpty()) hasValidDevice = true;
+    }
+    if (hasValidDevice) {
+        ok << QString::fromUtf8("Qt5 Multimedia (audio devices)");
+    } else {
+        missing << QString::fromUtf8("libqt5multimedia5-plugins gstreamer1.0-pulseaudio (sudo apt install libqt5multimedia5-plugins gstreamer1.0-pulseaudio)");
+    }
+
+    if (avutil_version() >= 3800000) {
+        ok << QString::fromUtf8("FFmpeg (libavutil %1)").arg(avutil_version());
+    } else {
+        missing << QString::fromUtf8("FFmpeg ≥ 4.0");
+    }
+
+    const bool hasGpu = HardwareInfo::sGpuRendererString() != QString::fromUtf8("Software");
+    if (hasGpu) {
+        ok << QString::fromUtf8("GPU: %1").arg(HardwareInfo::sGpuRendererString());
+    } else {
+        missing << QString::fromUtf8("GPU acceleration (software rendering fallback)");
+    }
+
+    QString text = QString::fromUtf8("<b style='color:#4caf50'>✅ OK:</b> ") + ok.join(QString::fromUtf8(", "));
+    if (!missing.isEmpty()) {
+        text += QString::fromUtf8("<br><b style='color:#f44336'>⚠ MISSING:</b> ") + missing.join(QString::fromUtf8("<br>  • "));
+    }
+    mDepsStatusLabel->setText(text);
 }

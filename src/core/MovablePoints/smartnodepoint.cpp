@@ -462,12 +462,18 @@ PathPointsHandler *SmartNodePoint::getHandler() {
 }
 
 void SmartNodePoint::setPrevNormalPoint(SmartNodePoint * const prevPoint) {
-    if(mPrevNormalPoint == this) RuntimeThrow("Node cannot point to itself");
+    if(Q_UNLIKELY(prevPoint == this)) {
+        qWarning() << "setPrevNormalPoint: node cannot point to itself";
+        return;
+    }
     mPrevNormalPoint = prevPoint;
 }
 
 void SmartNodePoint::setNextNormalPoint(SmartNodePoint * const nextPoint) {
-    if(mNextNormalPoint == this) RuntimeThrow("Node cannot point to itself");
+    if(Q_UNLIKELY(nextPoint == this)) {
+        qWarning() << "setNextNormalPoint: node cannot point to itself";
+        return;
+    }
     mNextNormalPoint = nextPoint;
     if(nextPoint && isNormal()) {
         mNextNormalSegment = NormalSegment(this, nextPoint);
@@ -487,12 +493,18 @@ bool SmartNodePoint::hasPrevPoint() const {
 }
 
 void SmartNodePoint::setPrevPoint(SmartNodePoint * const prevPoint) {
-    if(prevPoint == this) RuntimeThrow("Node cannot point to itself");
+    if(Q_UNLIKELY(prevPoint == this)) {
+        qWarning() << "setPrevPoint: node cannot point to itself";
+        return;
+    }
     mPrevPoint = prevPoint;
 }
 
 void SmartNodePoint::setNextPoint(SmartNodePoint * const nextPoint) {
-    if(nextPoint == this) RuntimeThrow("Node cannot point to itself");
+    if(Q_UNLIKELY(nextPoint == this)) {
+        qWarning() << "setNextPoint: node cannot point to itself";
+        return;
+    }
     mNextPoint = nextPoint;
 }
 
