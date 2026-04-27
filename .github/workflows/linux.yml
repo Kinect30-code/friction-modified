@@ -1,6 +1,9 @@
 name: Linux
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -18,9 +21,17 @@ jobs:
       run: |
         cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SKIA=ON
         ninja -C build -j2
-    - name: Archive
+    - name: Archive build
       uses: actions/upload-artifact@v4
       with:
         name: friction-linux-x86_64
         path: |
           build/src/app/friction
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        name: Development Build (${{ github.sha }})
+        tag_name: dev-${{ github.run_number }}
+        files: build/src/app/friction
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
