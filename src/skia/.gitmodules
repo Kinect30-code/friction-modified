@@ -1,6 +1,0 @@
-[submodule "third_party/externals/sfntly"]
-	path = third_party/externals/sfntly
-	url = https://github.com/friction2d/sfntly
-[submodule "gn-src"]
-	path = gn-src
-	url = https://github.com/friction2d/gn
