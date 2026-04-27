@@ -13,10 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+      with:
+        submodules: recursive
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake ninja-build build-essential clang lld qtbase5-dev qtdeclarative5-dev qtmultimedia5-dev libqt5opengl5-dev libqt5svg5-dev libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
+        sudo apt-get install -y cmake ninja-build build-essential clang lld libunwind-dev qtbase5-dev qtdeclarative5-dev qtmultimedia5-dev libqt5opengl5-dev libqt5svg5-dev libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
     - name: Build
       run: |
         CC=clang CXX=clang++ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SKIA=ON
