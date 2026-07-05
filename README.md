@@ -1,108 +1,172 @@
-# Friction Modified - Like After Effects
 
-这是一个基于 [Friction](https://github.com/friction2d/friction) 深度修改的2D动画软件，目标是打造Linux平台上的After Effects替代品。
+# Friction2D Modified - After Effects Like
 
-**⚠️ 重要提示：这不是Friction的官方版本，所有问题请勿提交给原项目维护者！**
+[](https://github.com/GhaniDz/friction-modified#friction-modified---like-after-effects)
 
-![Friction Modified Screenshot](screenshot.png)
+This is a 2D animation software based on [Friction](https://github.com/friction2d/friction) with extensive modifications, aiming to create an After Effects alternative on the Linux platform.
 
-## ✨ 本版本的主要功能
+**⚠️Important Note: This is not the official version of Friction. Please do not submit any issues to the original project maintainers!**
 
-## 🆕 本次更新 (2026-04-28)
+![Friction Modified Screenshot](src/Screenshot_2026-07-04_23-38-44.png)
 
-### 预览缓存系统重写
-- **修复缓存方向反转问题**：嵌套合成/ORA缓存不再"从右往左填"，严格按帧号递增顺序 0→1→2→3... 正向缓存
-- **修复缓存提前停止问题**：移除 `previewHasBufferedAhead` 稳态检查，缓存持续进行直到全部帧完成，不再每60帧自动暂停
-- **修复缓存范围收缩问题**：`renderDataFinished` 中宽范围缓存条目不再被窄范围替换，静态合成的绿色缓存条一次性填满
-- **修复渲染游标回退问题**：移除 `renderCursorAheadOfNeed` 导致的游标暴力拉回逻辑，保持渲染方向一致
-- **DI（Dependency Injection）缓存架构**：为 `HddCachableCacheHandler` 引入世代标记机制(`mCacheGeneration`)，支持场景变化时惰性驱逐旧缓存，避免全量清理
-- **空闲缓存跨度扩展**：从2s/1s扩展到5s/3s，暂停时预缓存更多帧
+## ✨ Main features of this version
 
-### 保存/加载修复
-- **修复视频导入后保存再打开只剩一帧**：`VideoBox`/`ImageSequenceBox` 在文件数据异步加载完成前不再调用 `animationDataChanged()`，等待 `reloaded` 信号再更新动画范围
-- **修复素材命名问题**：`prp_sFixName()` 不再剥离前导数字，保留 `-` `.` 等合法字符，文件名不再变成"N/A"前缀
+[](https://github.com/GhaniDz/friction-modified#-%E6%9C%AC%E7%89%88%E6%9C%AC%E7%9A%84%E4%B8%BB%E8%A6%81%E5%8A%9F%E8%83%BD)
 
-### 多选编辑增强
-- **多选盒子同步关键帧**：选中多个盒子后，在属性上 Add/Delete Key 会同步应用到所有选中盒子的对应属性（类似AE）
+## 🆕 This update (2026-04-28)
 
-### Tab键导航重写
-- **合并场景链+组层级**：多场景时Tab弹出同时显示场景路径和当前场景的组层级，不再丢失上下文
-- **修复ORA残留链**：从ORA合成返回普通合成时，导航链正确清除ORA层级，不再显示错误的层级关系
-- **根节点使用实际合成名**：不再显示硬编码的"Composition"替代实际合成名
+[](https://github.com/GhaniDz/friction-modified#-%E6%9C%AC%E6%AC%A1%E6%9B%B4%E6%96%B0-2026-04-28)
 
-### Project面板重组
-- **系统文件夹分组**：合成自动归入 `Compositions` 文件夹，素材自动归入 `Footage` 文件夹
-- **ORA包保持层级**：ORA导入的素材包保持原有的包/Compositions/Assets层级结构
+### Preview caching system rewrite
 
-### 音频修复
-- **修复轨道清空后音频仍播放**：`eSound` 析构函数增加 `removeSound` 调用，确保盒子删除时音频立即停止
+[](https://github.com/GhaniDz/friction-modified#%E9%A2%84%E8%A7%88%E7%BC%93%E5%AD%98%E7%B3%BB%E7%BB%9F%E9%87%8D%E5%86%99)
 
-### 嵌套合成缓存传播
-- **StateChanged信号**：`BoundingBox` content变化时emit `stateChanged`，`InternalLinkBox` 监听并传播 `planUpdate` 到主画布，确保修改嵌套合成后主画布缓存正确失效
+-   **Fixed the issue of reversed cache direction** : Nested composition/ORA caches are no longer filled "from right to left," but strictly follow the ascending frame number order 0→1→2→3... Forward caching
+-   **Fixed the issue of premature caching** : Removed `previewHasBufferedAhead`steady-state check, caching continues until all frames are complete, and no longer automatically pauses every 60 frames.
+-   **Fixed the cache range shrinking issue** : `renderDataFinished`Medium-wide range cache entries are no longer replaced by narrow range entries, and statically synthesized green cache bars are filled all at once.
+-   **Fixed rendering cursor rollback issue** : Removed `renderCursorAheadOfNeed`the logic that caused the cursor to violently pull back, ensuring consistent rendering direction.
+-   **DI (Dependency Injection) caching architecture** : `HddCachableCacheHandler`Introduces a generation marking mechanism `mCacheGeneration`to support lazy eviction of old caches when scenarios change, avoiding full cleanup.
+-   **Idle buffer span extended** : from 2s/1s to 5s/3s, pre-buffering more frames during pauses.
 
-### 代码清理
-- 清理 `canvas.cpp` / `renderhandler.cpp` / `assetswidget.cpp` 中大量冗余代码和注释
+### Save/Load Repair
 
-### AE风格界面
-- 重新设计的UI布局，模仿After Effects的工作流程
-- 更直观的层级管理和时间轴操作
+[](https://github.com/GhaniDz/friction-modified#%E4%BF%9D%E5%AD%98%E5%8A%A0%E8%BD%BD%E4%BF%AE%E5%A4%8D)
 
-### 视频格式支持
-- **WebM导入与Alpha通道支持** - 使用libvpx解码器正确处理带透明通道的WebM视频
+-   **Fixed a video import issue where only one frame remained after saving and reopening** : `VideoBox`/ `ImageSequenceBox`This function is not called again until the file data is asynchronously loaded `animationDataChanged()`, waiting for `reloaded`a signal to update the animation range.
+-   **Fixed the issue with file naming** : `prp_sFixName()`Leading numbers will no longer be stripped, `-`  `.`valid characters such as will be retained, and filenames will no longer have the "N/A" prefix.
 
-### 图像格式支持
-- **ORA合成导入** - 支持OpenRaster格式以合成形式导入，并支持热更新
+### Enhanced multi-select editing
 
-### 层级关系系统
-- **父子级关系** - 完整的父子级绑定系统
-- **Whip连接** - 使用whip工具快速建立层级关联
+[](https://github.com/GhaniDz/friction-modified#%E5%A4%9A%E9%80%89%E7%BC%96%E8%BE%91%E5%A2%9E%E5%BC%BA)
 
-### 蒙版与遮罩
-- **AE轨道遮罩** - 支持类似After Effects的轨道遮罩功能
-- **AE图层蒙版** - 选中轨道时使用钢笔/矩形/椭圆工具可直接创建蒙版
+-   **Multi-selection box synchronized keyframes** : After selecting multiple boxes, adding/deleting keys to their properties will simultaneously apply the corresponding properties to all selected boxes (similar to After Effects).
 
-### 合成管理
-- **Scene切换** - 像After Effects切换合成一样快速切换Scene
+### Tab key navigation rewritten
 
-### 动画工具
-- **AE木偶功能** - 加入木偶工具用于角色动画（可能存在稳定性问题，但基本可用）
+[](https://github.com/GhaniDz/friction-modified#tab%E9%94%AE%E5%AF%BC%E8%88%AA%E9%87%8D%E5%86%99)
 
-### 快捷键优化
-- 添加了一系列类似After Effects的快捷键
-- Mark快捷键从M键改为小键盘*键
+-   **Merging scene chains and group hierarchies** : When multiple scenes are displayed, the tab pop-up simultaneously shows the scene path and the group hierarchy of the current scene, without losing context.
+-   **Repairing ORA residual chains** : When returning from ORA synthesis to normal synthesis, the navigation chain correctly clears the ORA hierarchy, and incorrect hierarchy relationships are no longer displayed.
+-   **The root node uses the actual composition name** : the hard-coded "Composition" is no longer displayed in place of the actual composition name.
 
-## ⚠️ 免责声明
+### Project panel redesign
 
-**本项目代码完全由AI生成，处于"黑盒"状态，可能对Friction核心代码进行了深度修改。**
+[](https://github.com/GhaniDz/friction-modified#project%E9%9D%A2%E6%9D%BF%E9%87%8D%E7%BB%84)
 
-- 请勿将本版本的问题提交给Friction官方作者
-- 欢迎提交Issue，但请附带详细的报错信息
-- 欢迎其他开发者参与维护和优化
+-   **System folder grouping** : Composites are automatically grouped into `Compositions`a folder, and source materials are automatically grouped into `Footage`a folder.
+-   **ORA Package Preservation Hierarchy** : Imported asset packages in ORA retain their original package/compositions/asset hierarchy structure.
 
-## 📋 原项目信息
+### Audio repair
 
-本修改版基于：
-- **原项目**：[Friction](https://friction.graphics) 
-- **原作者**：Ole-André Rodlie and contributors
-- **原项目GitHub**：https://github.com/friction2d/friction
+[](https://github.com/GhaniDz/friction-modified#%E9%9F%B3%E9%A2%91%E4%BF%AE%E5%A4%8D)
 
-## 📖 构建说明
+-   **To fix the issue where audio continued to play after the track was cleared** : A call `eSound`was added to the destructor `removeSound`to ensure that audio stopped immediately when the box was deleted.
 
-* [Linux](https://friction.graphics/documentation/source-linux.html)
-* [Windows](https://friction.graphics/documentation/source-windows.html)
-* [macOS](https://friction.graphics/documentation/source-macos.html)
+### Nested synthesis cache propagation
 
-## 📄 许可证
+[](https://github.com/GhaniDz/friction-modified#%E5%B5%8C%E5%A5%97%E5%90%88%E6%88%90%E7%BC%93%E5%AD%98%E4%BC%A0%E6%92%AD)
 
-本项目保持与原项目相同的许可证：
+-   **The StateChanged signal**`BoundingBox` is emitted when content changes . It listens for and propagates to the main canvas, ensuring that the main canvas cache is correctly invalidated after modifications to nested compositions `stateChanged`.`InternalLinkBox``planUpdate`
 
-Friction is copyright &copy; Ole-André Rodlie and contributors.
+### Code Cleanup
+
+[](https://github.com/GhaniDz/friction-modified#%E4%BB%A3%E7%A0%81%E6%B8%85%E7%90%86)
+
+-   Clean up a large amount of redundant code and comments in `canvas.cpp`//`renderhandler.cpp``assetswidget.cpp`
+
+### After Effects style interface
+
+[](https://github.com/GhaniDz/friction-modified#ae%E9%A3%8E%E6%A0%BC%E7%95%8C%E9%9D%A2)
+
+-   The redesigned UI layout mimics the workflow of After Effects.
+-   More intuitive hierarchical management and timeline operation
+
+### Video format support
+
+[](https://github.com/GhaniDz/friction-modified#%E8%A7%86%E9%A2%91%E6%A0%BC%E5%BC%8F%E6%94%AF%E6%8C%81)
+
+-   **WebM Import and Alpha Channel Support** - Correctly Processing WebM Videos with Alpha Channel Using the libvpx Decoder
+
+### Image format support
+
+[](https://github.com/GhaniDz/friction-modified#%E5%9B%BE%E5%83%8F%E6%A0%BC%E5%BC%8F%E6%94%AF%E6%8C%81)
+
+-   **ORA composition import** - Supports importing OpenRaster format compositions and supports hot updates.
+
+### Hierarchical relationship system
+
+[](https://github.com/GhaniDz/friction-modified#%E5%B1%82%E7%BA%A7%E5%85%B3%E7%B3%BB%E7%B3%BB%E7%BB%9F)
+
+-   **Parent-child relationship** - A complete parent-child binding system
+-   **Whip Connections** - Quickly establish hierarchical relationships using the Whip tool.
+
+### Masks and Masks
+
+[](https://github.com/GhaniDz/friction-modified#%E8%92%99%E7%89%88%E4%B8%8E%E9%81%AE%E7%BD%A9)
+
+-   **AE Track Masking** - Supports track masking functionality similar to After Effects.
+-   **AE Layer Mask** - You can create a mask directly using the Pen/Rectangle/Ellipse tools when the track is selected.
+
+### Synthesis Management
+
+[](https://github.com/GhaniDz/friction-modified#%E5%90%88%E6%88%90%E7%AE%A1%E7%90%86)
+
+-   **Scene switching** - Quickly switch scenes like switching compositions in After Effects.
+
+### Animation tools
+
+[](https://github.com/GhaniDz/friction-modified#%E5%8A%A8%E7%94%BB%E5%B7%A5%E5%85%B7)
+
+-   **After Effects Puppet Functionality** - Added puppet tools for character animation (may have stability issues, but is generally usable).
+
+### Keyboard shortcut optimization
+
+[](https://github.com/GhaniDz/friction-modified#%E5%BF%AB%E6%8D%B7%E9%94%AE%E4%BC%98%E5%8C%96)
+
+-   A series of After Effects-like keyboard shortcuts have been added.
+-   The Mark shortcut key has been changed from the M key to the numeric keypad * key.
+
+## ⚠️Disclaimer
+
+[](https://github.com/GhaniDz/friction-modified#%EF%B8%8F-%E5%85%8D%E8%B4%A3%E5%A3%B0%E6%98%8E)
+
+**The code for this project is entirely generated by AI and is in a "black box" state, which may indicate that the core code of Friction has been deeply modified.**
+
+-   Please do not submit issues for this version to the official Friction authors.
+-   You are welcome to submit issues, but please include detailed error information.
+-   Other developers are welcome to participate in maintenance and optimization.
+
+## 📋 Original Project Information
+
+[](https://github.com/GhaniDz/friction-modified#-%E5%8E%9F%E9%A1%B9%E7%9B%AE%E4%BF%A1%E6%81%AF)
+
+This revised version is based on:
+
+-   **Original project** : [Friction](https://friction.graphics/)
+-   **Original author** : Ole-André Rodlie and contributors
+-   **Original project on GitHub** : [https://github.com/friction2d/friction](https://github.com/friction2d/friction)
+
+## 📖 Build Instructions
+
+[](https://github.com/GhaniDz/friction-modified#-%E6%9E%84%E5%BB%BA%E8%AF%B4%E6%98%8E)
+
+-   [Linux](https://friction.graphics/documentation/source-linux.html)
+-   [Windows](https://friction.graphics/documentation/source-windows.html)
+-   [macOS](https://friction.graphics/documentation/source-macos.html)
+
+## 📄 License
+
+[](https://github.com/GhaniDz/friction-modified#-%E8%AE%B8%E5%8F%AF%E8%AF%81)
+
+This project retains the same license as the original project:
+
+Friction is copyright © Ole-André Rodlie and contributors.
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 3.
 
-**This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the [GNU General Public License](LICENSE.md) for more details.**
+**This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the [GNU General Public License](https://github.com/GhaniDz/friction-modified/blob/main/LICENSE.md) for more details.**
 
-Friction is based on [enve](https://github.com/MaurycyLiebner/enve) - Copyright &copy; Maurycy Liebner and contributors.
+Friction is based on [enve](https://github.com/MaurycyLiebner/enve) - Copyright © Maurycy Liebner and contributors.
 
 Third-party software may contain other OSS licenses, see 'Help' > 'About' > 'Licenses' in Friction.
 
