@@ -27,351 +27,75 @@
 
 #include "Boxes/boundingbox.h"
 #include "Animators/transformanimator.h"
-#include "Animators/qpointfanimator.h"
 #include "Animators/qrealanimator.h"
-#include "Animators/qrealkey.h"
 #include "matrixdecomposition.h"
+#include "skia/skiahelpers.h"
+#include "simplemath.h"
 
-#include <set>
+ParentEffect::ParentEffect()
+    : FollowObjectEffectBase("parent",
+                             TransformEffectType::parent)
+{
+    prp_enabledDrawingOnCanvas();
 
-namespace {
+    auto connectInfluence = [this](QrealAnimator* const animator) {
+        connect(animator, &QrealAnimator::effectiveValueChanged,
+                this, [this]() { handleInfluenceChanged(); });
+    };
 
-void collectAnimatorFrames(Animator* const animator,
-                           std::set<int>& frames) {
-    if(!animator) return;
-    for(const auto &key : animator->anim_getKeys()) {
-        frames.insert(key->getAbsFrame());
-    }
+    connectInfluence(mPosInfluence->getXAnimator());
+    connectInfluence(mPosInfluence->getYAnimator());
+    connectInfluence(mScaleInfluence->getXAnimator());
+    connectInfluence(mScaleInfluence->getYAnimator());
+    connectInfluence(mRotInfluence.get());
+
+    connect(targetProperty(), &BoxTargetProperty::setActionFinished,
+            this, [this](BoundingBox* const,
+                         BoundingBox* const newTarget) {
+        mBindStateValid = false;
+        mDeltaAngleStateValid = false;
+        mNoFollowStateValid = false;
+        if (newTarget) {
+            const auto parent = getFirstAncestor<BoundingBox>();
+            if (parent) {
+                captureBindState(parent->anim_getCurrentRelFrame());
+            }
+        }
+    });
 }
 
-void collectQPointAnimatorFrames(QPointFAnimator* const animator,
-                                 std::set<int>& frames) {
-    if(!animator) return;
-    collectAnimatorFrames(animator->getXAnimator(), frames);
-    collectAnimatorFrames(animator->getYAnimator(), frames);
-}
+void ParentEffect::prp_drawCanvasControls(SkCanvas * const canvas,
+                                          const CanvasMode mode,
+                                          const float invScale,
+                                          const bool ctrlPressed)
+{
+    Q_UNUSED(mode)
+    Q_UNUSED(ctrlPressed)
 
-void collectTransformFrames(BasicTransformAnimator* const animator,
-                            std::set<int>& frames) {
-    if(!animator) return;
-    collectQPointAnimatorFrames(animator->getPosAnimator(), frames);
-    collectQPointAnimatorFrames(animator->getScaleAnimator(), frames);
-    collectAnimatorFrames(animator->getRotAnimator(), frames);
-    const auto advancedAnimator = static_cast<AdvancedTransformAnimator*>(animator);
-    collectQPointAnimatorFrames(advancedAnimator->getPivotAnimator(), frames);
-    collectQPointAnimatorFrames(advancedAnimator->getShearAnimator(), frames);
-}
+    if (!isVisible()) { return; }
 
-void setKeyValue(QrealAnimator* const animator,
-                 const int absFrame,
-                 const qreal value) {
-    if(!animator) return;
-    const auto key = animator->anim_getKeyAtAbsFrame<QrealKey>(absFrame);
-    if(!key) return;
-    key->startValueTransform();
-    key->setValue(value);
-    key->finishValueTransform();
-}
+    const auto parent = getFirstAncestor<BoundingBox>();
+    const auto target = targetProperty()->getTarget();
+    if (!parent || !target) { return; }
 
-void setBaseValueIfUnkeyed(QrealAnimator* const animator,
-                           const qreal value) {
-    if(!animator || animator->anim_hasKeys()) return;
-    animator->setCurrentBaseValue(value);
-}
-
-void applyCurrentBaseValues(AdvancedTransformAnimator* const animator,
-                            const TransformValues& values) {
-    if(!animator) return;
-    setBaseValueIfUnkeyed(animator->getPosAnimator()->getXAnimator(), values.fMoveX);
-    setBaseValueIfUnkeyed(animator->getPosAnimator()->getYAnimator(), values.fMoveY);
-    setBaseValueIfUnkeyed(animator->getScaleAnimator()->getXAnimator(), values.fScaleX);
-    setBaseValueIfUnkeyed(animator->getScaleAnimator()->getYAnimator(), values.fScaleY);
-    setBaseValueIfUnkeyed(animator->getRotAnimator(), values.fRotation);
-    setBaseValueIfUnkeyed(animator->getPivotAnimator()->getXAnimator(), values.fPivotX);
-    setBaseValueIfUnkeyed(animator->getPivotAnimator()->getYAnimator(), values.fPivotY);
-    setBaseValueIfUnkeyed(animator->getShearAnimator()->getXAnimator(), values.fShearX);
-    setBaseValueIfUnkeyed(animator->getShearAnimator()->getYAnimator(), values.fShearY);
-}
-
-void applyExistingKeyValues(AdvancedTransformAnimator* const animator,
-                            const int absFrame,
-                            const TransformValues& values) {
-    if(!animator) return;
-    setKeyValue(animator->getPosAnimator()->getXAnimator(), absFrame, values.fMoveX);
-    setKeyValue(animator->getPosAnimator()->getYAnimator(), absFrame, values.fMoveY);
-    setKeyValue(animator->getScaleAnimator()->getXAnimator(), absFrame, values.fScaleX);
-    setKeyValue(animator->getScaleAnimator()->getYAnimator(), absFrame, values.fScaleY);
-    setKeyValue(animator->getRotAnimator(), absFrame, values.fRotation);
-    setKeyValue(animator->getPivotAnimator()->getXAnimator(), absFrame, values.fPivotX);
-    setKeyValue(animator->getPivotAnimator()->getYAnimator(), absFrame, values.fPivotY);
-    setKeyValue(animator->getShearAnimator()->getXAnimator(), absFrame, values.fShearX);
-    setKeyValue(animator->getShearAnimator()->getYAnimator(), absFrame, values.fShearY);
-}
-
-void coordinateVec2AnimatorKeys(QPointFAnimator* const animator) {
-    if(!animator) return;
-    auto * const x = animator->getXAnimator();
-    auto * const y = animator->getYAnimator();
-    if(!x || !y) return;
-    x->anim_coordinateKeysWith(y);
-}
-
-void calculateParentEffectContribution(
-        const TargetTransformEffect* const effect,
-        BoundingBox* const target,
-        QPointFAnimator* const posInfluence,
-        QPointFAnimator* const scaleInfluence,
-        QrealAnimator* const rotInfluence,
-        const qreal relFrame,
-        QMatrix& postTransform,
-        qreal& rotDelta) {
-    postTransform.reset();
-    rotDelta = 0.;
-    if(!effect || !target || !posInfluence || !scaleInfluence ||
-       !rotInfluence || !effect->isVisible()) return;
-
-    const qreal absFrame = effect->prp_relFrameToAbsFrameF(relFrame);
+    const qreal relFrame = parent->anim_getCurrentRelFrame();
+    const qreal absFrame = prp_relFrameToAbsFrameF(relFrame);
     const qreal targetRelFrame = target->prp_absFrameToRelFrameF(absFrame);
-    const auto targetTransform = target->getTransformAnimator()->
-            getRelativeTransformAtFrame(targetRelFrame);
-    const auto targetPivot = target->getPivotRelPos(targetRelFrame);
-    const auto targetValues =
-            MatrixDecomposition::decomposePivoted(targetTransform, targetPivot);
+    const QPointF childPivotAbs = parent->getPivotAbsPos(relFrame);
+    const QPointF targetPivotAbs = target->getPivotAbsPos(targetRelFrame);
 
-    const qreal posXInfl = qBound(-10.0, posInfluence->getEffectiveXValue(relFrame), 10.0);
-    const qreal posYInfl = qBound(-10.0, posInfluence->getEffectiveYValue(relFrame), 10.0);
-    const qreal scaleXInfl = qBound(-10.0, scaleInfluence->getEffectiveXValue(relFrame), 10.0);
-    const qreal scaleYInfl = qBound(-10.0, scaleInfluence->getEffectiveYValue(relFrame), 10.0);
-    const qreal rotInfl = qBound(-10.0, rotInfluence->getEffectiveValue(relFrame), 10.0);
-    if(!std::isfinite(posXInfl) || !std::isfinite(posYInfl) ||
-       !std::isfinite(scaleXInfl) || !std::isfinite(scaleYInfl) ||
-       !std::isfinite(rotInfl)) {
-        return;
-    }
+    SkPath pivotLink;
+    pivotLink.moveTo(toSkScalar(childPivotAbs.x()),
+                     toSkScalar(childPivotAbs.y()));
+    pivotLink.lineTo(toSkScalar(targetPivotAbs.x()),
+                     toSkScalar(targetPivotAbs.y()));
 
-    TransformValues influencedValues = targetValues;
-    influencedValues.fMoveX = targetValues.fMoveX * posXInfl;
-    influencedValues.fMoveY = targetValues.fMoveY * posYInfl;
-    influencedValues.fScaleX = 1.0 + (targetValues.fScaleX - 1.0) * scaleXInfl;
-    influencedValues.fScaleY = 1.0 + (targetValues.fScaleY - 1.0) * scaleYInfl;
-    influencedValues.fRotation = targetValues.fRotation;
-    postTransform = influencedValues.calculate();
-
-    const bool zeroRotInfluence = std::abs(rotInfl) < 1e-6;
-    const qreal desiredRotation = zeroRotInfluence
-            ? -targetValues.fRotation
-            : targetValues.fRotation * rotInfl;
-    const qreal rotDeltaZero = -targetValues.fRotation;
-    const qreal rotDeltaFull = desiredRotation - influencedValues.fRotation;
-    if(rotInfl >= 0.0 && rotInfl <= 1.0) {
-        const qreal t = rotInfl;
-        rotDelta = rotDeltaZero + t * (rotDeltaFull - rotDeltaZero);
-    } else if(zeroRotInfluence) {
-        rotDelta = rotDeltaZero;
-    } else {
-        rotDelta = rotDeltaFull;
-    }
-}
-
-}
-
-ParentEffect::ParentEffect() :
-    FollowObjectEffectBase("parent", TransformEffectType::parent) {}
-
-void ParentEffect::beforeTargetChanged(BoundingBox* const parent,
-                                       BoundingBox* const oldTarget,
-                                       BoundingBox* const newTarget)
-{
-    Q_UNUSED(oldTarget)
-    Q_UNUSED(newTarget)
-
-    mTargetChangeCurrentFrameValid = false;
-    mTargetChangeFrames.clear();
-    mTargetChangeTotalTransforms.clear();
-
-    if(!parent) return;
-
-    const qreal currentRelFrame = parent->anim_getCurrentRelFrame();
-    mTargetChangeCurrentFrame = parent->anim_getCurrentAbsFrame();
-    mTargetChangeCurrentTotalTransform =
-            parent->getTotalTransformAtFrame(currentRelFrame);
-    mTargetChangeCurrentFrameValid = true;
-
-    std::set<int> frames;
-    collectTransformFrames(parent->getTransformAnimator(), frames);
-    if(frames.empty()) return;
-
-    mTargetChangeFrames.reserve(int(frames.size()));
-    mTargetChangeTotalTransforms.reserve(int(frames.size()));
-    for(const int absFrame : frames) {
-        const qreal relFrame = parent->prp_absFrameToRelFrameF(absFrame);
-        mTargetChangeFrames.append(absFrame);
-        mTargetChangeTotalTransforms.append(
-                parent->getTotalTransformAtFrame(relFrame));
-    }
-}
-
-bool ParentEffect::applyTargetChangeCompensation(BoundingBox* const parent,
-                                                 BoundingBox* const oldTarget,
-                                                 BoundingBox* const newTarget)
-{
-    if(!parent || !mTargetChangeCurrentFrameValid) {
-        mTargetChangeCurrentFrameValid = false;
-        mTargetChangeFrames.clear();
-        mTargetChangeTotalTransforms.clear();
-        return false;
-    }
-
-    const int savedFrame = parent->anim_getCurrentAbsFrame();
-    auto * const transformAnimator =
-            static_cast<AdvancedTransformAnimator*>(parent->getTransformAnimator());
-    coordinateVec2AnimatorKeys(transformAnimator->getPosAnimator());
-    coordinateVec2AnimatorKeys(transformAnimator->getScaleAnimator());
-    coordinateVec2AnimatorKeys(transformAnimator->getPivotAnimator());
-    coordinateVec2AnimatorKeys(transformAnimator->getShearAnimator());
-    parent->anim_setAbsFrame(mTargetChangeCurrentFrame);
-    const qreal currentRelFrame = parent->anim_getCurrentRelFrame();
-
-    if(oldTarget && !newTarget) {
-        bool actualInvertible = false;
-        const auto actualTotalNow = parent->getTotalTransformAtFrame(currentRelFrame);
-        const auto actualTotalInverse =
-                actualTotalNow.inverted(&actualInvertible);
-        if(!actualInvertible) {
-            parent->anim_setAbsFrame(savedFrame);
-            mTargetChangeCurrentFrameValid = false;
-            mTargetChangeFrames.clear();
-            mTargetChangeTotalTransforms.clear();
-            return false;
-        }
-
-        const auto delta =
-                mTargetChangeCurrentTotalTransform*actualTotalInverse;
-
-        const auto currentPivot = parent->getPivotRelPos(currentRelFrame);
-        const auto currentRelMatrix = parent->getRelativeTransformAtFrame(currentRelFrame);
-
-        QVector<QMatrix> relMatrices;
-        QVector<QPointF> pivots;
-        relMatrices.reserve(mTargetChangeFrames.size());
-        pivots.reserve(mTargetChangeFrames.size());
-        const int nFrames = mTargetChangeFrames.size();
-        for(int i = 0; i < nFrames; ++i) {
-            const int absFrame = mTargetChangeFrames.at(i);
-            parent->anim_setAbsFrame(absFrame);
-            const qreal relFrame = parent->anim_getCurrentRelFrame();
-            pivots.append(parent->getPivotRelPos(relFrame));
-            relMatrices.append(parent->getRelativeTransformAtFrame(relFrame));
-        }
-
-        {
-            parent->anim_setAbsFrame(mTargetChangeCurrentFrame);
-            const auto targetRelMatrix =
-                    delta*currentRelMatrix;
-            auto values = MatrixDecomposition::decomposePivoted(
-                    targetRelMatrix, currentPivot);
-            values.fPivotX = currentPivot.x();
-            values.fPivotY = currentPivot.y();
-            applyCurrentBaseValues(transformAnimator, values);
-        }
-
-        for(int i = 0; i < nFrames; ++i) {
-            const int absFrame = mTargetChangeFrames.at(i);
-            parent->anim_setAbsFrame(absFrame);
-            const auto pivot = pivots.at(i);
-            const auto targetRelMatrix =
-                    delta*relMatrices.at(i);
-            auto values = MatrixDecomposition::decomposePivoted(
-                    targetRelMatrix, pivot);
-            values.fPivotX = pivot.x();
-            values.fPivotY = pivot.y();
-            applyExistingKeyValues(transformAnimator, absFrame, values);
-        }
-
-        parent->anim_setAbsFrame(savedFrame);
-        mTargetChangeCurrentFrameValid = false;
-        mTargetChangeFrames.clear();
-        mTargetChangeTotalTransforms.clear();
-        return true;
-    }
-
-    bool inheritedInvertible = false;
-    const auto inheritedInverse =
-            parent->getInheritedTransformAtFrame(currentRelFrame)
-            .inverted(&inheritedInvertible);
-    if(!inheritedInvertible) {
-        parent->anim_setAbsFrame(savedFrame);
-        mTargetChangeCurrentFrameValid = false;
-        mTargetChangeFrames.clear();
-        mTargetChangeTotalTransforms.clear();
-        return false;
-    }
-    const auto desiredRelativeTransform =
-            mTargetChangeCurrentTotalTransform*inheritedInverse;
-    QMatrix currentPostTransform;
-    qreal currentRotDelta = 0.;
-    calculateParentEffectContribution(this, targetProperty()->getTarget(),
-                                      mPosInfluence.get(),
-                                      mScaleInfluence.get(),
-                                      mRotInfluence.get(),
-                                      currentRelFrame,
-                                      currentPostTransform,
-                                      currentRotDelta);
-    {
-        const auto pivot = parent->getPivotRelPos(currentRelFrame);
-        bool postInvertible = false;
-        const auto postInverse = currentPostTransform.inverted(&postInvertible);
-        const auto localMatrix = postInvertible ?
-                desiredRelativeTransform*postInverse :
-                desiredRelativeTransform;
-        auto values = MatrixDecomposition::decomposePivoted(
-                localMatrix, pivot);
-        values.fRotation -= currentRotDelta;
-        values.fPivotX = pivot.x();
-        values.fPivotY = pivot.y();
-        applyCurrentBaseValues(transformAnimator, values);
-    }
-
-    const int nFrames = mTargetChangeFrames.size();
-    for(int i = 0; i < nFrames; ++i) {
-        const int absFrame = mTargetChangeFrames.at(i);
-        parent->anim_setAbsFrame(absFrame);
-        const qreal relFrame = parent->anim_getCurrentRelFrame();
-        bool frameInheritedInvertible = false;
-        const auto frameInheritedInverse =
-                parent->getInheritedTransformAtFrame(relFrame)
-                .inverted(&frameInheritedInvertible);
-        if(!frameInheritedInvertible) continue;
-        const auto desiredRel =
-                mTargetChangeTotalTransforms.at(i)*frameInheritedInverse;
-        QMatrix postTransform;
-        qreal rotDelta = 0.;
-        calculateParentEffectContribution(this, targetProperty()->getTarget(),
-                                          mPosInfluence.get(),
-                                          mScaleInfluence.get(),
-                                          mRotInfluence.get(),
-                                          relFrame,
-                                          postTransform,
-                                          rotDelta);
-        const auto pivot = parent->getPivotRelPos(relFrame);
-        bool postInvertible = false;
-        const auto postInverse = postTransform.inverted(&postInvertible);
-        const auto localMatrix = postInvertible ?
-                desiredRel*postInverse :
-                desiredRel;
-        auto values = MatrixDecomposition::decomposePivoted(
-                localMatrix, pivot);
-        values.fRotation -= rotDelta;
-        values.fPivotX = pivot.x();
-        values.fPivotY = pivot.y();
-        applyExistingKeyValues(transformAnimator, absFrame, values);
-    }
-
-    parent->anim_setAbsFrame(savedFrame);
-    mTargetChangeCurrentFrameValid = false;
-    mTargetChangeFrames.clear();
-    mTargetChangeTotalTransforms.clear();
-    return true;
+    SkiaHelpers::drawOutlineOverlay(canvas,
+                                    pivotLink,
+                                    invScale,
+                                    true,
+                                    6.0f,
+                                    SK_ColorWHITE);
 }
 
 void ParentEffect::applyEffect(const qreal relFrame,
@@ -387,30 +111,407 @@ void ParentEffect::applyEffect(const qreal relFrame,
                                QMatrix& postTransform,
                                BoundingBox* const parent)
 {
-    Q_UNUSED(pivotX)
-    Q_UNUSED(pivotY)
-    Q_UNUSED(posX)
-    Q_UNUSED(posY)
-    Q_UNUSED(rot)
-    Q_UNUSED(scaleX)
-    Q_UNUSED(scaleY)
-    Q_UNUSED(shearX)
-    Q_UNUSED(shearY)
+    Q_UNUSED(parent)
 
-    if (!isVisible() || !parent) { return; }
+    if (!isVisible()) { return; }
 
     const auto target = targetProperty()->getTarget();
     if (!target) { return; }
 
-    qreal rotDelta = 0.;
-    calculateParentEffectContribution(this, target,
-                                      mPosInfluence.get(),
-                                      mScaleInfluence.get(),
-                                      mRotInfluence.get(),
-                                      relFrame,
-                                      postTransform,
-                                      rotDelta);
-    rot += rotDelta;
+    const qreal posXInfl = qBound(-10.0,
+                                  mPosInfluence->getEffectiveXValue(relFrame),
+                                  10.0);
+    const qreal posYInfl = qBound(-10.0,
+                                  mPosInfluence->getEffectiveYValue(relFrame),
+                                  10.0);
+    const qreal scaleXInfl = qBound(-10.0,
+                                    mScaleInfluence->getEffectiveXValue(relFrame),
+                                    10.0);
+    const qreal scaleYInfl = qBound(-10.0,
+                                    mScaleInfluence->getEffectiveYValue(relFrame),
+                                    10.0);
+    const qreal rotInfl = qBound(-10.0,
+                                 mRotInfluence->getEffectiveValue(relFrame),
+                                 10.0);
+
+    if (!validateInfluenceValues(posXInfl,
+                                 posYInfl,
+                                 scaleXInfl,
+                                 scaleYInfl,
+                                 rotInfl)) { return; }
+
+    TransformValues baseValues;
+    baseValues.fPivotX = pivotX;
+    baseValues.fPivotY = pivotY;
+    baseValues.fMoveX = posX;
+    baseValues.fMoveY = posY;
+    baseValues.fRotation = rot;
+    baseValues.fScaleX = scaleX;
+    baseValues.fScaleY = scaleY;
+    baseValues.fShearX = shearX;
+    baseValues.fShearY = shearY;
+
+    if (!computeEffectTransform(relFrame,
+                                baseValues,
+                                posXInfl,
+                                posYInfl,
+                                scaleXInfl,
+                                scaleYInfl,
+                                rotInfl,
+                                postTransform,
+                                true)) { return; }
+
+    if (!mPrevInfluenceValid) {
+        mPrevPosInfluence = {posXInfl, posYInfl};
+        mPrevScaleInfluence = {scaleXInfl, scaleYInfl};
+        mPrevRotInfluence = rotInfl;
+        mPrevInfluenceValid = true;
+    }
+}
+
+bool ParentEffect::computeEffectTransform(const qreal relFrame,
+                                          const TransformValues& baseValues,
+                                          const qreal posXInfl,
+                                          const qreal posYInfl,
+                                          const qreal scaleXInfl,
+                                          const qreal scaleYInfl,
+                                          const qreal rotInfl,
+                                          QMatrix& outPostTransform,
+                                          const bool updateState)
+{
+    if (!isVisible()) { return false; }
+
+    const auto parent = getFirstAncestor<BoundingBox>();
+    if (!parent) { return false; }
+
+    const auto target = targetProperty()->getTarget();
+    if (!target) { return false; }
+
+    if (!validateInfluenceValues(posXInfl,
+                                 posYInfl,
+                                 scaleXInfl,
+                                 scaleYInfl,
+                                 rotInfl)) { return false; }
+
+    const qreal absFrame = prp_relFrameToAbsFrameF(relFrame);
+    const qreal targetRelFrame = target->prp_absFrameToRelFrameF(absFrame);
+
+    if (!ensureBindState(relFrame)) { return false; }
+
+    const QMatrix targetRel = target->getRelativeTransformAtFrame(targetRelFrame);
+    const QMatrix targetInParentSpace = targetRel*mBindTargetParentToParentSpace;
+    const QMatrix targetLinear(targetInParentSpace.m11(),
+                               targetInParentSpace.m12(),
+                               targetInParentSpace.m21(),
+                               targetInParentSpace.m22(),
+                               0.0, 0.0);
+
+    const QPointF targetPivotRel = target->getPivotRelPos(targetRelFrame);
+    const QPointF targetPivotInParent = targetInParentSpace.map(targetPivotRel);
+
+    bool bindLinearInvertible = false;
+    const QMatrix bindLinearInv = mBindTargetLinearInParent.inverted(&bindLinearInvertible);
+    if (!bindLinearInvertible) { return false; }
+
+    const QMatrix deltaLinear = targetLinear*bindLinearInv;
+    const TransformValues deltaValues = MatrixDecomposition::decompose(deltaLinear);
+    const qreal rawDeltaAngle = std::atan2(deltaLinear.m12(),
+                                           deltaLinear.m11());
+
+    if (!mDeltaAngleStateValid) {
+        mAccumDeltaAngleRad = rawDeltaAngle;
+        mDeltaAngleStateValid = true;
+    } else {
+        // Continuous unwrap without random-walk accumulation:
+        // choose the raw angle equivalent closest to previous accumulated value.
+        const qreal twoPi = 2.0*PI;
+        const qreal wraps = std::round((rawDeltaAngle - mAccumDeltaAngleRad)/twoPi);
+        mAccumDeltaAngleRad = rawDeltaAngle - wraps*twoPi;
+    }
+
+    TransformValues linearValues;
+    applyInfluenceToTransform(linearValues,
+                              deltaValues,
+                              0.0,
+                              0.0,
+                              scaleXInfl,
+                              scaleYInfl);
+    linearValues.fRotation = (mAccumDeltaAngleRad*180.0/PI)*rotInfl;
+    linearValues.fShearX = deltaValues.fShearX*scaleXInfl;
+    linearValues.fShearY = deltaValues.fShearY*scaleYInfl;
+
+    const QMatrix linear = linearValues.calculate();
+
+    const QPointF objectPivotLocal(baseValues.fPivotX,
+                                   baseValues.fPivotY);
+    const QPointF objectPivotInParent = baseValues.calculate().map(objectPivotLocal);
+
+    if (updateState) {
+        if (mLastBaseMoveValid) {
+            const QPointF baseMoveDelta(baseValues.fMoveX - mLastBaseMove.x(),
+                                        baseValues.fMoveY - mLastBaseMove.y());
+            const QPointF mappedDelta = mapLinear(linear, baseMoveDelta);
+            QPointF bindDelta = mappedDelta;
+
+            // Partial position influence requires compensating how bind offset
+            // contributes to the final pivot: final ~= ((1-p)I + p*linear)*bind.
+            const qreal a = (1.0 - posXInfl) + posXInfl*linear.m11();
+            const qreal b = posXInfl*linear.m21();
+            const qreal c = posYInfl*linear.m12();
+            const qreal d = (1.0 - posYInfl) + posYInfl*linear.m22();
+            const qreal det = a*d - b*c;
+            if (std::abs(det) > 1e-6) {
+                bindDelta.setX(( d*mappedDelta.x() - b*mappedDelta.y())/det);
+                bindDelta.setY((-c*mappedDelta.x() + a*mappedDelta.y())/det);
+            }
+            if (!isZero6Dec(bindDelta.x()) || !isZero6Dec(bindDelta.y())) {
+                // Treat child position edits as a bind-offset adjustment so
+                // translation can be edited while linked (same behavior as rotation).
+                mBindObjectPivotInParent.rx() += bindDelta.x();
+                mBindObjectPivotInParent.ry() += bindDelta.y();
+                if (mNoFollowStateValid) {
+                    mNoFollowPivotState.rx() += bindDelta.x();
+                    mNoFollowPivotState.ry() += bindDelta.y();
+                }
+            }
+        }
+        mLastBaseMove = QPointF(baseValues.fMoveX,
+                                baseValues.fMoveY);
+        mLastBaseMoveValid = true;
+    }
+    const QPointF bindOffset(mBindObjectPivotInParent.x() - mBindTargetPivotInParent.x(),
+                             mBindObjectPivotInParent.y() - mBindTargetPivotInParent.y());
+    const QPointF transformedBindOffset = mapLinear(linear, bindOffset);
+
+    // No translation follow is evaluated incrementally:
+    // pure target translation should not move the child, but changes in
+    // rotation/scale/shear should be applied around the current target pivot.
+    QPointF noFollowPivot = mBindObjectPivotInParent;
+    if (mNoFollowStateValid) {
+        bool prevLinearInvertible = false;
+        const QMatrix prevLinearInv = mNoFollowLinearState.inverted(&prevLinearInvertible);
+        if (prevLinearInvertible) {
+            const QMatrix deltaLinearStep = linear*prevLinearInv;
+            const QPointF prevRel(mNoFollowPivotState.x() - targetPivotInParent.x(),
+                                  mNoFollowPivotState.y() - targetPivotInParent.y());
+            const QPointF nextRel = mapLinear(deltaLinearStep, prevRel);
+            noFollowPivot = QPointF(targetPivotInParent.x() + nextRel.x(),
+                                    targetPivotInParent.y() + nextRel.y());
+        } else {
+            noFollowPivot = mNoFollowPivotState;
+        }
+    }
+
+    // Full translation follow: move with target while keeping rotated/scaled bind offset.
+    const QPointF fullFollowPivot(targetPivotInParent.x() + transformedBindOffset.x(),
+                                  targetPivotInParent.y() + transformedBindOffset.y());
+
+    const QPointF finalPivot(noFollowPivot.x() +
+                             (fullFollowPivot.x() - noFollowPivot.x())*posXInfl,
+                             noFollowPivot.y() +
+                             (fullFollowPivot.y() - noFollowPivot.y())*posYInfl);
+
+    // Solve affine translation so objectPivotInParent maps to finalPivot.
+    const QPointF linearAtObjectPivot = mapLinear(linear, objectPivotInParent);
+    const QPointF offset(finalPivot.x() - linearAtObjectPivot.x(),
+                         finalPivot.y() - linearAtObjectPivot.y());
+
+    outPostTransform = QMatrix(linear.m11(), linear.m12(),
+                               linear.m21(), linear.m22(),
+                               offset.x(), offset.y());
+
+    if (updateState) {
+        mNoFollowPivotState = noFollowPivot;
+        mNoFollowLinearState = linear;
+        mNoFollowStateValid = true;
+    }
+    return true;
+}
+
+void ParentEffect::captureBindState(const qreal relFrame)
+{
+    const auto parent = getFirstAncestor<BoundingBox>();
+    const auto target = targetProperty()->getTarget();
+    if (!parent || !target) {
+        mBindStateValid = false;
+        return;
+    }
+
+    const qreal absFrame = prp_relFrameToAbsFrameF(relFrame);
+    const qreal targetRelFrame = target->prp_absFrameToRelFrameF(absFrame);
+
+    const QMatrix inherited = parent->getInheritedTransformAtFrame(relFrame);
+    bool inheritedInvertible = false;
+    const QMatrix inheritedInv = inherited.inverted(&inheritedInvertible);
+    if (!inheritedInvertible) {
+        mBindStateValid = false;
+        return;
+    }
+
+    const QMatrix targetInherited = target->getInheritedTransformAtFrame(targetRelFrame);
+    mBindTargetParentToParentSpace = targetInherited*inheritedInv;
+    const QMatrix targetRel = target->getRelativeTransformAtFrame(targetRelFrame);
+    const QMatrix targetInParentSpace = targetRel*mBindTargetParentToParentSpace;
+    const QMatrix targetLinear(targetInParentSpace.m11(),
+                               targetInParentSpace.m12(),
+                               targetInParentSpace.m21(),
+                               targetInParentSpace.m22(),
+                               0.0, 0.0);
+
+    const QPointF objectPivotAbs = parent->getPivotAbsPos(relFrame);
+    const QPointF objectPivotInParent = inheritedInv.map(objectPivotAbs);
+    const QPointF targetPivotRel = target->getPivotRelPos(targetRelFrame);
+    const QPointF targetPivotInParent = targetInParentSpace.map(targetPivotRel);
+
+    mBindTargetPivotInParent = targetPivotInParent;
+    mBindObjectPivotInParent = objectPivotInParent;
+    mBindTargetLinearInParent = targetLinear;
+    mBindStateValid = true;
+    mAccumDeltaAngleRad = 0.0;
+    mDeltaAngleStateValid = false;
+    mNoFollowPivotState = objectPivotInParent;
+    mNoFollowLinearState = QMatrix();
+    mNoFollowStateValid = true;
+    const auto transform = parent->getBoxTransformAnimator();
+
+    if (transform) {
+        const TransformValues baseValues = getCurrentBaseValues(transform,
+                                                                relFrame);
+        mLastBaseMove = QPointF(baseValues.fMoveX,
+                                baseValues.fMoveY);
+        mLastBaseMoveValid = true;
+    } else {
+        mLastBaseMove = QPointF(0.0, 0.0);
+        mLastBaseMoveValid = false;
+    }
+}
+
+bool ParentEffect::ensureBindState(const qreal relFrame)
+{
+    if (mBindStateValid) { return true; }
+    captureBindState(relFrame);
+    return mBindStateValid;
+}
+
+void ParentEffect::handleInfluenceChanged()
+{
+    const auto parent = getFirstAncestor<BoundingBox>();
+    if (!parent) {
+        updatePrevInfluences(anim_getCurrentRelFrame());
+        return;
+    }
+
+    const auto transform = parent->getBoxTransformAnimator();
+    if (!transform) {
+        updatePrevInfluences(parent->anim_getCurrentRelFrame());
+        return;
+    }
+
+    const qreal relFrame = parent->anim_getCurrentRelFrame();
+
+    const qreal posXInfl = qBound(-10.0,
+                                  mPosInfluence->getEffectiveXValue(relFrame),
+                                  10.0);
+    const qreal posYInfl = qBound(-10.0,
+                                  mPosInfluence->getEffectiveYValue(relFrame),
+                                  10.0);
+    const qreal scaleXInfl = qBound(-10.0,
+                                    mScaleInfluence->getEffectiveXValue(relFrame),
+                                    10.0);
+    const qreal scaleYInfl = qBound(-10.0,
+                                    mScaleInfluence->getEffectiveYValue(relFrame),
+                                    10.0);
+    const qreal rotInfl = qBound(-10.0,
+                                 mRotInfluence->getEffectiveValue(relFrame),
+                                 10.0);
+
+    if (!mPrevInfluenceValid) {
+        mPrevPosInfluence = {posXInfl, posYInfl};
+        mPrevScaleInfluence = {scaleXInfl, scaleYInfl};
+        mPrevRotInfluence = rotInfl;
+        mPrevInfluenceValid = true;
+        if (!mBindStateValid) {
+            captureBindState(relFrame);
+        }
+        return;
+    }
+
+    if (isZero6Dec(posXInfl - mPrevPosInfluence.x()) &&
+       isZero6Dec(posYInfl - mPrevPosInfluence.y()) &&
+       isZero6Dec(scaleXInfl - mPrevScaleInfluence.x()) &&
+       isZero6Dec(scaleYInfl - mPrevScaleInfluence.y()) &&
+       isZero6Dec(rotInfl - mPrevRotInfluence)) { return; }
+
+    const TransformValues baseValues = getCurrentBaseValues(transform,
+                                                            relFrame);
+
+    QMatrix oldPost;
+    if (!computeEffectTransform(relFrame,
+                                baseValues,
+                                mPrevPosInfluence.x(),
+                                mPrevPosInfluence.y(),
+                                mPrevScaleInfluence.x(),
+                                mPrevScaleInfluence.y(),
+                                mPrevRotInfluence,
+                                oldPost,
+                                false)) {
+        updatePrevInfluences(relFrame);
+        return;
+    }
+
+    QMatrix newPost;
+    if (!computeEffectTransform(relFrame,
+                                baseValues,
+                                posXInfl,
+                                posYInfl,
+                                scaleXInfl,
+                                scaleYInfl,
+                                rotInfl,
+                                newPost,
+                                false)) {
+        updatePrevInfluences(relFrame);
+        return;
+    }
+
+    bool invertible = false;
+    const QMatrix invNewPost = newPost.inverted(&invertible);
+    if (!invertible) {
+        updatePrevInfluences(relFrame);
+        return;
+    }
+
+    const QMatrix baseRel = baseValues.calculate();
+    const QMatrix newBaseRel = baseRel*oldPost*invNewPost;
+
+    TransformValues newValues = MatrixDecomposition::decomposePivoted(newBaseRel,
+                                                                      QPointF(baseValues.fPivotX,
+                                                                              baseValues.fPivotY));
+
+    transform->startTransformSkipOpacity();
+    transform->setValues(newValues);
+    transform->prp_finishTransform();
+
+    updatePrevInfluences(relFrame);
+}
+
+void ParentEffect::updatePrevInfluences(const qreal relFrame)
+{
+    mPrevPosInfluence = {qBound(-10.0,
+                                mPosInfluence->getEffectiveXValue(relFrame),
+                                10.0),
+                         qBound(-10.0,
+                                mPosInfluence->getEffectiveYValue(relFrame),
+                                10.0)};
+    mPrevScaleInfluence = {qBound(-10.0,
+                                  mScaleInfluence->getEffectiveXValue(relFrame),
+                                  10.0),
+                           qBound(-10.0,
+                                  mScaleInfluence->getEffectiveYValue(relFrame),
+                                  10.0)};
+    mPrevRotInfluence = qBound(-10.0,
+                               mRotInfluence->getEffectiveValue(relFrame),
+                               10.0);
+    mPrevInfluenceValid = true;
 }
 
 bool ParentEffect::validateInfluenceValues(const qreal posXInfl,
@@ -435,8 +536,61 @@ void ParentEffect::applyInfluenceToTransform(TransformValues& values,
 {
     values.fMoveX = targetValues.fMoveX * posXInfl;
     values.fMoveY = targetValues.fMoveY * posYInfl;
-    
-    // Scale influence: interpolate between no scaling (1.0) and target scaling
+
+    // Scale influence interpolates around identity to avoid drift.
     values.fScaleX = 1.0 + (targetValues.fScaleX - 1.0) * scaleXInfl;
     values.fScaleY = 1.0 + (targetValues.fScaleY - 1.0) * scaleYInfl;
+}
+
+TransformValues ParentEffect::getCurrentBaseValues(BoxTransformAnimator * const transform,
+                                                   const qreal relFrame) const
+{
+    TransformValues values;
+    if (!transform) { return values; }
+
+    if (const auto &pivotAnim = transform->getPivotAnimator()) {
+        values.fPivotX = pivotAnim->getEffectiveXValue(relFrame);
+        values.fPivotY = pivotAnim->getEffectiveYValue(relFrame);
+    }
+    if (const auto &posAnim = transform->getPosAnimator()) {
+        values.fMoveX = posAnim->getEffectiveXValue(relFrame);
+        values.fMoveY = posAnim->getEffectiveYValue(relFrame);
+    }
+    if (const auto &rotAnim = transform->getRotAnimator()) {
+        values.fRotation = rotAnim->getEffectiveValue(relFrame);
+    }
+    if (const auto &scaleAnim = transform->getScaleAnimator()) {
+        values.fScaleX = scaleAnim->getEffectiveXValue(relFrame);
+        values.fScaleY = scaleAnim->getEffectiveYValue(relFrame);
+    }
+    if (const auto &shearAnim = transform->getShearAnimator()) {
+        values.fShearX = shearAnim->getEffectiveXValue(relFrame);
+        values.fShearY = shearAnim->getEffectiveYValue(relFrame);
+    }
+
+    return values;
+}
+
+// -- fork compatibility shims ----------------------------------------------
+// The fork's TargetTransformEffect declares these virtuals; upstream's
+// bind-state system replaces the old target-change compensation, so these
+// are kept as no-ops to satisfy the vtable.
+
+void ParentEffect::beforeTargetChanged(BoundingBox* const parent,
+                                       BoundingBox* const oldTarget,
+                                       BoundingBox* const newTarget)
+{
+    Q_UNUSED(parent)
+    Q_UNUSED(oldTarget)
+    Q_UNUSED(newTarget)
+}
+
+bool ParentEffect::applyTargetChangeCompensation(BoundingBox* const parent,
+                                                 BoundingBox* const oldTarget,
+                                                 BoundingBox* const newTarget)
+{
+    Q_UNUSED(parent)
+    Q_UNUSED(oldTarget)
+    Q_UNUSED(newTarget)
+    return false;
 }

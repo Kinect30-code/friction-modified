@@ -56,13 +56,20 @@ void NodeList::updateDissolvedNodePosition(const int nodeId) {
 }
 
 void NodeList::updateDissolvedNodePosition(const int nodeId,
-                                           Node * const node) {
-    if(!node || node->isNormal()) {
-        qWarning() << "updateDissolvedNodePosition: unsupported node type or null";
+                                           Node * const node)
+{
+    if (node->isNormal()) {
+        qWarning() << "Warning: updateDissolvedNodePosition called on normal node.";
         return;
     }
+
     const Node * const prevNode = prevNormal(nodeId);
     const Node * const nextNode = nextNormal(nodeId);
+
+    if (!prevNode || !nextNode) {
+        return;
+    }
+
     const auto normalSeg = gSegmentFromNodes(*prevNode, *nextNode);
     node->mP1 = normalSeg.posAtT(node->mT);
 }
@@ -145,13 +152,17 @@ void NodeList::removeNodeFromList(const int nodeId) {
     mNodes.removeAt(nodeId);
 }
 
-Node *NodeList::insertNodeToList(const int nodeId, const Node &node) {
-    if(nodeId < 0 || nodeId > mNodes.count()) {
-        qWarning() << "insertNodeToList: wrong insert id" << nodeId;
-        return nullptr;
+Node *NodeList::insertNodeToList(const int nodeId, const Node &node)
+{
+    int safeId = nodeId;
+    if (safeId < 0 || safeId > mNodes.count()) {
+        qWarning() << "InsertNodeToList: Wrong insert id" << safeId << "Clamping to valid range.";
+        if (safeId < 0) { safeId = 0; }
+        if (safeId > mNodes.count()) { safeId = mNodes.count(); }
     }
-    mNodes.insert(nodeId, node);
-    Node * const insertedNode = mNodes[nodeId];
+
+    mNodes.insert(safeId, node);
+    Node * const insertedNode = mNodes[safeId];
     return insertedNode;
 }
 
@@ -391,9 +402,10 @@ void NodeList::splitNodeAndDisconnect(const int nodeId) {
     splitNode(nodeId);
 }
 
-void NodeList::mergeNodes(const int node1Id, const int node2Id) {
-    if(!nodesConnected(node1Id, node2Id)) {
-        qWarning() << "mergeNodes: only neighbouring connected nodes can be merged";
+void NodeList::mergeNodes(const int node1Id, const int node2Id)
+{
+    if (!nodesConnected(node1Id, node2Id)) {
+        qWarning() << "Only neighbouring connected nodes can be merged" << node1Id << node2Id;
         return;
     }
     const int resId = qMin(node1Id, node2Id);
@@ -435,12 +447,14 @@ void gCubicTo(const Node& prevNode, const Node& nextNode,
     dissolvedTs.clear();
 }
 
-SkPath NodeList::toSkPath() const {
+SkPath NodeList::toSkPath() const
+{
     SkPath result;
 
-    if(mNodes.isEmpty()) return result;
+    if (mNodes.isEmpty()) { return result; }
+    if (!at(0)) { return result; }
 
-    if(at(0)->isDissolved()) {
+    if (at(0)->isDissolved()) {
         auto copy = *this;
         copy.promoteDissolvedNodeToNormal(0);
         return copy.toSkPath();
@@ -453,10 +467,11 @@ SkPath NodeList::toSkPath() const {
 
     bool move = true;
     for(const auto& node : mNodes) {
-        if(node->isDissolved()) {
+        if (!node) { continue; }
+        if (node->isDissolved()) {
             dissolvedTs << node->t();
-        } else if(node->isNormal()) {
-            if(move) {
+        } else if (node->isNormal()) {
+            if (move) {
                 firstNode = node.get();
                 result.moveTo(toSkPoint(node->p1()));
                 move = false;
@@ -466,14 +481,16 @@ SkPath NodeList::toSkPath() const {
             }
             prevNormalNode = node.get();
         } else {
-            qWarning() << "toSkPath: unrecognized node type, skipping";
+                qWarning() << "Unrecognized node type in toSkPath. Skipping node.";
             continue;
         }
     }
-    if(isClosed()) {
+
+    if (isClosed() && firstNode && prevNormalNode) {
         gCubicTo(*prevNormalNode, *firstNode, dissolvedTs, result);
         result.close();
     }
+
     return result;
 }
 
@@ -692,15 +709,23 @@ Node * NodeList::nextNormal(const int nodeId) const {
 
 NodeList NodeList::sInterpolate(const NodeList &list1,
                                 const NodeList &list2,
-                                const qreal weight2) {
-    if(list1.count() != list2.count()) {
-        qWarning() << "sInterpolate: cannot interpolate paths with different node count";
-        return list1;
+                                const qreal weight2)
+{
+    // "hold keyframe" fallback
+    auto fallbackHold = [&]() {
+        return (weight2 < 0.5) ? list1 : list2;
+    };
+
+    if (list1.count() != list2.count()) {
+        qWarning() << "Interpolate: Cannot interpolate paths with different node count.";
+        return fallbackHold();
     }
-    if(list1.isClosed() != list2.isClosed()) {
-        qWarning() << "sInterpolate: cannot interpolate a closed path with an open path";
-        return list1;
+
+    if (list1.isClosed() != list2.isClosed()) {
+        qWarning() << "Interpolate: Cannot interpolate a closed path with an open path.";
+        return fallbackHold();
     }
+
     NodeList list1Cpy = list1;
     NodeList list2Cpy = list2;
     const bool closed = list1Cpy.isClosed();
@@ -708,33 +733,36 @@ NodeList NodeList::sInterpolate(const NodeList &list1,
     result.setClosed(closed);
     ListOfNodes& resultList = result.getList();
     const int listCount = list1Cpy.count();
-    for(int i = 0; i < listCount; i++) {
+
+    for (int i = 0; i < listCount; i++) {
         const Node * const node1 = list1Cpy.at(i);
         const Node * const node2 = list2Cpy.at(i);
-        if(node1->getType() == node2->getType()) continue;
-        if(node1->isDissolved()) {
+
+        if (node1->getType() == node2->getType()) { continue; }
+
+        if (node1->isDissolved()) {
             list1Cpy.promoteDissolvedNodeToNormal(i);
-        } else if(node2->isDissolved()) {
+        } else if (node2->isDissolved()) {
             list2Cpy.promoteDissolvedNodeToNormal(i);
         } else {
-            qWarning() << "sInterpolate: nodes with different incompatible types at" << i;
-            return list1;
+            qWarning() << "Interpolate: Nodes with different type should not happen.";
+            return fallbackHold();
         }
     }
-    for(int i = 0; i < listCount; i++) {
+
+    for (int i = 0; i < listCount; i++) {
         const Node * const node1 = list1Cpy.at(i);
         const Node * const node2 = list2Cpy.at(i);
-        if(node1->isNormal() && node2->isNormal()) {
-            const auto normalInter = Node::sInterpolateNormal(
-                        *node1, *node2, weight2);
+
+        if (node1->isNormal() && node2->isNormal()) {
+            const auto normalInter = Node::sInterpolateNormal(*node1, *node2, weight2);
             resultList.append(normalInter);
-        } else if(node1->isDissolved() && node2->isDissolved()) {
-            const auto dissInter = Node::sInterpolateDissolved(
-                        *node1, *node2, weight2);
+        } else if (node1->isDissolved() && node2->isDissolved()) {
+            const auto dissInter = Node::sInterpolateDissolved(*node1, *node2, weight2);
             resultList.append(dissInter);
         } else {
-            qWarning() << "sInterpolate: nodes with different types at" << i;
-            return list1;
+            qWarning() << "Interpolate: Nodes with different type should not happen.";
+            return fallbackHold();
         }
     }
 

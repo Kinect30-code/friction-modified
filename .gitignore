@@ -48,3 +48,8 @@ linuxdeploy-plugin-qt-*
 build_runfix_clang/
 编译
 .claude/
+.trae/
+parenteffect_fork.cpp
+parenteffect_upstream.cpp
+vecb_*
+src/skia/gn-src-tmp/

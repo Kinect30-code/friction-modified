@@ -129,14 +129,16 @@ void AudioHandler::initializeAudio(const QString &deviceName,
     emit deviceChanged();
 }
 
-void AudioHandler::startAudio() {
+bool AudioHandler::startAudio() {
     mAudioIOOutput = mAudioOutput->start();
     if (!mAudioIOOutput) {
         qWarning() << "QAudioOutput::start() returned null — audio will not play"
                    << "device:" << mAudioDevice.deviceName()
                    << "state:" << mAudioOutput->state()
                    << "error:" << mAudioOutput->error();
+        return false;
     }
+    return true;
 }
 
 void AudioHandler::pauseAudio()

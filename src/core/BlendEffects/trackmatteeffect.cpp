@@ -143,32 +143,39 @@ void TrackMatteEffect::detachedBlendSetup(
     const bool isInverted = invert();
     delayed << [boxToDraw, matte, relFrame, isInverted, canvas, filter]
                (int, BoundingBox* prev, BoundingBox* next) {
-        // Match next to boxToDraw, including link target resolution.
+        // Match next to boxToDraw, resolving the full link chain.
+        // For 3+ level nesting: innerLink2 → innerLink1 → originalLayer.
+        // getLinkBoxTarget() only resolves one hop; we resolve all.
         if(!next) {
             return false;
         }
-        if(next != boxToDraw && next->getLinkBoxTarget() != boxToDraw) {
-            return false;
+        if(!BoundingBox::linkChainContains(next, boxToDraw)) return false;
+
+        // Resolve actual matte: if prev's link chain includes the matte
+        // source, then prev is the link proxy that should be used for
+        // rendering (it carries the correct coordinate space).
+        const auto actualBox = next;
+        const BoundingBox* actualMatte = matte;
+        if(BoundingBox::linkChainContains(prev, matte)) {
+            actualMatte = prev;
         }
 
-        // Resolve actual box and matte for link (inner link) case
-        const auto actualBox = next;
-        const auto actualMatte =
-                (prev && prev->getLinkBoxTarget() == matte) ? prev : matte;
-
-        const qreal absFrame = actualBox->prp_relFrameToAbsFrameF(relFrame);
-        const qreal matteRelFrame = matte->prp_absFrameToRelFrameF(absFrame);
+        const qreal absFrame = boxToDraw->prp_relFrameToAbsFrameF(relFrame);
+        const qreal actualBoxRelFrame =
+                actualBox->prp_absFrameToRelFrameF(absFrame);
+        const qreal actualMatteRelFrame =
+                actualMatte->prp_absFrameToRelFrameF(absFrame);
         const auto boxData =
-                actualBox->getLatestFinishedRenderData(relFrame);
+                actualBox->getLatestFinishedRenderData(actualBoxRelFrame);
         const auto matteData =
-                actualMatte->getLatestFinishedRenderData(matteRelFrame);
+                actualMatte->getLatestFinishedRenderData(actualMatteRelFrame);
         const auto boxDrawData =
                 TrackMatteDrawResolver::resolve(
-                        actualBox, relFrame, boxData,
+                        actualBox, actualBoxRelFrame, boxData,
                         TrackMatteDrawResolver::CoordinateMode::Display);
         const auto matteDrawData =
                 TrackMatteDrawResolver::resolve(
-                        actualMatte, matteRelFrame, matteData,
+                        actualMatte, actualMatteRelFrame, matteData,
                         TrackMatteDrawResolver::CoordinateMode::Display);
         if(!boxDrawData) {
             return true;

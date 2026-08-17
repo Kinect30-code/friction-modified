@@ -9,7 +9,7 @@ class PathBox;
 struct ChildRenderData;
 
 enum class BlendEffectType {
-    move, targeted, trackMatte, layerMask
+    move, targeted
 };
 
 class CORE_EXPORT BlendEffect : public eEffect {

@@ -49,12 +49,12 @@ protected:
                   BasicTransformAnimator * const trans,
                   const MovablePointType type);
 public:    
-    QPointF getRelativePos() const;
-    void setRelativePos(const QPointF &relPos);
+    QPointF getRelativePos() const override;
+    void setRelativePos(const QPointF &relPos) override;
 
-    void startTransform();
-    void finishTransform();
-    void cancelTransform();
+    void startTransform() override;
+    void finishTransform() override;
+    void cancelTransform() override;
 
     QPointFAnimator * getAnimator() const {
         return mAssociatedAnimator_k;

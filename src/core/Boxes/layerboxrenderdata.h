@@ -29,8 +29,8 @@
 
 struct CORE_EXPORT PathClipOp {
     SkPath fClipPath;
-    SkClipOp fClipPathOp;
-    bool fClipPathAA;
+    SkClipOp fClipPathOp = SkClipOp::kIntersect;
+    bool fClipPathAA = true;
 
     void clip(SkCanvas * const canvas) const {
         canvas->clipPath(fClipPath, fClipPathOp, fClipPathAA);
@@ -38,8 +38,8 @@ struct CORE_EXPORT PathClipOp {
 };
 
 struct CORE_EXPORT PathClip {
-    int fTargetIndex;
-    bool fAbove;
+    int fTargetIndex = 0;
+    bool fAbove = false;
     BoundingBox* fTargetBox = nullptr;
     QList<PathClipOp> fClipOps;
 
@@ -68,9 +68,9 @@ public:
 
     QList<ChildRenderData> fChildrenRenderData;
 protected:
-    void drawSk(SkCanvas * const canvas);
+    void drawSk(SkCanvas * const canvas) override;
     void transformRenderCanvas(SkCanvas& canvas) const final;
-    void updateRelBoundingRect();
+    void updateRelBoundingRect() override;
 };
 
 #endif // CONTAINERBOXRENDERDATA_H

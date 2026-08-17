@@ -37,7 +37,6 @@
 #include "swt_abstraction.h"
 #include "GUI/keysview.h"
 #include "RasterEffects/rastereffectcollection.h"
-#include "BlendEffects/trackmatteeffect.h"
 #include "GUI/timelinehighlightwidget.h"
 #include "GUI/timelinewidget.h"
 #include "renderhandler.h"
@@ -69,9 +68,7 @@ protected:
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing, true);
 
-        const QColor accent = mScroller->mPickWhipMode == BoxScroller::PickWhipMode::parent
-                ? QColor(110, 198, 255)
-                : QColor(255, 181, 84);
+        const QColor accent(110, 198, 255);
 
         if (mScroller->mPickWhipHoverTarget && mScroller->mPickWhipHoverGlobalRect.isValid()) {
             const QPoint tl = mapFromGlobal(mScroller->mPickWhipHoverGlobalRect.topLeft());
@@ -220,11 +217,9 @@ void BoxScroller::beginPickWhip(BoundingBox *source, PickWhipMode mode,
     updatePickWhipOverlay();
     qApp->installEventFilter(this);
     if (auto *win = MainWindow::sGetInstance()) {
-        const auto message = mode == PickWhipMode::parent
-                ? tr("Pick-whip: click a layer row to use as parent.")
-                : tr("Pick-whip: click a layer row to use as this layer's track matte source.");
         if (win->statusBar()) {
-            win->statusBar()->showMessage(message, 4000);
+            win->statusBar()->showMessage(
+                tr("Pick-whip: click a layer row to use as parent."), 4000);
         }
     }
 }
@@ -263,26 +258,6 @@ bool BoxScroller::handlePickWhipTarget(BoundingBox *target) {
             }
         }
         Document::sInstance->actionFinished();
-        return true;
-    }
-
-    if (mode == PickWhipMode::matte) {
-        const auto parent = source->getParentGroup();
-        if (parent && parent == target->getParentGroup()) {
-            const auto trackMatteMode = source->getTrackMatteTarget()
-                    ? source->getTrackMatteMode()
-                    : TrackMatteMode::alphaMatte;
-            source->setTrackMatteTarget(target, trackMatteMode);
-            if (auto *win = MainWindow::sGetInstance()) {
-                if (win->statusBar()) {
-                    win->statusBar()->showMessage(
-                        tr("Track matte for \"%1\" now uses \"%2\".").arg(source->prp_getName(),
-                                                                          target->prp_getName()),
-                        2500);
-                }
-            }
-            Document::sInstance->actionFinished();
-        }
         return true;
     }
 

@@ -33,53 +33,10 @@
 #include "RasterEffects/rastereffectcollection.h"
 #include "TransformEffects/transformeffectcollection.h"
 #include "BlendEffects/blendeffectcollection.h"
-#include "BlendEffects/layermaskeffect.h"
 #include "Boxes/pathbox.h"
-#include "../modules/ae_masks/aemaskmodule.h"
 #include "canvas.h"
 
 qsptr<BoundingBox> readIdCreateBox(eReadStream& src);
-
-namespace {
-
-enum class CopiedBlendEffectKind : int {
-    normal,
-    layerMask
-};
-
-void writeMaskPath(PathBox* const maskPath, eWriteStream& writeStream) {
-    const bool hasMaskPath = maskPath;
-    writeStream << hasMaskPath;
-    if(!hasMaskPath) {
-        return;
-    }
-    const auto future = writeStream.planFuturePos();
-    maskPath->writeIdentifier(writeStream);
-    maskPath->writeBoundingBox(writeStream);
-    writeStream.writeCheckpoint();
-    writeStream.assignFuturePos(future);
-}
-
-qsptr<PathBox> readMaskPath(eReadStream& readStream) {
-    bool hasMaskPath;
-    readStream >> hasMaskPath;
-    if(!hasMaskPath) {
-        return nullptr;
-    }
-    const auto futurePos = readStream.readFuturePos();
-    try {
-        const auto box = readIdCreateBox(readStream);
-        box->readBoundingBox(readStream);
-        readStream.readCheckpoint("Error reading layer mask path");
-        return qSharedPointerCast<PathBox>(box);
-    } catch(const std::exception& e) {
-        readStream.seek(futurePos);
-        gPrintExceptionCritical(e);
-        return nullptr;
-    }
-}
-
-}
 
 Clipboard::Clipboard(const ClipboardType type) : mType(type) {}
 
@@ -135,12 +92,6 @@ EffectsClipboard::EffectsClipboard(const QList<RasterEffect*> &rasterEffects,
             if(!effect) continue;
             writeStream << static_cast<int>(EffectsType::blend);
             const auto future = writeStream.planFuturePos();
-            const auto layerMask = enve_cast<LayerMaskEffect*>(effect);
-            writeStream << static_cast<int>(layerMask ? CopiedBlendEffectKind::layerMask
-                                                      : CopiedBlendEffectKind::normal);
-            if(layerMask) {
-                writeMaskPath(layerMask->maskPathSource(), writeStream);
-            }
             writeBlendEffectType(effect, writeStream);
             effect->prp_writeProperty(writeStream);
             writeStream.assignFuturePos(future);
@@ -188,35 +139,9 @@ bool EffectsClipboard::pasteTo(BoundingBox * const target) {
                     effect->prp_readProperty(readStream);
                     target->addTransformEffect(effect);
                 } else if(type == EffectsType::blend) {
-                    int kindInt;
-                    readStream >> kindInt;
-                    const auto kind = static_cast<CopiedBlendEffectKind>(kindInt);
-                    const auto maskPath = kind == CopiedBlendEffectKind::layerMask ?
-                                readMaskPath(readStream) : qsptr<PathBox>();
                     const auto effect = readIdCreateBlendEffect(readStream);
                     effect->prp_readProperty(readStream);
-                    if(const auto layerMask = enve_cast<LayerMaskEffect*>(effect.get())) {
-                        if(maskPath) {
-                            const QString maskName = AeMaskModule::nextMaskName(target, nullptr);
-                            maskPath->prp_setName(maskName);
-                            AeMaskModule::attachLayerMaskPath(target, maskPath.get());
-                            layerMask->setClipPathSource(maskPath.get());
-                            target->addBlendEffect(effect);
-                            layerMask->syncMaskDisplayName();
-                            target->ensureBlendEffectsVisible();
-                            target->refreshCanvasControls();
-                            target->prp_afterWholeInfluenceRangeChanged();
-                            if(auto* const scene = target->getParentScene()) {
-                                AeMaskModule::syncSelection(scene, target);
-                                scene->requestUpdate();
-                            }
-                        } else {
-                            layerMask->setClipPathSource(nullptr);
-                            target->addBlendEffect(effect);
-                        }
-                    } else {
-                        target->addBlendEffect(effect);
-                    }
+                    target->addBlendEffect(effect);
                 }
                 pasted = true;
             } catch(const std::exception& e) {

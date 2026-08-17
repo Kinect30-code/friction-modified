@@ -34,6 +34,11 @@ class ParentEffect : public FollowObjectEffectBase
 public:
     ParentEffect();
 
+    void prp_drawCanvasControls(SkCanvas * const canvas,
+                                const CanvasMode mode,
+                                const float invScale,
+                                const bool ctrlPressed) override;
+
     void applyEffect(const qreal relFrame,
                      qreal &pivotX,
                      qreal &pivotY,
@@ -54,6 +59,23 @@ private:
     bool applyTargetChangeCompensation(BoundingBox* const parent,
                                        BoundingBox* const oldTarget,
                                        BoundingBox* const newTarget) override;
+
+    void captureBindState(const qreal relFrame);
+    bool ensureBindState(const qreal relFrame);
+
+    bool computeEffectTransform(const qreal relFrame,
+                                const TransformValues& baseValues,
+                                const qreal posXInfl,
+                                const qreal posYInfl,
+                                const qreal scaleXInfl,
+                                const qreal scaleYInfl,
+                                const qreal rotInfl,
+                                QMatrix& outPostTransform,
+                                const bool updateState);
+
+    void handleInfluenceChanged();
+    void updatePrevInfluences(const qreal relFrame);
+
     bool validateInfluenceValues(const qreal posXInfl,
                                  const qreal posYInfl,
                                  const qreal scaleXInfl,
@@ -74,6 +96,26 @@ private:
     QVector<int> mTargetChangeFrames;
     QVector<QMatrix> mTargetChangeTotalTransforms;
     QVector<QPointF> mTargetChangeAbsPivotPositions;
+
+    TransformValues getCurrentBaseValues(BoxTransformAnimator* const transform,
+                                         const qreal relFrame) const;
+
+    QPointF mPrevPosInfluence;
+    QPointF mPrevScaleInfluence;
+    qreal mPrevRotInfluence = 0.0;
+    bool mPrevInfluenceValid = false;
+    QPointF mBindTargetPivotInParent;
+    QPointF mBindObjectPivotInParent;
+    QMatrix mBindTargetParentToParentSpace;
+    QMatrix mBindTargetLinearInParent;
+    bool mBindStateValid = false;
+    qreal mAccumDeltaAngleRad = 0.0;
+    bool mDeltaAngleStateValid = false;
+    QPointF mNoFollowPivotState;
+    QMatrix mNoFollowLinearState;
+    bool mNoFollowStateValid = false;
+    QPointF mLastBaseMove;
+    bool mLastBaseMoveValid = false;
 };
 
 #endif // PARENTEFFECT_H

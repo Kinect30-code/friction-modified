@@ -30,17 +30,11 @@
 #include "PathEffects/patheffectsinclude.h"
 #include "Boxes/smartvectorpath.h"
 #include "Animators/SmartPath/smartpathcollection.h"
-#include "Animators/SmartPath/smartpathanimator.h"
-#include "BlendEffects/layermaskeffect.h"
 #include "Private/document.h"
 #include "eevent.h"
 #include "Boxes/textbox.h"
-#include "Sound/eindependentsound.h"
 
 namespace {
-
-constexpr const char* kAeMaskStorageName = "Masks";
-constexpr const char* kAeLegacyMaskStorageName = "__AE_LAYER_MASKS__";
 
 bool isInsideRemovedSubtree(BoundingBox* const candidate,
                             BoundingBox* const removedRoot) {
@@ -72,98 +66,6 @@ QString makeUniquePrecompName(Document& document,
             return numbered;
         }
         ++index;
-    }
-}
-
-void clearLayerMaskSources(BoundingBox* const box) {
-    if(!box) {
-        return;
-    }
-    QList<LayerMaskEffect*> layerMasks;
-    box->ca_execOnDescendants([&layerMasks](Property* const prop) {
-        if(auto* const layerMask = enve_cast<LayerMaskEffect*>(prop)) {
-            layerMasks.append(layerMask);
-        }
-    });
-    for(auto* const layerMask : layerMasks) {
-        if(!layerMask) {
-            continue;
-        }
-        if(auto* const maskPath = layerMask->maskPathSource()) {
-            if(auto* const parent = maskPath->getParentGroup()) {
-                const auto parentName = parent->prp_getName();
-                if(parentName == QString::fromLatin1(kAeMaskStorageName) ||
-                   parentName == QString::fromLatin1(kAeLegacyMaskStorageName)) {
-                    maskPath->removeFromParent_k();
-                }
-            }
-        }
-        layerMask->setClipPathSource(nullptr);
-    }
-}
-
-Property* firstEditableMaskPropertyFor(BoundingBox* const box) {
-    if(!box) {
-        return nullptr;
-    }
-    Property* editable = nullptr;
-    box->ca_execOnDescendants([&editable](Property* const prop) {
-        if(editable) {
-            return;
-        }
-        const auto layerMask = enve_cast<LayerMaskEffect*>(prop);
-        if(!layerMask) {
-            return;
-        }
-        const auto vectorMask =
-                enve_cast<SmartVectorPath*>(layerMask->maskPathSource());
-        if(!vectorMask) {
-            return;
-        }
-        auto* const paths = vectorMask->getPathAnimator();
-        if(!paths) {
-            return;
-        }
-        if(paths->ca_getNumberOfChildren() > 0) {
-            editable = paths->ca_getChildAt<Property>(0);
-        }
-        if(!editable) editable = paths;
-    });
-    return editable;
-}
-
-void syncLayerMaskSelection(Canvas* const scene, BoundingBox* const box) {
-    if(!scene || !box) {
-        return;
-    }
-    scene->clearSelectedProps();
-    bool addedAny = false;
-    box->ca_execOnDescendants([scene, &addedAny](Property* const prop) {
-        const auto layerMask = enve_cast<LayerMaskEffect*>(prop);
-        if(!layerMask) {
-            return;
-        }
-        const auto vectorMask =
-                enve_cast<SmartVectorPath*>(layerMask->maskPathSource());
-        if(!vectorMask) {
-            return;
-        }
-        auto* const paths = vectorMask->getPathAnimator();
-        if(!paths) {
-            return;
-        }
-        const int pathCount = paths->ca_getNumberOfChildren();
-        for(int i = 0; i < pathCount; ++i) {
-            if(auto* const path = paths->ca_getChildAt<Property>(i)) {
-                scene->addToSelectedProps(path);
-                addedAny = true;
-            }
-        }
-    });
-    if(!addedAny) {
-        if(auto* const editable = firstEditableMaskPropertyFor(box)) {
-            scene->addToSelectedProps(editable);
-        }
     }
 }
 
@@ -362,14 +264,30 @@ void Canvas::flipSelectedBoxesVertically() {
     }
 }
 
-void Canvas::convertSelectedBoxesToPath() {
-    for(const auto &box : mSelectedBoxes)
-        box->objectToVectorPathBox();
+void Canvas::convertSelectedBoxesToPath()
+{
+    for (const auto &box : mSelectedBoxes) {
+        const auto name = box->prp_getName() + "Path";
+        const auto index = box->getZIndex();
+        const auto pbox = box->objectToVectorPathBox();
+        if (pbox) {
+            box->removeFromParent_k();
+            pbox->prp_setName(name);
+            pbox->moveTo(index);
+        }
+    }
 }
 
 void Canvas::convertSelectedPathStrokesToPath() {
     for(const auto &box : mSelectedBoxes) {
-        box->strokeToVectorPathBox();
+        const auto name = box->prp_getName() + "Path";
+        const auto index = box->getZIndex();
+        const auto pbox = box->strokeToVectorPathBox();
+        if (pbox) {
+            box->removeFromParent_k();
+            pbox->prp_setName(name);
+            pbox->moveTo(index);
+        }
     }
 }
 
@@ -812,43 +730,12 @@ void Canvas::centerPivotForSelected() {
 }
 
 void Canvas::removeSelectedBoxesAndClearList() {
-    clearHovered();
-    clearHoveredEdge();
-    clearPointsSelection();
-    clearSelectedProps();
-    clearCurrentSmartEndPoint();
-    clearLastPressedPoint();
-    drawPathClear();
     while(!mSelectedBoxes.isEmpty()) {
         const auto &box = mSelectedBoxes.last();
-        if(isInsideRemovedSubtree(mCurrentContainer, box)) {
-            auto* fallbackGroup = box->getParentGroup();
-            if(!fallbackGroup) {
-                fallbackGroup = this;
-            }
-            if(fallbackGroup != mCurrentContainer) {
-                setCurrentBoxesGroup(fallbackGroup);
-            }
-        }
-        if(isInsideRemovedSubtree(mDrawPathMaskTarget, box)) {
-            mDrawPathMaskTarget = nullptr;
-        }
-        if(isInsideRemovedSubtree(mHoveredBox, box)) {
-            mHoveredBox = nullptr;
-        }
-        if(isInsideRemovedSubtree(mPressedBox, box)) {
-            mPressedBox = nullptr;
-        }
-        if(isInsideRemovedSubtree(mCurrentBox, box)) {
-            setCurrentBox(nullptr);
-        }
-        clearLayerMaskSources(box);
         removeBoxFromSelection(box);
         box->removeFromParent_k();
     }
     emit objectSelectionChanged();
-    scheduleUpdate();
-    mDocument.actionFinished();
 }
 
 void Canvas::setCurrentBox(BoundingBox* const box) {
@@ -881,9 +768,6 @@ void Canvas::addBoxToSelection(BoundingBox * const box)
     sortSelectedBoxesDesc();
     //setCurrentFillStrokeSettingsFromBox(box);
     setCurrentBox(box);
-    if(mSelectedBoxes.count() == 1) {
-        syncLayerMaskSelection(this, box);
-    }
 
     /*if(mCurrentMode == CanvasMode::paint) {
         if(const auto pBox = enve_cast<PaintBox*>(box)) {

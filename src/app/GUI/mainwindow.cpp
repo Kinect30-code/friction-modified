@@ -54,7 +54,6 @@
 #include <QVBoxLayout>
 #include <QSet>
 
-#include "GUI/edialogs.h"
 #include "dialogs/applyexpressiondialog.h"
 #include "dialogs/markereditordialog.h"
 #include "timelinedockwidget.h"
@@ -73,7 +72,6 @@
 #include "memoryhandler.h"
 #include "dialogs/scenesettingsdialog.h"
 #include "importhandler.h"
-#include "GUI/edialogs.h"
 #include "eimporters.h"
 #include "../../modules/ora/oramodule.h"
 #include "dialogs/exportsvgdialog.h"
@@ -89,7 +87,6 @@
 #include "RasterEffects/rastereffect.h"
 #include "BlendEffects/blendeffectmenucreator.h"
 #include "BlendEffects/blendeffect.h"
-#include "BlendEffects/layermaskeffect.h"
 #include "Boxes/pathbox.h"
 #include "Boxes/internallinkcanvas.h"
 #include "TransformEffects/transformeffectmenucreator.h"
@@ -104,6 +101,7 @@
 #include "dialogs/adjustscenedialog.h"
 #include "dialogs/commandpalette.h"
 #include "GUI/motionv2dialog.h"
+#include "wizards/installpresets.h"
 
 using namespace Friction;
 
@@ -122,48 +120,6 @@ bool isFocusedEditorWidget(QWidget *widget)
            qobject_cast<QTextEdit*>(widget) ||
            qobject_cast<QPlainTextEdit*>(widget) ||
            widget->inherits("QsciScintilla");
-}
-
-bool propertyBelongsToMaskPath(Property* const prop,
-                               PathBox* const maskPath)
-{
-    if (!prop || !maskPath) {
-        return false;
-    }
-    if (prop == maskPath) {
-        return true;
-    }
-    return maskPath->prp_dependsOn(prop);
-}
-
-LayerMaskEffect* layerMaskForSelectedMaskProperty(Property* const prop,
-                                                  const QList<BoundingBox*> &selectedBoxes)
-{
-    if (!prop) {
-        return nullptr;
-    }
-    for (const auto box : selectedBoxes) {
-        if (!box) {
-            continue;
-        }
-        LayerMaskEffect* result = nullptr;
-        box->ca_execOnDescendants([prop, &result](Property* const candidate) {
-            if (result) {
-                return;
-            }
-            const auto layerMask = enve_cast<LayerMaskEffect*>(candidate);
-            if (!layerMask) {
-                return;
-            }
-            if (propertyBelongsToMaskPath(prop, layerMask->maskPathSource())) {
-                result = layerMask;
-            }
-        });
-        if (result) {
-            return result;
-        }
-    }
-    return nullptr;
 }
 
 void findLinkToTargetRecursive(ContainerBox* const container,
@@ -640,6 +596,7 @@ MainWindow::MainWindow(Document& document,
 
 MainWindow::~MainWindow()
 {
+    disconnect();
     mShutdown = true;
     if (qApp) {
         qApp->removeEventFilter(this);
@@ -649,9 +606,6 @@ MainWindow::~MainWindow()
     writeSettings();
     sInstance = nullptr;
 }
-
-
-
 
 BoundingBox *MainWindow::getCurrentBox()
 {
@@ -751,6 +705,7 @@ void MainWindow::closedTimelineWindow()
             ensureBottomSceneTab(scenePtr);
         }
         ensureBottomSceneTab(*mDocument.fActiveScene);
+        attachTimelineToBottomScene(*mDocument.fActiveScene);
         selectBottomSceneTab(*mDocument.fActiveScene);
     }
     updateWorkspaceTabTitles();
@@ -801,69 +756,10 @@ void MainWindow::closedRenderQueueWindow()
     }
 }
 
-void MainWindow::initRenderPresets(const bool reinstall)
+void MainWindow::askInstallDefaultPresets()
 {
-    const QString path = AppSupport::getAppOutputProfilesPath();
-    if (path.isEmpty() || !QFileInfo(path).isWritable()) { return; }
-
-    QStringList presets;
-    presets << "001-friction-preset-mp4-h264.conf";
-    presets << "002-friction-preset-mp4-h264-mp3.conf";
-    presets << "003-friction-preset-prores-444.conf";
-    presets << "004-friction-preset-prores-444-aac.conf";
-    presets << "005-friction-preset-png.conf";
-    presets << "006-friction-preset-tiff.conf";
-    presets << "007-friction-preset-webm-vp9-alpha.conf";
-
-    bool hasMissingPreset = false;
-    for (const auto &preset : presets) {
-        const QString filePath(QString("%1/%2").arg(path, preset));
-        if (!QFile::exists(filePath)) {
-            hasMissingPreset = true;
-            break;
-        }
-    }
-    const bool doInstall = reinstall || hasMissingPreset ||
-            AppSupport::getSettings("settings",
-                                    "firstRunRenderPresets",
-                                    true).toBool();
-    if (!doInstall) { return; }
-
-    for (const auto &preset : presets) {
-        QString filePath(QString("%1/%2").arg(path, preset));
-        if (QFile::exists(filePath) && !reinstall) { continue; }
-        QFile file(filePath);
-        if (file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
-            QFile res(QString(":/presets/render/%1").arg(preset));
-            if (res.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                file.write(res.readAll());
-                res.close();
-            }
-            file.close();
-        }
-    }
-
-    AppSupport::setSettings("settings", "firstRunRenderPresets", false);
-}
-
-void MainWindow::askInstallRenderPresets()
-{
-    const auto result = QMessageBox::question(this,
-                                              tr("Install Render Profiles"),
-                                              tr("Are you sure you want to install the default render profiles?"
-                                                 "<p style='font-weight: normal;font-style: italic'>Note that a restart of the application is required to detect new profiles.</p>"));
-    if (result != QMessageBox::Yes) { return; }
-    initRenderPresets(true);
-}
-
-void MainWindow::askInstallExpressionsPresets()
-{
-    const auto result = QMessageBox::question(this,
-                                              tr("Install default Expressions Presets"),
-                                              tr("Are you sure you want to install the default Expressions Presets?"
-                                                 "<p style='font-weight: normal;font-style: italic'>Note that:<ul><li>any user modification to default presets will be removed.</li><li>a restart of the application is required to install them all.</li></ul></p>"));
-    if (result != QMessageBox::Yes) { return; }
-    AppSupport::setSettings("settings", "firstRunExprPresets", true);
+    Ui::InstallPresets dialog(this);
+    dialog.exec();
 }
 
 void MainWindow::askRestoreFillStrokeDefault()
@@ -889,6 +785,15 @@ void MainWindow::askRestoreDefaultUi()
                                                  "You must restart VECB to apply."));
     if (result != QMessageBox::Yes) { return; }
     eSettings::sInstance->fRestoreDefaultUi = true;
+}
+
+void MainWindow::askRunQuickSetup()
+{
+    const auto result = QMessageBox::question(this,
+                                              tr("Run Quick Setup on startup?"),
+                                              tr("Are you sure you want to run Quick Setup the next time you start Friction?"));
+    if (result != QMessageBox::Yes) { return; }
+    AppSupport::setSettings("settings", "firstRun", true);
 }
 
 void MainWindow::openWelcomeDialog()
@@ -925,7 +830,9 @@ void MainWindow::updateSettingsForCurrentCanvas(Canvas* const scene)
     if (mRenderVideoAct) { mRenderVideoAct->setEnabled(scene); }
     if (mCloseProjectAct) { mCloseProjectAct->setEnabled(scene); }
     if (mLinkedAct) { mLinkedAct->setEnabled(scene); }
-    if (mImportAct) { mImportAct->setEnabled(scene); }
+    // Import stays enabled without a scene: AEP/PSD imports create their
+    // own scenes, so the menu must remain usable from the welcome page.
+    if (mImportAct) { mImportAct->setEnabled(true); }
     if (mImportSeqAct) { mImportSeqAct->setEnabled(scene); }
     if (mRevertAct) { mRevertAct->setEnabled(scene); }
     if (mSelectAllAct) { mSelectAllAct->setEnabled(scene); }
@@ -1051,6 +958,15 @@ void MainWindow::setupDocument()
         if (mTimeline) { mTimeline->stopPreview(); }
     });
 
+#ifdef Q_OS_MAC
+    // https://github.com/friction2d/friction/pull/736
+    connect(&mDocument, &Document::fitCanvasToSize, this, []() {
+        const auto target = KeyFocusTarget::KFT_getCurrentTarget();
+        const auto cwTarget = dynamic_cast<CanvasWindow*>(target);
+        if (cwTarget) { cwTarget->fitCanvasToSize(); }
+    });
+#endif
+
     // set defaults
     mDocument.setPath("");
     mDocument.fDrawPathManual = false;
@@ -1065,6 +981,12 @@ void MainWindow::setupImporters()
     ImportHandler::sInstance->addImporter<eSvgImporter>();
     ImportHandler::sInstance->addImporter<eOraImporter>();
     ImportHandler::sInstance->addImporter<eGltfImporter>();
+#ifdef BUILD_AEP_IMPORT
+    ImportHandler::sInstance->addImporter<eAepImporter>();
+#endif
+#ifdef BUILD_PSD_IMPORT
+    ImportHandler::sInstance->addImporter<ePsdImporter>();
+#endif
 }
 
 void MainWindow::setupAutoSave()
@@ -1329,21 +1251,6 @@ bool MainWindow::deleteSelectedEffectProperties()
     }
 
     bool deleted = false;
-
-    QList<LayerMaskEffect*> layerMaskEffectsToDelete;
-    const auto selectedBoxes = scene->getSelectedBoxes();
-    scene->execOpOnSelectedProperties<Property>(
-                [&selectedBoxes, &layerMaskEffectsToDelete](Property *prop) {
-        if (!prop) { return; }
-        const auto layerMask = layerMaskForSelectedMaskProperty(prop, selectedBoxes);
-        if (layerMask && !layerMaskEffectsToDelete.contains(layerMask)) {
-            layerMaskEffectsToDelete << layerMask;
-        }
-    });
-
-    for (const auto layerMask : layerMaskEffectsToDelete) {
-        deleted = deleteEffectProperty(layerMask) || deleted;
-    }
 
     scene->execOpOnSelectedProperties<TransformEffect>(
                 [&deleted](TransformEffect *effect) {
@@ -1639,8 +1546,6 @@ void MainWindow::readSettings(const QString &openProject)
 
     updateAutoSaveBackupState();
 
-    initRenderPresets();
-
     if (!openProject.isEmpty()) {
         QTimer::singleShot(10,
                            this,
@@ -1651,6 +1556,8 @@ void MainWindow::readSettings(const QString &openProject)
 
 void MainWindow::writeSettings()
 {
+    mUI->writeSettings();
+
     if (eSettings::instance().fRestoreDefaultUi) {
         AppSupport::clearSettings("ui");
     } else {
@@ -1692,6 +1599,9 @@ void MainWindow::setupMainWidgets()
     mTimeline = new TimelineDockWidget(mDocument,
                                        mLayoutHandler,
                                        this);
+    // 初次启动可能还没有场景；在 attach 到场景底部 tab 之前隐藏，
+    // 避免 timeline 作为 MainWindow 裸子部件显示在左上角（覆盖菜单栏）
+    mTimeline->hide();
     mRenderWidget = new RenderWidget(this);
 }
 
@@ -2105,6 +2015,7 @@ void MainWindow::attachTimelineToBottomScene(Canvas *scene)
     if (mTimeline->parentWidget() == page) { return; }
     if (auto *layout = qobject_cast<QVBoxLayout*>(page->layout())) {
         layout->addWidget(mTimeline);
+        mTimeline->show();
     }
 }
 
@@ -2317,8 +2228,10 @@ void MainWindow::openFile()
         const QString defPath = mDocument.fEvFile.isEmpty() ? getLastOpenDir() : mDocument.fEvFile;
         const QString title = tr("Open File", "OpenDialog_Title");
         const QString files = tr("Friction Files %1", "OpenDialog_FileType");
-        const QString openPath = eDialogs::openFile(title, defPath,
-                                                    files.arg("(*.friction *.ev)"));
+        const QString openPath = AppSupport::getOpenFile(this,
+                                                         title,
+                                                         defPath,
+                                                         files.arg("(*.friction)"));
         if (!openPath.isEmpty()) { openFile(openPath); }
         enable();
     }
@@ -2330,7 +2243,7 @@ void MainWindow::openFile(const QString& openPath)
     try {
         QFileInfo fi(openPath);
         const QString suffix = fi.suffix();
-        if (suffix == "friction" || suffix == "ev") {
+        if (suffix == "friction") {
             loadEVFile(openPath);
         } /*else if (suffix == "xev") {
             loadXevFile(openPath);
@@ -2371,7 +2284,7 @@ void MainWindow::saveFile(const QString& path,
     try {
         QFileInfo fi(path);
         const QString suffix = fi.suffix();
-        if (suffix == "friction" || suffix == "ev") {
+        if (suffix == "friction") {
             saveToFile(path);
         } /*else if (suffix == "xev") {
             saveToFileXEV(path);
@@ -2397,15 +2310,13 @@ void MainWindow::saveFileAs(const bool setPath)
 
     const QString title = tr("Save File", "SaveDialog_Title");
     const QString fileType = tr("Friction Files %1", "SaveDialog_FileType");
-    QString saveAs = eDialogs::saveFile(title, defPath, fileType.arg("(*.friction)"));
+    QString saveAs = AppSupport::getSaveFile(this,
+                                             title,
+                                             defPath,
+                                             fileType.arg("(*.friction)"),
+                                             "friction");
     enableEventFilter();
-    if (!saveAs.isEmpty()) {
-        //const bool isXEV = saveAs.right(4) == ".xev";
-        //if (!isXEV && saveAs.right(3) != ".ev") { saveAs += ".ev"; }
-        QString suffix = QString::fromUtf8(".friction");
-        if (!saveAs.endsWith(suffix)) { saveAs.append(suffix); }
-        saveFile(saveAs, setPath);
-    }
+    if (!saveAs.isEmpty()) { saveFile(saveAs, setPath); }
 }
 
 void MainWindow::saveBackup()
@@ -2510,12 +2421,25 @@ void MainWindow::importFile()
 
     const QString title = tr("Import File(s)", "ImportDialog_Title");
     const QString fileType = tr("Files %1", "ImportDialog_FileTypes");
-    const QString fileTypes = "(*.friction *.ev *.svg *.ora *.glb *.gltf " +
+    QString importExts = "(*.friction *.ev *.svg *.ora *.glb *.gltf ";
+#ifdef BUILD_AEP_IMPORT
+    if (PluginManager::isEnabled(PluginFeature::aepImport)) {
+        importExts += "*.aep ";
+    }
+#endif
+#ifdef BUILD_PSD_IMPORT
+    if (PluginManager::isEnabled(PluginFeature::psdImport)) {
+        importExts += "*.psd ";
+    }
+#endif
+    const QString fileTypes = importExts +
             FileExtensions::videoFilters() +
             FileExtensions::imageFilters() +
             FileExtensions::soundFilters() + ")";
-    const auto importPaths = eDialogs::openFiles(
-                title, defPath, fileType.arg(fileTypes));
+    const auto importPaths = AppSupport::getOpenFiles(this,
+                                                      title,
+                                                      defPath,
+                                                      fileType.arg(fileTypes));
     enableEventFilter();
     if (!importPaths.isEmpty()) {
         for(const QString &path : importPaths) {
@@ -2536,8 +2460,10 @@ void MainWindow::linkFile()
                 QDir::homePath() : mDocument.fEvFile;
     const QString title = tr("Link File", "LinkDialog_Title");
     const QString fileType = tr("Files %1", "LinkDialog_FileType");
-    const auto importPaths = eDialogs::openFiles(
-                title, defPath, fileType.arg("(*.svg *.ora)"));
+    const auto importPaths = AppSupport::getOpenFiles(this,
+                                                      title,
+                                                      defPath,
+                                                      fileType.arg("(*.svg)"));
     enableEventFilter();
     if (!importPaths.isEmpty()) {
         for (const QString &path : importPaths) {
@@ -2558,7 +2484,9 @@ void MainWindow::importImageSequence()
                 QDir::homePath() : mDocument.fEvFile;
     const QString title = tr("Import Image Sequence",
                              "ImportSequenceDialog_Title");
-    const auto folder = eDialogs::openDir(title, defPath);
+    const auto folder = AppSupport::getOpenDirectory(this,
+                                                     title,
+                                                     defPath);
     enableEventFilter();
     if (!folder.isEmpty()) { mActions.importFile(folder); }
 }
@@ -2578,9 +2506,10 @@ void MainWindow::updateAutoSaveBackupState()
 {
     if (mShutdown) { return; }
 
-    mBackupOnSave = AppSupport::getSettings("files",
-                                            "BackupOnSave",
-                                            false).toBool();
+    mBackupOnSave = AppSupport::isFlatpak() ? false :
+                        AppSupport::getSettings("files",
+                                                "BackupOnSave",
+                                                false).toBool();
     mAutoSave = AppSupport::getSettings("files",
                                         "AutoSave",
                                         false).toBool();
@@ -2791,7 +2720,7 @@ void MainWindow::updateRecentMenu()
     for (const auto &path : mRecentFiles) {
         QFileInfo info(path);
         if (!info.exists()) { continue; }
-        mRecentMenu->addAction(QIcon::fromTheme(AppSupport::getAppID()), info.baseName(), [path, this]() {
+        mRecentMenu->addAction(QIcon::fromTheme(ThemeSupport::getAppIconName(true)), info.baseName(), [path, this]() {
             openFile(path);
         });
     }

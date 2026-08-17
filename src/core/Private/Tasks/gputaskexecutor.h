@@ -44,8 +44,8 @@ public:
     bool unhandledException() const;
     std::exception_ptr handleException();
 private:
-    void processTask(eTask& task);
-    void start();
+    void processTask(eTask& task) override;
+    void start() override;
 
     void setException(const std::exception_ptr& exception);
 

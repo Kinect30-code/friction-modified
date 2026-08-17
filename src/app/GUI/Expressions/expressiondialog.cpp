@@ -32,7 +32,6 @@
 #include <QApplication>
 #include <QButtonGroup>
 #include <QMessageBox>
-#include <QFileDialog>
 #include <QLineEdit>
 #include <QUuid>
 #include <QRegularExpression>
@@ -48,6 +47,16 @@
 #include "canvas.h"
 
 using namespace Friction::Core;
+
+namespace {
+QString defaultAnimatorExpressionBindings()
+{
+    return QStringLiteral(
+        "fps = $scene.fps;\n"
+        "frame = $frame;\n"
+        "value = $value;\n");
+}
+}
 
 class JSLexer : public QsciLexerJavaScript
 {
@@ -368,7 +377,11 @@ ExpressionDialog::ExpressionDialog(QrealAnimator* const target,
     tabLayout->addWidget(mDefinitionsButon);
     mainLayout->addLayout(tabLayout);
 
-    mBindings = new ExpressionEditor(target, this);
+    const QString currentBindings = target->getExpressionBindingsString();
+    mBindings = new ExpressionEditor(target,
+                                    currentBindings.isEmpty() ? defaultAnimatorExpressionBindings()
+                                                              : currentBindings,
+                                    this);
     connect(mBindings, &ExpressionEditor::textChanged,
             this, [this]() {
         mBindingsChanged = true;
@@ -686,9 +699,10 @@ QWidget *ExpressionDialog::setupPresetsUi()
     mPresetsCombo->setFocusPolicy(Qt::ClickFocus);
     mPresetsCombo->setSizePolicy(QSizePolicy::Expanding,
                                  QSizePolicy::Preferred);
-    mPresetsCombo->setToolTip(tr("Select a Preset from the list to fill Bindings, Definitions\n"
-                                 "and Calculate fields. In case there is no Preset available,\n"
-                                 "you can create a new one by clicking on the '+' button."));
+    const QString genericPresetTooltip = tr("Select a Preset from the list to fill Bindings, Definitions\n"
+                                            "and Calculate fields. In case there is no Preset available,\n"
+                                            "you can create a new one by clicking on the '+' button.");
+    mPresetsCombo->setToolTip(genericPresetTooltip);
 
     const auto presetLabel = new QLabel(tr("Preset"), this);
 
@@ -759,12 +773,31 @@ QWidget *ExpressionDialog::setupPresetsUi()
         fixLeaveEvent(mPresetsCombo);
     });
 
+    const auto updatePresetTooltip = [this, genericPresetTooltip](int index) {
+        const QString id = mPresetsCombo->itemData(index).toString();
+        if (id.isEmpty()) {
+            mPresetsCombo->setToolTip(genericPresetTooltip);
+            return;
+        }
+        const QString header = "Preset description:";
+        const auto expr = mSettings->fExpressions.getExpr(id);
+        const QString separator = QString(20, '-');
+        mPresetsCombo->setToolTip(QString("%1\n%2\n\n%3\n\n%4")
+                                      .arg(header,
+                                           expr.description,
+                                           separator,
+                                           genericPresetTooltip));
+    };
+
     connect(mPresetsCombo,
             QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [this](int index) {
+            this, [this, updatePresetTooltip](int index) {
         const QString id = mPresetsCombo->itemData(index).toString();
         if (!id.isEmpty()) { applyPreset(id); }
+        updatePresetTooltip(index);
     });
+
+    updatePresetTooltip(mPresetsCombo->currentIndex());
 
     connect(editPresetBtn,
             &QPushButton::released,
@@ -798,12 +831,12 @@ QWidget *ExpressionDialog::setupPresetsUi()
     connect(importPresetBtn,
             &QPushButton::released,
             this, [this]() {
-        const QString preset = QFileDialog::getOpenFileName(this,
-                                                            tr("Import Preset"),
-                                                            AppSupport::getSettings("files",
-                                                                                    "lastExprImportDir",
-                                                                                    QDir::homePath()).toString(),
-                                                            "Expressions (*.fexpr)");
+        const QString preset = AppSupport::getOpenFile(this,
+                                                       tr("Import Preset"),
+                                                       AppSupport::getSettings("files",
+                                                                               "lastExprImportDir",
+                                                                               QDir::homePath()).toString(),
+                                                       "Expressions (*.fexpr)");
         if (mSettings->fExpressions.isValidExprFile(preset)) {
             importPreset(preset);
         } else {
@@ -892,14 +925,14 @@ void ExpressionDialog::exportPreset()
 
     if (!editDialog(tr("Export Preset"), &expr)) { return; }
 
-    QString path = QFileDialog::getSaveFileName(this,
-                                                tr("Export Preset"),
-                                                AppSupport::getSettings("files",
-                                                                        "lastExprExportDir",
-                                                                        QDir::homePath()).toString(),
-                                                "Expressions (*.fexpr)");
+    const QString path = AppSupport::getSaveFile(this,
+                                                 tr("Export Preset"),
+                                                 AppSupport::getSettings("files",
+                                                                         "lastExprExportDir",
+                                                                         QDir::homePath()).toString(),
+                                                 "Expressions (*.fexpr)",
+                                                 "fexpr");
     if (path.trimmed().isEmpty()) { return; }
-    if (QFileInfo(path).suffix() != "fexpr") { path.append(".fexpr"); }
 
     if (mSettings->fExpressions.saveExpr(expr, path)) {
         QMessageBox::information(this,
@@ -923,6 +956,8 @@ void ExpressionDialog::importPreset(const QString& path)
     }
 
     auto expr = mSettings->fExpressions.readExpr(path);
+    expr.enabled = mSettings->fExpressions.isExprEnabled(expr.id);
+
     if (mSettings->fExpressions.hasExpr(expr.id)) {
         QMessageBox::warning(this,
                              tr("Expression exists"),

@@ -53,7 +53,6 @@ public:
                     const bool &showLabel = true,
                     const bool &showHeader = true,
                     const bool &darkHeader = false);
-    ~UIDock();
     void setPosition(const Position &pos);
     Position getPosition();
     void setIndex(const int &index);
@@ -65,6 +64,7 @@ public:
     void setCollapsed(bool collapsed);
     bool isFloating() const { return mFloating; }
     bool isCollapsed() const { return mCollapsed; }
+    void writeSettings();
 
 signals:
     void changePosition(const Position &pos,
@@ -89,7 +89,6 @@ private:
     bool mFloating = false;
     bool mCollapsed = false;
     int mExpandedExtent = -1;
-    void writeSettings();
     void updateCollapseUi();
     void applyCollapseState(bool adjustSplitter);
     int currentExtent() const;
@@ -116,7 +115,6 @@ public:
         }
     };
     explicit UILayout(QWidget *parent = nullptr);
-    ~UILayout();
     void readSettings();
     void writeSettings();
     void applyAeDefaultWorkspace();
@@ -160,6 +158,8 @@ private:
     void setDockPageVisible(UIDock *dock,
                             bool visible);
     void updateBottomTabsVisibility();
+    void saveDocks();
+    void saveDock(QSplitter *container);
 };
 
 #endif // UILAYOUT_H

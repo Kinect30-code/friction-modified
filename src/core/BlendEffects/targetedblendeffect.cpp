@@ -28,6 +28,18 @@
 #include "Boxes/layerboxrenderdata.h"
 #include "Boxes/boundingbox.h"
 
+namespace {
+
+bool matchesTarget(const BoundingBox* prev,
+                   const BoundingBox* next,
+                   const BoundingBox* target,
+                   const bool isAbove) {
+    return isAbove ? BoundingBox::linkChainContains(prev, target)
+                   : BoundingBox::linkChainContains(next, target);
+}
+
+}
+
 TargetedBlendEffect::TargetedBlendEffect() :
     BlendEffect("targeted", BlendEffectType::targeted) {
     const auto poses = QStringList() << "above" << "below";
@@ -72,9 +84,9 @@ void TargetedBlendEffect::detachedBlendUISetup(
     const bool isAbove = above();
     delayed << [this, target, isAbove]
                (int, BoundingBox* prev, BoundingBox* next) {
-        const bool above = isAbove && prev == target;
-        const bool below = !isAbove && next == target;
-        if(!above && !below) return static_cast<BlendEffect*>(nullptr);
+        if(!matchesTarget(prev, next, target, isAbove)) {
+            return static_cast<BlendEffect*>(nullptr);
+        }
         return static_cast<BlendEffect*>(this);
     };
 }
@@ -94,9 +106,7 @@ void TargetedBlendEffect::detachedBlendSetup(
         const auto clipPath = this->clipPath(relFrame);
         delayed << [boxToDraw, target, isAbove, clipPath, canvas, filter]
                    (int, BoundingBox* prev, BoundingBox* next) {
-            const bool above = isAbove && prev == target;
-            const bool below = !isAbove && next == target;
-            if(!above && !below) return false;
+            if(!matchesTarget(prev, next, target, isAbove)) return false;
             canvas->save();
             canvas->clipPath(clipPath, SkClipOp::kIntersect, false);
             boxToDraw->drawPixmapSk(canvas, filter);
@@ -106,9 +116,7 @@ void TargetedBlendEffect::detachedBlendSetup(
     } else {
         delayed << [boxToDraw, target, isAbove, canvas, filter]
                    (int, BoundingBox* prev, BoundingBox* next) {
-            const bool above = isAbove && prev == target;
-            const bool below = !isAbove && next == target;
-            if(!above && !below) return false;
+            if(!matchesTarget(prev, next, target, isAbove)) return false;
             canvas->save();
             boxToDraw->drawPixmapSk(canvas, filter);
             canvas->restore();

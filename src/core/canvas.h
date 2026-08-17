@@ -203,6 +203,7 @@ public:
     void setWorldToScreen(const QTransform& transform,
                           qreal devicePixelRatio);
     void setResolution(const qreal percent);
+    void invalidateSceneFramesCache();
 
     void applyCurrentTransformToSelected();
     QPointF getSelectedPointsAbsPivotPos();
@@ -373,14 +374,13 @@ public:
 
     QRect getMaxBounds() const
     {
-        return QRect(-mWidth/2, - mHeight/2, 2*mWidth, 2*mHeight);
+        return QRect(-mWidth, -mHeight, 4*mWidth, 4*mHeight);
     }
 
     QRect getCurrentBounds() const
     {
-        //if(mClipToCanvasSize) return getCanvasBounds();
-        //else return getMaxBounds();
-        return getMaxBounds();
+        if(mClipToCanvasSize) return getCanvasBounds();
+        else return getMaxBounds();
     }
 
     int getCanvasHeight() const
@@ -936,8 +936,6 @@ protected:
     int mDrawPathFit = 0;
     SkPath mDrawPathTmp;
     DrawPath mDrawPath;
-    qptr<BoundingBox> mDrawPathMaskTarget;
-
     NormalSegment mHoveredNormalSegment;
     NormalSegment mCurrentNormalSegment;
     qreal mCurrentNormalSegmentT;
@@ -1015,12 +1013,6 @@ protected:
                             std::vector<QPointF>& nodeTargets,
                             bool includeSelectedBounds = false) const;
 
-    static bool isAeMaskDrawableTarget(BoundingBox * const box);
-    static QString nextAeMaskName(BoundingBox * const target,
-                                  ContainerBox * const parent);
-    static void attachLayerMaskEffect(BoundingBox * const target,
-                                    PathBox * const maskPath);
-    void finalizeAeMaskShapePath(PathBox * const maskPath);
 };
 
 #endif // CANVAS_H

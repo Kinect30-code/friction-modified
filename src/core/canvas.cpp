@@ -60,7 +60,6 @@
 #include "RasterEffects/rastereffect.h"
 #include "TransformEffects/transformeffect.h"
 #include "BlendEffects/blendeffect.h"
-#include "BlendEffects/layermaskeffect.h"
 #include "Animators/dynamiccomplexanimator.h"
 #include "Boxes/pathbox.h"
 
@@ -72,48 +71,6 @@ bool exportDebugEnabled()
 {
     static const bool enabled = qEnvironmentVariableIsSet("FRICTION_EXPORT_DEBUG");
     return enabled;
-}
-
-bool propertyBelongsToMaskPath(Property* const prop,
-                               PathBox* const maskPath)
-{
-    if(!prop || !maskPath) {
-        return false;
-    }
-    if(prop == maskPath) {
-        return true;
-    }
-    return maskPath->prp_dependsOn(prop);
-}
-
-LayerMaskEffect* layerMaskForSelectedMaskProperty(Property* const prop,
-                                                  const QList<BoundingBox*> &selectedBoxes)
-{
-    if(!prop) {
-        return nullptr;
-    }
-    for(const auto box : selectedBoxes) {
-        if(!box) {
-            continue;
-        }
-        LayerMaskEffect* result = nullptr;
-        box->ca_execOnDescendants([prop, &result](Property* const candidate) {
-            if(result) {
-                return;
-            }
-            const auto layerMask = enve_cast<LayerMaskEffect*>(candidate);
-            if(!layerMask) {
-                return;
-            }
-            if(propertyBelongsToMaskPath(prop, layerMask->maskPathSource())) {
-                result = layerMask;
-            }
-        });
-        if(result) {
-            return result;
-        }
-    }
-    return nullptr;
 }
 
 }
@@ -207,12 +164,21 @@ void Canvas::toggleTransparencyGrid()
 
 void Canvas::setResolution(const qreal percent)
 {
-    if (isZero6Dec(mResolution - percent)) {
-        return;
-    }
+    if (isZero6Dec(mResolution - percent)) { return; }
     mResolution = percent;
+#ifdef Q_OS_MAC
+    invalidateSceneFramesCache();
+#endif
     prp_afterWholeInfluenceRangeChanged();
     updateAllBoxes(UpdateReason::userChange);
+}
+
+void Canvas::invalidateSceneFramesCache()
+{
+    mSceneFrame.reset();
+    mLoadingSceneFrame.reset();
+    mSceneFrameOutdated = true;
+    mSceneFramesHandler.clear();
 }
 
 void Canvas::setCurrentGroupParentAsCurrentGroup()
@@ -1379,11 +1345,6 @@ void Canvas::copyAction()
             if(!blendEffects.contains(effect)) {
                 blendEffects << effect;
             }
-        } else if(const auto layerMask = layerMaskForSelectedMaskProperty(
-                      prop, mSelectedBoxes.getList())) {
-            if(!blendEffects.contains(layerMask)) {
-                blendEffects << layerMask;
-            }
         }
     }
     if(!rasterEffects.isEmpty() || !transformEffects.isEmpty() || !blendEffects.isEmpty()) {
@@ -1450,17 +1411,6 @@ void Canvas::cutAction()
         copyAction();
         bool removed = false;
         const auto selected = mSelectedProps.getList();
-        QList<LayerMaskEffect*> layerMaskEffectsToRemove;
-        for(const auto prop : selected) {
-            const auto layerMask = layerMaskForSelectedMaskProperty(
-                      prop, mSelectedBoxes.getList());
-            if(layerMask && !layerMaskEffectsToRemove.contains(layerMask)) {
-                layerMaskEffectsToRemove << layerMask;
-            }
-        }
-        for(const auto layerMask : layerMaskEffectsToRemove) {
-            removed = removeEffectForCut(layerMask) || removed;
-        }
         for(const auto prop : selected) {
             removed = removeEffectForCut(prop) || removed;
         }
@@ -1566,8 +1516,31 @@ void Canvas::splitAction()
 
 void Canvas::duplicateAction()
 {
-    copyAction();
-    pasteAction();
+    if (mSelectedBoxes.isEmpty()) { return; }
+
+    const auto originals = mSelectedBoxes.getList();
+    clearBoxesSelection();
+
+    for (auto* box : originals) {
+        if (!box) continue;
+
+        ContainerBox* targetContainer = box->getParentGroup();
+        if (!targetContainer) { targetContainer = mCurrentContainer; }
+
+        const int originalZIndex = box->getZIndex();
+        const QString originalName = box->prp_getName();
+
+        QList<BoundingBox*> singleList;
+        singleList.append(box);
+
+        const auto tempClipboard = enve::make_shared<BoxesClipboard>(singleList);
+        tempClipboard->pasteTo(targetContainer);
+
+        if (mLastSelectedBox && mLastSelectedBox != box) {
+            mLastSelectedBox->moveTo(originalZIndex);
+            mLastSelectedBox->prp_setName(originalName + " Copy");
+        }
+    }
 }
 
 void Canvas::selectAllAction()

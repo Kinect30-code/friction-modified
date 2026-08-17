@@ -221,7 +221,6 @@ set(
     GUI/aeshortcutcontroller.cpp
     GUI/aeshortcutdefaults.cpp
     GUI/canvaswindow.cpp
-    GUI/layerrelationswidget.cpp
     GUI/graphboxeslist.cpp
     GUI/keysview.cpp
     GUI/mainwindow.cpp
@@ -276,7 +275,6 @@ set(
     GUI/aeshortcutcontroller.h
     GUI/aeshortcutdefaults.h
     GUI/canvaswindow.h
-    GUI/layerrelationswidget.h
     GUI/keysview.h
     GUI/mainwindow.h
     GUI/window.h
@@ -384,6 +382,16 @@ target_link_libraries(
     ${SKIA_LIBRARIES}
 )
 
+if(${BUILD_AEP_IMPORT})
+    target_compile_definitions(${PROJECT_NAME} PRIVATE BUILD_AEP_IMPORT)
+    target_link_libraries(${PROJECT_NAME} PRIVATE friction_aep_mapper)
+endif()
+
+if(${BUILD_PSD_IMPORT})
+    target_compile_definitions(${PROJECT_NAME} PRIVATE BUILD_PSD_IMPORT)
+    target_link_libraries(${PROJECT_NAME} PRIVATE friction_psd_import)
+endif()
+
 if(${SKIA_USE_SYSTEM_LIBS} AND UNIX)
     target_link_libraries(
         ${PROJECT_NAME}
@@ -430,7 +438,17 @@ if(${SKIA_STATIC})
     endif()
 endif()
 
+if(APPLE)
+    target_link_libraries(
+        ${PROJECT_NAME}
+        PRIVATE
+        "-framework AppKit"
+    )
+endif()
+
 if(UNIX AND NOT APPLE)
+    option(INSTALL_DOCS "Install documentation on Linux/BSD" ON)
+    #option(INSTALL_OFFLINE_DOCS "Install offline documentation on Linux/BSD" OFF)
     target_link_libraries(
         ${PROJECT_NAME}
         PRIVATE
@@ -499,11 +517,21 @@ if(UNIX AND NOT APPLE)
         RENAME
         application-x-${PROJECT_FREEDESKTOP}.svg
     )
-    install(
-        FILES
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../LICENSE.md
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../README.md
-        DESTINATION
-        ${CMAKE_INSTALL_DOCDIR}-${PROJECT_VERSION}
-    )
+    if(${INSTALL_DOCS})
+        install(
+            FILES
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../LICENSE.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../README.md
+            DESTINATION
+            ${CMAKE_INSTALL_DOCDIR}
+        )
+        #if(${INSTALL_OFFLINE_DOCS})
+        #    install(
+        #        DIRECTORY
+        #        ${CMAKE_CURRENT_SOURCE_DIR}/../../docs/offline/
+        #        DESTINATION
+        #        ${CMAKE_INSTALL_DOCDIR}/html
+        #    )
+        #endif()
+    endif()
 endif()

@@ -400,11 +400,6 @@ UIDock::UIDock(QWidget *parent,
     updateCollapseUi();
 }
 
-UIDock::~UIDock()
-{
-    writeSettings();
-}
-
 void UIDock::setPosition(const Position &pos)
 {
     mPos = pos;
@@ -647,12 +642,6 @@ UILayout::UILayout(QWidget *parent)
     mMiddle->setCollapsible(mMiddle->indexOf(mTop), false);
 }
 
-UILayout::~UILayout()
-{
-    updateDocks();
-    writeSettings();
-}
-
 void UILayout::readSettings()
 {
     const bool firstrun = AppSupport::getSettings(UI_CONF_GROUP, UI_CONF_KEY_COLUMNS).isNull();
@@ -681,6 +670,7 @@ void UILayout::readSettings()
 
 void UILayout::writeSettings()
 {
+    saveDocks();
     AppSupport::setSettings(UI_CONF_GROUP, UI_CONF_KEY_MAIN, saveState());
     AppSupport::setSettings(UI_CONF_GROUP, UI_CONF_KEY_COLUMNS, mColumns->saveState());
     AppSupport::setSettings(UI_CONF_GROUP, UI_CONF_KEY_LEFT, mLeft->saveState());
@@ -1109,6 +1099,29 @@ void UILayout::updateBottomTabsVisibility()
     }
 
     mBottomTabs->setVisible(hasVisibleTabs);
+}
+
+void UILayout::saveDocks()
+{
+    updateDocks();
+    saveDock(mLeft);
+    saveDock(mRight);
+    saveDock(mTop);
+    for (int i = 0; i < mBottomTabs->count(); ++i) {
+        UIDock *dock = qobject_cast<UIDock*>(mBottomTabs->widget(i));
+        if (!dock) { continue; }
+        dock->writeSettings();
+    }
+}
+
+void UILayout::saveDock(QSplitter *container)
+{
+    if (!container) { return; }
+    for (int i = 0; i < container->count(); ++i) {
+        UIDock *dock = qobject_cast<UIDock*>(container->widget(i));
+        if (!dock) { continue; }
+        dock->writeSettings();
+    }
 }
 
 #include "uilayout.moc"

@@ -24,6 +24,8 @@
     </qresource>
     <qresource prefix="/config"/>
     <qresource prefix="/">
+        <file>presets/render/008-friction-preset-exr.conf</file>
+        <file>presets/render/007-friction-preset-webm.conf</file>
         <file>presets/render/006-friction-preset-tiff.conf</file>
         <file>presets/render/005-friction-preset-png.conf</file>
         <file>presets/render/004-friction-preset-prores-444-aac.conf</file>
@@ -41,5 +43,6 @@
         <file>icons/splash/splash-00004.png</file>
         <file>icons/splash/splash-00005.png</file>
         <file>icons/splash/splash-00006.png</file>
+        <file>icons/friction-splash.png</file>
     </qresource>
 </RCC>

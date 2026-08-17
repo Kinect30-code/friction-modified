@@ -66,7 +66,7 @@ private:
 MotionBlurEffect::MotionBlurEffect() :
     RasterEffect("motion blur",
                  AppSupport::getRasterEffectHardwareSupport("MotionBlur",
-                                                            HardwareSupport::gpuPreffered),
+                                                            HardwareSupport::cpuOnly),
                  false,
                  RasterEffectType::MOTION_BLUR)
 {

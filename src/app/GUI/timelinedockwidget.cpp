@@ -461,6 +461,8 @@ bool TimelineDockWidget::processKeyPress(QKeyEvent *event)
         }
     } else if (ctrl && shift && key == Qt::Key_D) { // split clip
         splitClip();
+    } else if (key == Qt::Key_K && mods == Qt::NoModifier) { // split clip
+        splitClip();
     } else if (key == Qt::Key_B && !ctrl && !alt) { // work area in
         setIn();
     } else if (key == Qt::Key_N && !ctrl && !alt) { // work area out

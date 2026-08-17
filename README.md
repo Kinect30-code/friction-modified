@@ -8,7 +8,45 @@
 
 ## ✨ 本版本的主要功能
 
-## 🆕 本次更新 (2026-04-28)
+## 🤝 贡献
+
+We accept any contributions, big or small. Before submitting a pull request it's recommended that you communicate with the developers first (on [GitHub](https://github.com/friction2d/friction/issues) or [Codeberg](https://codeberg.org/friction/friction/issues)).
+
+## 🆕 本次更新 (2026-08-16)
+
+### 同步上游 Friction 主干更新（v1.0.0-rc.3 → main @ 548d46e）
+- **QuickSetup / InstallPresets 向导**：全新安装引导与预设管理向导（含 WebM Alpha 预设选项）
+- **SmartPath 节点加固**：用空检查与范围钳制替代 RuntimeThrow，修复路径插值/合并崩溃
+- **OpenGL ES 3.0 支持**：新增 GLES3 渲染后端选项
+- **HiDPI PassThrough 选项**：界面缩放策略可配置
+- **视频编码修复**：WebM alpha 非预乘处理、编码器崩溃防护、flush buffers 修正
+- **SVG 导入大幅改进**：文本/渐变/透明度/剪贴板粘贴重构
+- **父子级效果重构**：官方 bind-state 系统（更稳定的父级跟随与旋转补偿）
+- **UX 改进**：Duplicate 重构、step rotation（Ctrl/Shift）、时间轴图层图标、AskDialog、macOS fit canvas 修复
+- **保留全部本地特性**：AE 遮罩模块、运动模糊 V2、调整层、GLTF/ORA/粒子模块、WebM Alpha 预设、崩溃日志、插件管理、快捷键系统
+
+## 🕘 上次更新 (2026-06-09)
+
+### AE合成与遮罩系统修复
+- **合并塌陷变换按钮逻辑**：将原本分离的 Collapse Transformations / Promote-Demote 行为整合为更接近 After Effects 的单一按钮逻辑，按钮点亮表示塌陷变换启用
+- **修复嵌套合成黑底问题**：不塌陷模式下嵌套合成使用透明底渲染，避免目标合成的黑色空背景被带到主合成
+- **修复嵌套合成轨道遮罩失效**：不塌陷模式下强制展开子层渲染，确保内部 Track Matte 在外层合成中仍然生效
+- **修复轨道遮罩预览缩放错误**：区分预览显示坐标和内部渲染坐标，避免 75% / 50% 预览时遮罩内容越缩越大的问题
+- **修复切换塌陷时崩溃**：修复 Track Matte 延迟绘制路径中的空指针访问，避免点击塌陷按钮触发 SIGSEGV
+- **修复图层蒙版保存/加载**：Layer Mask 的路径现在保存到真实目标图层，重新打开工程后蒙版路径不再丢失
+
+### AE工作流增强
+- **Project 面板行为优化**：继续完善合成、素材和 ORA 导入后的项目组织逻辑
+- **Tab 导航与合成链修复**：优化嵌套合成/ORA 合成之间的导航链显示，减少返回普通合成后的层级残留
+- **AE快捷键与界面细节调整**：补充常用 AE 风格快捷键，优化时间轴、画布窗口和工具按钮交互
+- **新增/更新图标资源**：更新工具栏、文件操作、导入、透明网格等图标资源
+
+### 稳定性与渲染修复
+- **修复缓存与嵌套合成状态传播**：嵌套合成内容变化会正确通知外层画布更新，避免外层显示旧缓存
+- **修复运动模糊、调整层、效果渲染相关问题**：改进渲染模块中多类效果的更新和缓存失效逻辑
+- **修复 ORA / 素材导入细节**：改善 ORA 合成导入、素材命名、剪贴板复制等相关行为
+
+## 🕘 上次更新 (2026-04-28)
 
 ### 预览缓存系统重写
 - **修复缓存方向反转问题**：嵌套合成/ORA缓存不再"从右往左填"，严格按帧号递增顺序 0→1→2→3... 正向缓存
@@ -92,7 +130,7 @@
 * [Windows](https://friction.graphics/documentation/source-windows.html)
 * [macOS](https://friction.graphics/documentation/source-macos.html)
 
-## 📄 许可证
+## 📄 许可证 (GPL-3.0-only)
 
 本项目保持与原项目相同的许可证：
 

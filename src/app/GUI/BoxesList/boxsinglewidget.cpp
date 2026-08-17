@@ -64,7 +64,6 @@
 #include "canvas.h"
 #include "BlendEffects/blendeffectcollection.h"
 #include "BlendEffects/blendeffectboxshadow.h"
-#include "BlendEffects/trackmatteeffect.h"
 #include "Sound/eindependentsound.h"
 #include "GUI/propertynamedialog.h"
 #include "Animators/SmartPath/smartpathcollection.h"
@@ -81,6 +80,13 @@
 #include <QFileInfo>
 #include <QLocale>
 #include <QMessageBox>
+
+#include "Boxes/circle.h"
+#include "Boxes/rectangle.h"
+#include "Boxes/nullobject.h"
+#include "Sound/evideosound.h"
+#include "Boxes/internallinkgroupbox.h"
+#include "Boxes/imagesequencebox.h"
 
 QPixmap* BoxSingleWidget::VISIBLE_ICON;
 QPixmap* BoxSingleWidget::INVISIBLE_ICON;
@@ -100,6 +106,18 @@ QPixmap* BoxSingleWidget::G_ICON;
 QPixmap* BoxSingleWidget::CG_ICON;
 QPixmap* BoxSingleWidget::GRAPH_PROPERTY_ICON;
 
+QPixmap* BoxSingleWidget::BOX_PATH;
+QPixmap* BoxSingleWidget::BOX_CIRCLE;
+QPixmap* BoxSingleWidget::BOX_RECT;
+QPixmap* BoxSingleWidget::BOX_TEXT;
+QPixmap* BoxSingleWidget::BOX_NULL;
+QPixmap* BoxSingleWidget::BOX_IMAGE;
+QPixmap* BoxSingleWidget::BOX_VIDEO;
+QPixmap* BoxSingleWidget::BOX_SOUND;
+QPixmap* BoxSingleWidget::BOX_GROUP;
+QPixmap* BoxSingleWidget::BOX_LINK;
+QPixmap* BoxSingleWidget::BOX_SEQ;
+
 bool BoxSingleWidget::sStaticPixmapsLoaded = false;
 
 namespace {
@@ -114,40 +132,6 @@ bool boxIsAncestorOf(BoundingBox *ancestor, BoundingBox *box)
         current = current->getParentGroup();
     }
     return false;
-}
-
-BoundingBox *defaultTrackMatteSource(BoundingBox *box)
-{
-    if (!box) {
-        return nullptr;
-    }
-    auto *parent = box->getParentGroup();
-    if (!parent) {
-        return nullptr;
-    }
-
-    const auto &siblings = parent->getContainedBoxes();
-    const int boxIndex = siblings.indexOf(box);
-    if (boxIndex < 0 || boxIndex + 1 >= siblings.count()) {
-        return nullptr;
-    }
-    return siblings.at(boxIndex + 1);
-}
-
-int matteIndexForTrackMatte(BoundingBox *box)
-{
-    if (!box || !box->getTrackMatteTarget()) {
-        return 0;
-    }
-
-    switch (box->getTrackMatteMode()) {
-    case TrackMatteMode::alphaMatte:
-        return 1;
-    case TrackMatteMode::alphaInvertedMatte:
-        return 2;
-    default:
-        return 0;
-    }
 }
 
 QString titleCaseWords(const QString &text)
@@ -434,6 +418,39 @@ BoxSingleWidget::BoxSingleWidget(BoxScroller * const parent)
     mMainLayout->setContentsMargins(0, 0, 0, 0);
     mMainLayout->setAlignment(Qt::AlignLeft);
 
+    mBoxButton = new PixmapActionButton(this);
+    mBoxButton->setPixmapChooser([this]() {
+        if (!mTarget) { return static_cast<QPixmap*>(nullptr); }
+        const auto target = mTarget->getTarget();
+        if (enve_cast<Circle*>(target)) {
+            return BoxSingleWidget::BOX_CIRCLE;
+        } else if (enve_cast<RectangleBox*>(target)) {
+            return BoxSingleWidget::BOX_RECT;
+        } else if (enve_cast<TextBox*>(target)) {
+            return BoxSingleWidget::BOX_TEXT;
+        } else if (enve_cast<NullObject*>(target)) {
+            return BoxSingleWidget::BOX_NULL;
+        } else if (enve_cast<ImageBox*>(target)) {
+            return BoxSingleWidget::BOX_IMAGE;
+        } else if (enve_cast<VideoBox*>(target)) {
+            return BoxSingleWidget::BOX_VIDEO;
+        } else if (enve_cast<eVideoSound*>(target) ||
+                   enve_cast<eSound*>(target)) {
+            return BoxSingleWidget::BOX_SOUND;
+        } else if (enve_cast<InternalLinkGroupBox*>(target)) {
+            return BoxSingleWidget::BOX_LINK;
+        } else if (enve_cast<ImageSequenceBox*>(target)) {
+            return BoxSingleWidget::BOX_SEQ;
+        } else if (enve_cast<PathBox*>(target)) {
+            return BoxSingleWidget::BOX_PATH;
+        } else if (enve_cast<ContainerBox*>(target)) {
+            return BoxSingleWidget::BOX_GROUP;
+        }
+        return static_cast<QPixmap*>(nullptr);
+    });
+
+    mMainLayout->addWidget(mBoxButton);
+
     mRecordButton = new PixmapActionButton(this);
     mRecordButton->setPixmapChooser([this]() {
         if (!mTarget) { return static_cast<QPixmap*>(nullptr); }
@@ -719,8 +736,8 @@ BoxSingleWidget::BoxSingleWidget(BoxScroller * const parent)
 
     mColorButton = new ColorAnimatorButton(nullptr, this);
     mMainLayout->addWidget(mColorButton, Qt::AlignRight);
-    mColorButton->setFixedHeight(mColorButton->height() - 6);
-    mColorButton->setContentsMargins(0, 3, 0, 3);
+    mColorButton->setFixedHeight(mColorButton->height() - 2);
+    mColorButton->setContentsMargins(0, 1, 0, 1);
 
     mPropertyComboBox = createCombo(this);
     mMainLayout->addWidget(mPropertyComboBox);
@@ -811,68 +828,6 @@ BoxSingleWidget::BoxSingleWidget(BoxScroller * const parent)
                 box->setParentEffectTarget(parentBox);
             }
         }
-        Document::sInstance->actionFinished();
-        syncTimelineRelationControls();
-    });
-
-    mMattePickWhipButton = new QPushButton(tr("T"), this);
-    mMattePickWhipButton->setObjectName("AeTimelineRelationPickWhip");
-    mMattePickWhipButton->setFlat(true);
-    mMattePickWhipButton->setFocusPolicy(Qt::NoFocus);
-    mMattePickWhipButton->setToolTip(tr("Pick-whip another layer to use as this layer's track matte source."));
-    mMattePickWhipButton->setFixedWidth(qRound(eSizesUI::widget * 1.1));
-    mMainLayout->addWidget(mMattePickWhipButton);
-    mMattePickWhipButton->hide();
-    connect(mMattePickWhipButton, &QPushButton::pressed, this, [this]() {
-        const auto box = mTarget ? enve_cast<BoundingBox*>(mTarget->getTarget()) : nullptr;
-        if (!box || !mParent) return;
-        mParent->beginPickWhip(
-                    box,
-                    BoxScroller::PickWhipMode::matte,
-                    mMattePickWhipButton->mapToGlobal(mMattePickWhipButton->rect().center()));
-    });
-
-    mTrackMatteCombo = createCombo(this);
-    mTrackMatteCombo->setObjectName("timelineTrackMatteCombo");
-    mTrackMatteCombo->setToolTip(tr("AE-style track matte mode for this layer. If no matte source is linked yet, the layer above is used by default."));
-    mTrackMatteCombo->addItem(tr("None"), -1);
-    mTrackMatteCombo->addItem(tr("alpF"), int(TrackMatteMode::alphaMatte));
-    mTrackMatteCombo->addItem(tr("alpB"), int(TrackMatteMode::alphaInvertedMatte));
-    mTrackMatteCombo->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Minimum);
-    mTrackMatteCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-    mTrackMatteCombo->setMinimumContentsLength(5);
-    mTrackMatteCombo->setMaximumWidth(qRound(eSizesUI::widget * 4.6));
-    mMainLayout->addWidget(mTrackMatteCombo);
-    connect(mTrackMatteCombo, qOverload<int>(&QComboBox::activated),
-            this, [this](const int id) {
-        if (!mTarget || mUpdatingTimelineRelations) return;
-        const auto box = enve_cast<BoundingBox*>(mTarget->getTarget());
-        if (!box) return;
-        if (id == 0) {
-            box->clearTrackMatte();
-            Document::sInstance->actionFinished();
-            syncTimelineRelationControls();
-            return;
-        }
-
-        auto *matteSource = box->getTrackMatteTarget();
-        if (!matteSource) {
-            matteSource = defaultTrackMatteSource(box);
-        }
-        if (!matteSource || matteSource == box) {
-            if (auto *win = MainWindow::sGetInstance()) {
-                if (win->statusBar()) {
-                    win->statusBar()->showMessage(
-                        tr("No matte source layer is available above this layer. Move the matte source above this layer or use the T whip to pick one."),
-                        3500);
-                }
-            }
-            syncTimelineRelationControls();
-            return;
-        }
-
-        const auto mode = static_cast<TrackMatteMode>(mTrackMatteCombo->itemData(id).toInt());
-        box->setTrackMatteTarget(matteSource, mode);
         Document::sInstance->actionFinished();
         syncTimelineRelationControls();
     });
@@ -1054,7 +1009,6 @@ void BoxSingleWidget::syncTimelineRelationControls() {
     }
     mParentLayerCombo->setCurrentIndex(parentIndex);
 
-    mTrackMatteCombo->setCurrentIndex(matteIndexForTrackMatte(box));
     mUpdatingTimelineRelations = false;
 }
 
@@ -1253,10 +1207,8 @@ void BoxSingleWidget::setTargetAbstraction(SWT_Abstraction *abs) {
     mBlendModeVisible = false;
     mFillTypeVisible = false;
     mTimelineParentVisible = false;
-    mTimelineMatteVisible = false;
     mTimelineCollapseVisible = false;
     mParentPickWhipButton->hide();
-    mMattePickWhipButton->hide();
     mPromoteDemoteToggle->hide();
     mMotionBlurToggle->hide();
     mSoloButton->hide();
@@ -1278,7 +1230,6 @@ void BoxSingleWidget::setTargetAbstraction(SWT_Abstraction *abs) {
         if (isTimelineLayerRow()) {
             mBlendModeVisible = true;
             mTimelineParentVisible = true;
-            mTimelineMatteVisible = true;
             mTimelineCollapseVisible = true;
             mSoloButton->show();
             mPromoteDemoteToggle->show();
@@ -1568,12 +1519,6 @@ void BoxSingleWidget::applyInlineExpressionEdit()
         return;
     }
 
-    if (!script.contains(QStringLiteral("return")) &&
-        !script.contains(QLatin1Char(';')) &&
-        !script.contains(QLatin1Char('\n'))) {
-        script = QStringLiteral("return %1;").arg(script);
-    }
-
     const QString bindings = QStringLiteral(
         "fps = $scene.fps;\n"
         "frame = $frame;\n"
@@ -1611,12 +1556,10 @@ void BoxSingleWidget::loadStaticPixmaps(int iconSize)
     if (sStaticPixmapsLoaded) { return; }
     if (!ThemeSupport::hasIconSize(iconSize)) {
         QMessageBox::warning(nullptr,
-                             tr("Icon issues"),
+                             tr("Scaling issues"),
                              tr("<p>Requested icon size <b>%1</b> is not available,"
-                                " expect blurry icons.</p>"
-                                "<p>Note that this may happen if you change the display scaling"
-                                " in Windows without restarting."
-                                " If you still have issues after restarting please report this issue.</p>").arg(iconSize));
+                                " expect blurry icons and possible UI size issues. This is usually related to font scaling.</p>"
+                                "<p>Disable <b>'HiDPI PassThrough'</b> in preferences, then restart Friction.</p>").arg(iconSize));
     }
     const auto pixmapSize = ThemeSupport::getIconSize(iconSize);
     qDebug() << "pixmaps size" << pixmapSize;
@@ -1637,6 +1580,18 @@ void BoxSingleWidget::loadStaticPixmaps(int iconSize)
     G_ICON = new QPixmap(QIcon::fromTheme("gpu-active").pixmap(pixmapSize));
     CG_ICON = new QPixmap(QIcon::fromTheme("cpu-gpu").pixmap(pixmapSize));
     GRAPH_PROPERTY_ICON = new QPixmap(QIcon::fromTheme("graph_property_2").pixmap(pixmapSize));
+
+    BOX_PATH = new QPixmap(QIcon::fromTheme("pathCreate").pixmap(pixmapSize));
+    BOX_CIRCLE = new QPixmap(QIcon::fromTheme("circleCreate").pixmap(pixmapSize));
+    BOX_RECT = new QPixmap(QIcon::fromTheme("rectCreate").pixmap(pixmapSize));
+    BOX_TEXT = new QPixmap(QIcon::fromTheme("textCreate").pixmap(pixmapSize));
+    BOX_NULL = new QPixmap(QIcon::fromTheme("nullCreate").pixmap(pixmapSize));
+    BOX_IMAGE = new QPixmap(QIcon::fromTheme("image-x-generic").pixmap(pixmapSize));
+    BOX_VIDEO = new QPixmap(QIcon::fromTheme("file_movie").pixmap(pixmapSize));
+    BOX_SOUND = new QPixmap(QIcon::fromTheme("audio-x-generic").pixmap(pixmapSize));
+    BOX_GROUP = new QPixmap(QIcon::fromTheme("group").pixmap(pixmapSize));
+    BOX_LINK = new QPixmap(QIcon::fromTheme("linked").pixmap(pixmapSize));
+    BOX_SEQ = new QPixmap(QIcon::fromTheme("renderlayers").pixmap(pixmapSize));
 
     sStaticPixmapsLoaded = true;
 }
@@ -1662,6 +1617,18 @@ void BoxSingleWidget::clearStaticPixmaps()
     delete G_ICON;
     delete CG_ICON;
     delete GRAPH_PROPERTY_ICON;
+
+    delete BOX_PATH;
+    delete BOX_CIRCLE;
+    delete BOX_RECT;
+    delete BOX_TEXT;
+    delete BOX_NULL;
+    delete BOX_IMAGE;
+    delete BOX_VIDEO;
+    delete BOX_SOUND;
+    delete BOX_GROUP;
+    delete BOX_LINK;
+    delete BOX_SEQ;
 }
 
 void BoxSingleWidget::mousePressEvent(QMouseEvent *event) {
@@ -2257,16 +2224,10 @@ void BoxSingleWidget::updateTimelineRelationCombosVisible() {
     const int relationOffset = mBlendModeCombo->isVisible() ? qRound(5.4*eSizesUI::widget) : 0;
     const bool canShowCollapse = remaining - relationOffset > qRound(2.0*eSizesUI::widget);
     const bool canShowParent = remaining - relationOffset > qRound(3.8*eSizesUI::widget);
-    const bool canShowMatte = remaining - relationOffset > qRound(5.8*eSizesUI::widget);
     if (mTimelineParentVisible && canShowParent) {
         mParentLayerCombo->show();
     } else {
         mParentLayerCombo->hide();
-    }
-    if (mTimelineMatteVisible && canShowMatte) {
-        mTrackMatteCombo->show();
-    } else {
-        mTrackMatteCombo->hide();
     }
     if (mTimelineCollapseVisible && canShowCollapse) {
         // Collapse is now unified with Promote/Demote toggle
@@ -2277,9 +2238,7 @@ void BoxSingleWidget::updatePickWhipButtonsVisible() {
     if (!mTarget) return;
     const int remaining = width() - mFillWidget->x();
     const bool canShowParent = remaining > qRound(4.2*eSizesUI::widget);
-    const bool canShowMatte = remaining > qRound(5.4*eSizesUI::widget);
     mParentPickWhipButton->setVisible(mTimelineParentVisible && canShowParent);
-    mMattePickWhipButton->setVisible(mTimelineMatteVisible && canShowMatte);
     if (const auto target = enve_cast<eBoxOrSound*>(mTarget->getTarget())) {
         mSoloButton->setVisible(isTimelineLayerRow());
         mSoloButton->setChecked(mParent && mParent->isSolo(target));

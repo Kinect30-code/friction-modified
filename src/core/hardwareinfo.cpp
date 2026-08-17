@@ -24,19 +24,9 @@
 // Fork of enve - Copyright (C) 2016-2020 Maurycy Liebner
 
 #include "hardwareinfo.h"
-
+#include "appsupport.h"
+#include "Private/Tasks/offscreenqgl33c.h"
 #include <QThread>
-
-#include "exceptions.h"
-
-#if defined(Q_OS_WIN)
-    #include "windowsincludes.h"
-#elif defined(Q_OS_LINUX)
-    #include <sys/sysinfo.h>
-#elif defined(Q_OS_MACOS)
-    #include <sys/types.h>
-    #include <sys/sysctl.h>
-#endif
 
 int HardwareInfo::mCpuThreads = -1;
 
@@ -46,49 +36,6 @@ GpuVendor HardwareInfo::mGpuVendor = GpuVendor::unrecognized;
 QString HardwareInfo::mGpuVendorString = QObject::tr("Unknown");
 QString HardwareInfo::mGpuRendererString = QObject::tr("Unknown");
 QString HardwareInfo::mGpuVersionString = QObject::tr("Unknown");
-
-intKB getTotalRamBytes() {
-#if defined(Q_OS_WIN)
-    MEMORYSTATUSEX statex;
-    statex.dwLength = sizeof (statex);
-    GlobalMemoryStatusEx(&statex);
-    const longB totalBytes(statex.ullTotalPhys);
-    return intKB(totalBytes);
-#elif defined(Q_OS_LINUX)
-    FILE * const meminfo = fopen("/proc/meminfo", "r");
-    if(meminfo) {
-        char line[256];
-
-        while(fgets(line, sizeof(line), meminfo)) {
-            intKB memTotal(0);
-            if(sscanf(line, "MemTotal: %d kB", &memTotal.fValue) == 1) {
-                fclose(meminfo);
-                return memTotal;
-            }
-        }
-        fclose(meminfo);
-    }
-    struct sysinfo info = {};
-    if(sysinfo(&info) == 0) {
-        const longB totalBytes(static_cast<qint64>(info.totalram)*
-                               static_cast<qint64>(info.mem_unit));
-        return intKB(totalBytes);
-    }
-    qWarning() << "HardwareInfo: failed to query RAM size";
-    return intKB(0);
-#elif defined(Q_OS_MACOS)
-    int mib [] = { CTL_HW, HW_MEMSIZE };
-    int64_t bytes = 0;
-    size_t length = sizeof(bytes);
-    const int ret = sysctl(mib, 2, &bytes, &length, NULL, 0);
-    if(ret) RuntimeThrow("Failed to retrieve memory using sysctl");
-    return intKB(longB(bytes));
-#endif
-    RuntimeThrow("Unsupported platform for RAM detection");
-    return intKB(0);
-}
-
-#include "Private/Tasks/offscreenqgl33c.h"
 
 const QPair<GpuVendor, QStringList> gpuVendor()
 {
@@ -123,7 +70,7 @@ const QPair<GpuVendor, QStringList> gpuVendor()
 
 void HardwareInfo::sUpdateInfo() {
     mCpuThreads = QThread::idealThreadCount();
-    mRamKB = getTotalRamBytes();
+    mRamKB = AppSupport::getTotalRamBytes();
     const auto gpu = gpuVendor();
     mGpuVendor = gpu.first;
     mGpuVendorString = gpu.second.at(0);

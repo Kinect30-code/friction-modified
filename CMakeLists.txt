@@ -21,6 +21,8 @@ cmake_minimum_required(VERSION 3.12)
 project(friction.graphics)
 
 option(BUILD_SKIA "Build skia" ON)
+option(BUILD_AEP_IMPORT "Build AEP import module (C++17)" OFF)
+option(BUILD_PSD_IMPORT "Build PSD import module" OFF)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/src/cmake")
 include(friction-version)
@@ -68,6 +70,14 @@ endif()
 add_subdirectory(src/core)
 add_subdirectory(src/ui)
 add_subdirectory(src/app)
+
+if(${BUILD_AEP_IMPORT})
+    add_subdirectory(src/modules/aep)
+endif()
+
+if(${BUILD_PSD_IMPORT})
+    add_subdirectory(src/modules/psd)
+endif()
 
 if(${BUILD_SKIA})
     add_dependencies(frictioncore skialib)

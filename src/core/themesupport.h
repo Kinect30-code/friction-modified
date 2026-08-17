@@ -30,6 +30,7 @@
 #include <QList>
 #include <QSize>
 #include <QToolBar>
+#include <QFileIconProvider>
 
 #include "include/core/SkColor.h"
 
@@ -44,6 +45,7 @@ public:
         paper = 3
     };
 
+    static const QString getAppIconName(const bool alt = false);
     static const QColor getQColor(int r, int g, int b, int a = 255);
     static void setThemeVariant(ThemeVariant variant);
     static ThemeVariant themeVariant();
@@ -90,6 +92,16 @@ public:
                                       QAction *act);
     static const QColor getLightDarkColor(const QColor &color,
                                           const int &factor);
+};
+
+class CORE_EXPORT ThemeIconProvider : public QFileIconProvider
+{
+public:
+    ThemeIconProvider();
+    QIcon icon(const QFileInfo & info) const;
+
+private:
+    QIcon mIcon;
 };
 
 #endif // THEMESUPPORT_H

@@ -28,9 +28,6 @@
 #include "Boxes/smartvectorpath.h"
 #include "eevent.h"
 #include "Private/document.h"
-#include "BlendEffects/layermaskeffect.h"
-#include "GUI/dialogsinterface.h"
-#include "../modules/ae_masks/aemaskmodule.h"
 
 void Canvas::clearCurrentSmartEndPoint() {
     setCurrentSmartEndPoint(nullptr);
@@ -45,74 +42,11 @@ void Canvas::setCurrentSmartEndPoint(SmartNodePoint * const point) {
 #include "Animators/SmartPath/smartpathcollection.h"
 #include "Animators/transformanimator.h"
 
-namespace {
-void configureMaskPathAnimatorForCanvas(SmartVectorPath* const maskPath) {
-    if(!maskPath) {
-        return;
-    }
-    auto* const paths = maskPath->getPathAnimator();
-    if(!paths) {
-        return;
-    }
-    paths->prp_setName(QStringLiteral("Path"));
-    paths->prp_setDrawingOnCanvasEnabled(true);
-    const int pathCount = paths->ca_getNumberOfChildren();
-    if(pathCount <= 0) {
-        return;
-    }
-    if(auto* const firstPath = paths->ca_getChildAt<Property>(0)) {
-        paths->ca_setGUIProperty(firstPath);
-    }
-    for(int i = 0; i < pathCount; ++i) {
-        if(auto* const path = paths->ca_getChildAt<SmartPathAnimator>(i)) {
-            path->prp_setName(QStringLiteral("Path"));
-            path->prp_setDrawingOnCanvasEnabled(true);
-        }
-    }
-}
-
-void syncAeMaskSelection(Canvas* const scene, BoundingBox* const target) {
-    AeMaskModule::syncSelection(scene, target);
-    if(scene) scene->scheduleUpdate();
-}
-}
-
 void Canvas::handleAddSmartPointMousePress(const eMouseEvent &e) {
     if(mLastEndPoint ? mLastEndPoint->isHidden(mCurrentMode) : false) {
         clearCurrentSmartEndPoint();
     }
-    const qreal invScale = 1/e.fScale;
     qptr<BoundingBox> test;
-
-    if (e.fModifiers & Qt::AltModifier) {
-        if (const auto deletePoint =
-                enve_cast<SmartNodePoint*>(getPointAtAbsPos(e.fPos,
-                                                            CanvasMode::pointTransform,
-                                                            invScale))) {
-            clearPointsSelection();
-            clearCurrentSmartEndPoint();
-            clearLastPressedPoint();
-            deletePoint->actionRemove(false);
-            mPressedPoint = nullptr;
-            mStartTransform = false;
-            clearHovered();
-            scheduleUpdate();
-            return;
-        }
-    }
-
-    if (mHoveredNormalSegment.isValid()) {
-        clearPointsSelection();
-        clearCurrentSmartEndPoint();
-        mPressedPoint = mHoveredNormalSegment.divideAtAbsPos(snapEventPos(e, false));
-        if (mPressedPoint && !mPressedPoint->isSelected()) {
-            addPointToSelection(mPressedPoint);
-        }
-        mStartTransform = false;
-        clearHovered();
-        scheduleUpdate();
-        return;
-    }
 
     auto nodePointUnderMouse = static_cast<SmartNodePoint*>(mPressedPoint.data());
     if(nodePointUnderMouse ? !nodePointUnderMouse->isEndPoint() : false) {
@@ -123,48 +57,15 @@ void Canvas::handleAddSmartPointMousePress(const eMouseEvent &e) {
     if(!mLastEndPoint && !nodePointUnderMouse) {
         const auto newPath = enve::make_shared<SmartVectorPath>();
         newPath->planCenterPivotPosition();
-        
-        BoundingBox* maskTarget = nullptr;
-        if (mCurrentBox) {
-            maskTarget = mCurrentBox;
-        }
-        if(!maskTarget && !mSelectedBoxes.isEmpty()) {
-            maskTarget = mSelectedBoxes.first();
-        }
-        
-        if (maskTarget) {
-            mCurrentContainer->addContained(newPath);
-            newPath->prp_setName(Canvas::nextAeMaskName(maskTarget, nullptr));
-            Canvas::attachLayerMaskEffect(maskTarget, newPath.get());
-            DialogsInterface::instance().showStatusMessage(
-                QObject::tr("AE: Created mask for %1")
-                    .arg(maskTarget->prp_getName()));
-        } else {
-            mCurrentContainer->addContained(newPath);
-        }
-        
+        mCurrentContainer->addContained(newPath);
         clearBoxesSelection();
-        if(maskTarget) {
-            addBoxToSelection(maskTarget);
-        } else {
-            addBoxToSelection(newPath.get());
-        }
+        addBoxToSelection(newPath.get());
         const QPointF snappedPos = snapEventPos(e, false);
+        const auto relPos = newPath->mapAbsPosToRel(snappedPos);
+        newPath->getBoxTransformAnimator()->setPosition(relPos.x(), relPos.y());
         const auto newHandler = newPath->getPathAnimator();
-        SmartNodePoint* node = nullptr;
-        if(maskTarget) {
-            node = newHandler->createNewSubPathAtPos(snappedPos);
-        } else {
-            const auto relPos = newPath->mapAbsPosToRel(snappedPos);
-            newPath->getBoxTransformAnimator()->setPosition(relPos.x(), relPos.y());
-            node = newHandler->createNewSubPathAtRelPos({0, 0});
-        }
-        configureMaskPathAnimatorForCanvas(newPath.get());
+        const auto node = newHandler->createNewSubPathAtRelPos({0, 0});
         setCurrentSmartEndPoint(node);
-        if(maskTarget) {
-            syncAeMaskSelection(this, maskTarget);
-            maskTarget->refreshCanvasControls();
-        }
     } else {
         if(!nodePointUnderMouse) {
             const QPointF snappedPos = snapEventPos(e, false);

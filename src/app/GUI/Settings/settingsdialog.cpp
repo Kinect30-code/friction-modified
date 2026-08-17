@@ -7,10 +7,14 @@
 #include "appsupport.h"
 
 #include "generalsettingswidget.h"
+#include "timelinesettingswidget.h"
+
+#ifndef USE_GLES
+#include "pluginssettingswidget.h"
+#endif
+
 #include "widgets/performancesettingswidget.h"
 #include "widgets/canvassettingswidget.h"
-#include "timelinesettingswidget.h"
-#include "pluginssettingswidget.h"
 #include "widgets/presetsettingswidget.h"
 #include "shortcutsettingswidget.h"
 #include "themesupport.h"
@@ -44,8 +48,10 @@ SettingsDialog::SettingsDialog(QWidget * const parent)
     const auto timeline = new TimelineSettingsWidget(this);
     addSettingsWidget(timeline, tr("Layers"));
 
+#ifndef USE_GLES
     const auto plugins = new PluginsSettingsWidget(this);
     addSettingsWidget(plugins, tr("Plugins"));
+#endif
 
     const auto presets = new PresetSettingsWidget(this);
     addSettingsWidget(presets, tr("Presets"));

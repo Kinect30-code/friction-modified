@@ -30,6 +30,12 @@
 #include "pluginmanager.h"
 #include "../modules/ora/oramodule.h"
 #include "../modules/gltf/gltfmodule.h"
+#ifdef BUILD_AEP_IMPORT
+#include "../modules/aep/aepmapper.h"
+#endif
+#ifdef BUILD_PSD_IMPORT
+#include "../modules/psd/psdmapper.h"
+#endif
 
 qsptr<BoundingBox> eXevImporter::import(const QFileInfo &fileInfo, Canvas * const scene) const {
     Q_UNUSED(scene);
@@ -57,6 +63,26 @@ qsptr<BoundingBox> eOraImporter::import(const QFileInfo &fileInfo, Canvas * cons
     }
     return OraModule::importOraFileAsPrecomp(fileInfo, scene);
 }
+
+#ifdef BUILD_AEP_IMPORT
+qsptr<BoundingBox> eAepImporter::import(const QFileInfo &fileInfo,
+                                        Canvas * const scene) const {
+    if(!PluginManager::isEnabled(PluginFeature::aepImport)) {
+        return nullptr;
+    }
+    return AepModule::importAepFile(fileInfo, scene);
+}
+#endif
+
+#ifdef BUILD_PSD_IMPORT
+qsptr<BoundingBox> ePsdImporter::import(const QFileInfo &fileInfo,
+                                        Canvas * const scene) const {
+    if(!PluginManager::isEnabled(PluginFeature::psdImport)) {
+        return nullptr;
+    }
+    return PsdModule::importPsdFile(fileInfo, scene);
+}
+#endif
 
 bool eGltfImporter::supports(const QFileInfo &fileInfo) const {
     return PluginManager::isEnabled(PluginFeature::glbViewer) &&

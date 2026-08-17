@@ -93,10 +93,9 @@ TaskScheduler::TaskScheduler() {
             this, &TaskScheduler::afterCpuGpuTaskFinished);
 }
 
-TaskScheduler::~TaskScheduler() {
-    for(const auto& exec : mCpuExecs) {
-        exec->stopAndWait();
-    }
+TaskScheduler::~TaskScheduler()
+{
+    for (const auto& exec : mCpuExecs) { exec->stopAndWait(); }
     mHddExec->stopAndWait();
     mGpuExec->stopAndWait();
 }

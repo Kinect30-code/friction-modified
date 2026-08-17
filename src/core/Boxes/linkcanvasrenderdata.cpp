@@ -24,15 +24,17 @@
 // Fork of enve - Copyright (C) 2016-2020 Maurycy Liebner
 
 #include "linkcanvasrenderdata.h"
-#include "CacheHandlers/imagecachecontainer.h"
+#include "CacheHandlers/sceneframecontainer.h"
 #include "skia/skiahelpers.h"
 #include "skia/skqtconversions.h"
 
-void LinkCanvasRenderData::setCachedSceneFrame(ImageCacheContainer * const container) {
+void LinkCanvasRenderData::setCachedSceneFrame(SceneFrameContainer * const container) {
     if(!container) {
         return;
     }
     mCachedSceneImage = container->getImage();
+    mCachedSceneResolution = container->fResolution > 0.
+            ? container->fResolution : 1.;
 }
 
 void LinkCanvasRenderData::setupRenderData() {
@@ -51,6 +53,10 @@ void LinkCanvasRenderData::setupRenderData() {
         updateGlobalRect();
         fRenderTransform.reset();
         fRenderTransform.translate(fRelBoundingRect.x(), fRelBoundingRect.y());
+        QMatrix cachedResolutionCorrection;
+        cachedResolutionCorrection.scale(1./mCachedSceneResolution,
+                                         1./mCachedSceneResolution);
+        fRenderTransform *= cachedResolutionCorrection;
         fRenderTransform *= fScaledTransform;
         fRenderTransform.translate(-fGlobalRect.x(), -fGlobalRect.y());
         fUseRenderTransform = true;
@@ -75,16 +81,10 @@ void LinkCanvasRenderData::drawSk(SkCanvas * const canvas) {
         return;
     }
 
+    // Layer mode (non-collapsed / "flattened" precomp): content must be
+    // visible. If a cached scene image is available (set by
+    // InternalLinkCanvas::setupRenderData from the target scene's frame
+    // cache) it is drawn above; otherwise fall back to drawing the children
+    // directly so the precomp is never blank.
     ContainerBoxRenderData::drawSk(canvas);
-    if(fClipToCanvas) {
-        canvas->save();
-        canvas->concat(toSkMatrix(fScaledTransform));
-        canvas->clipRect(toSkRect(fRelBoundingRect), SkClipOp::kDifference, true);
-        canvas->clear(SK_ColorTRANSPARENT);
-        canvas->restore();
-    }
-}
-
-void LinkCanvasRenderData::afterProcessing() {
-    BoxRenderData::afterProcessing();
 }

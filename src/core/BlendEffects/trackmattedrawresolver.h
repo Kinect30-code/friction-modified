@@ -22,12 +22,12 @@ inline bool matricesMatch(const QMatrix& lhs,
 
 inline QMatrix displayTransform(const BoxRenderData* const renderData,
                                 const QMatrix& totalTransform) {
-    QMatrix paintTransform =
-            renderData->fTotalTransform.inverted()*totalTransform;
     const qreal invRes = renderData->fResolution > 0.
             ? 1/renderData->fResolution
             : 1.;
+    QMatrix paintTransform;
     paintTransform.scale(invRes, invRes);
+    paintTransform *= renderData->fTotalTransform.inverted()*totalTransform;
     return paintTransform;
 }
 
@@ -49,9 +49,21 @@ enum class CoordinateMode {
 inline DrawData resolve(const BoundingBox* const box,
                         const qreal relFrame,
                         const stdsptr<BoxRenderData>& renderData,
-                        const CoordinateMode coordinateMode) {
+                        const CoordinateMode coordinateMode,
+                        const QMatrix& canvasMatrix = QMatrix()) {
     DrawData result;
     const bool displayMode = coordinateMode == CoordinateMode::Display;
+
+    // Determine the effective transform for paintTransform computation.
+    // Use the box's own total transform at the current frame.
+    // This is correct for all box types including link/precomp layers,
+    // because getTotalTransformAtFrame returns the full chain transform
+    // matching what the render data's fTotalTransform contains.
+    const bool hasCanvasMatrix = !canvasMatrix.isIdentity();
+    const auto effectiveTransform = hasCanvasMatrix
+            ? canvasMatrix
+            : (box ? box->getTotalTransformAtFrame(relFrame) : QMatrix());
+
     if(displayMode && box && Actions::sInstance &&
        Actions::sInstance->smoothChange() &&
        box->hasLatestFinishedDisplayData(relFrame)) {
@@ -74,7 +86,7 @@ inline DrawData resolve(const BoundingBox* const box,
             if(displayMode && renderData->fRenderedImage &&
                !renderData->fUseRenderTransform) {
                 const QMatrix paintTransform =
-                        displayTransform(renderData.get(), currentTransform);
+                        displayTransform(renderData.get(), effectiveTransform);
                 result.fBounds = paintTransform.mapRect(
                             QRectF(renderData->fGlobalRect));
                 result.fBlendMode = renderData->fBlendMode;
@@ -102,7 +114,7 @@ inline DrawData resolve(const BoundingBox* const box,
             if(displayMode && latestFinished->fRenderedImage &&
                !latestFinished->fUseRenderTransform) {
                 const QMatrix paintTransform =
-                        displayTransform(latestFinished.get(), currentTransform);
+                        displayTransform(latestFinished.get(), effectiveTransform);
                 result.fBounds = paintTransform.mapRect(
                             QRectF(latestFinished->fGlobalRect));
                 result.fBlendMode = latestFinished->fBlendMode;
@@ -130,12 +142,8 @@ inline DrawData resolve(const BoundingBox* const box,
 
     QMatrix paintTransform;
     if(displayMode) {
-        // Display path draws onto the live canvas and must match
-        // RenderContainer::drawSkRaw(), which applies scale(1/fResolution).
-        const qreal dataRes = resolvedRenderData->fResolution > 0.
-                              ? resolvedRenderData->fResolution : 1.;
-        const qreal invRes = 1./dataRes;
-        paintTransform.scale(invRes, invRes);
+        paintTransform = displayTransform(resolvedRenderData.get(),
+                                          effectiveTransform);
     }
 
     result.fBounds = displayMode

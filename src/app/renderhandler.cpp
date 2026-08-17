@@ -1152,7 +1152,18 @@ void RenderHandler::startAudio() {
             mCurrentSoundComposition->stop();
         }
     }
-    mAudioHandler.startAudio();
+    if(!mAudioHandler.startAudio()) {
+        // 音频输出启动失败（设备不可用/被占用等）时降级为静音播放，
+        // 避免音视频同步把视频播放锁死（processedUSecs 不增长导致
+        // accumulator 被持续拉回 0，播放卡在某一帧）。
+        qWarning() << "Audio output failed to start — playback continues muted";
+        if(mCurrentSoundComposition->isOpen()) {
+            mCurrentSoundComposition->stop();
+        }
+        timingState.fAudioActive = false;
+        setPreviewTimingState(timingState);
+        return;
+    }
     mAudioStartFrame = currentPreviewFrameValue();
     mCurrentSoundComposition->start(mAudioStartFrame);
     timingState.fAudioActive = true;

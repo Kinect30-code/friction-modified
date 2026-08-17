@@ -27,9 +27,6 @@
 #define CONTAINERBOX_H
 #include "boxwithpatheffects.h"
 #include "conncontextobjlist.h"
-#include <QReadWriteLock>
-#include <QSet>
-#include <limits>
 
 class PathBox;
 class PathEffectCollection;
@@ -77,8 +74,7 @@ public:
     void processChildrenData(const qreal relFrame,
                              const QMatrix& thisM,
                              BoxRenderData* const data,
-                             Canvas* const scene,
-                             qreal resolutionOverride = 0);
+                             Canvas* const scene);
 
     virtual BoundingBox *getBoxAt(const QPointF &absPos);
 
@@ -170,7 +166,6 @@ public:
 
     const QList<BoundingBox*> &getContainedBoxes() const;
     const auto &getContained() const { return mContained; }
-    bool usesTrackMatteSource(const BoundingBox * const box) const;
 
     void forcedMarginMeaningfulChange();
     QRect currentGlobalBounds() const;
@@ -301,9 +296,6 @@ private:
     QList<qsptr<BlendEffectBoxShadow>> mBlendShadows;
     ConnContextObjList<qsptr<eBoxOrSound>> mContained;
     qsptr<FlipBookProperty> mFlipBook;
-    mutable QReadWriteLock mTrackMatteSourceCacheLock;
-    mutable QSet<const BoundingBox*> mTrackMatteSourceBoxes;
-    mutable uint mTrackMatteSourceCacheStateId = std::numeric_limits<uint>::max();
 };
 
 #endif // CONTAINERBOX_H

@@ -46,8 +46,7 @@ class BoxScroller : public ScrollWidgetVisiblePart {
 public:
     enum class PickWhipMode {
         none,
-        parent,
-        matte
+        parent
     };
     explicit BoxScroller(ScrollWidget * const parent);
 

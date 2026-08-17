@@ -126,16 +126,14 @@ void prepareMaskSource(PathBox* const maskPath) {
 // For a pre-comp layer (InternalLinkCanvas), the mask must be stored
 // inside the *target* Canvas's layer, because InternalLinkCanvas does
 // not serialize its children (writeAllContained is skipped).
+BoundingBox* resolveLinkedMaskOwner(BoundingBox* const target) {
+    const auto resolvedTarget = BoundingBox::resolveFinalLinkTarget(target);
+    return resolvedTarget ? resolvedTarget : target;
+}
+
 ContainerBox* resolveMaskStorageLayer(BoundingBox* const target) {
     if(!target) return nullptr;
-    // If the target is a link (pre-comp layer), resolve to the actual
-    // Canvas so the mask PathBox is serialized with the target's children.
-    if(target->isLink()) {
-        if(auto* const linkTarget = target->getLinkBoxTarget()) {
-            return linkTarget->getFirstParentLayerOrSelf();
-        }
-    }
-    return target->getFirstParentLayerOrSelf();
+    return resolveLinkedMaskOwner(target)->getFirstParentLayerOrSelf();
 }
 
 namespace AeMaskModule {
@@ -271,11 +269,10 @@ void attachLayerMaskPath(BoundingBox* const target,
     maskPath->setParentTransformKeepTransform(target->getTransformAnimator());
     if(enve_cast<SmartVectorPath*>(maskPath)) {
         configureAeMaskVectorPath(maskPath, maskPath->prp_getName());
-        if(auto* const vectorMask = enve_cast<SmartVectorPath*>(maskPath)) {
-            if(auto* const pathAnimator = vectorMask->getPathAnimator()) {
-                pathAnimator->anim_setAbsFrame(target->anim_getCurrentAbsFrame());
-                pathAnimator->prp_afterChangedCurrent(UpdateReason::userChange);
-            }
+        if(auto* const pathAnimator =
+                enve_cast<SmartVectorPath*>(maskPath)->getPathAnimator()) {
+            pathAnimator->anim_setAbsFrame(target->anim_getCurrentAbsFrame());
+            pathAnimator->prp_afterChangedCurrent(UpdateReason::userChange);
         }
     }
     maskPath->anim_setAbsFrame(target->anim_getCurrentAbsFrame());
@@ -289,14 +286,7 @@ void attachLayerMaskEffect(BoundingBox* const target,
     }
     if(!target || !maskPath) return;
 
-    // For a pre-comp layer (link), add the effect to the resolved target
-    // Canvas so it is serialized alongside the mask PathBox.
-    BoundingBox* effectOwner = target;
-    if(target->isLink()) {
-        if(auto* const linkTarget = target->getLinkBoxTarget()) {
-            effectOwner = linkTarget;
-        }
-    }
+    BoundingBox* effectOwner = resolveLinkedMaskOwner(target);
 
     const auto effect = enve::make_shared<LayerMaskEffect>();
     effect->setClipPathSource(maskPath);

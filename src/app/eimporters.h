@@ -72,6 +72,28 @@ public:
                               Canvas* const scene) const;
 };
 
+class eAepImporter : public eImporter {
+public:
+    bool supports(const QFileInfo& fileInfo) const {
+        return PluginManager::isEnabled(PluginFeature::aepImport) &&
+               fileInfo.suffix().toLower() == "aep";
+    }
+
+    qsptr<BoundingBox> import(const QFileInfo& fileInfo,
+                              Canvas* const scene) const;
+};
+
+class ePsdImporter : public eImporter {
+public:
+    bool supports(const QFileInfo& fileInfo) const {
+        return PluginManager::isEnabled(PluginFeature::psdImport) &&
+               fileInfo.suffix().toLower() == "psd";
+    }
+
+    qsptr<BoundingBox> import(const QFileInfo& fileInfo,
+                              Canvas* const scene) const;
+};
+
 class eGltfImporter : public eImporter {
 public:
     bool supports(const QFileInfo& fileInfo) const;

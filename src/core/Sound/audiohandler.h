@@ -71,7 +71,7 @@ public:
                          const QString &deviceName = QString());
     void initializeAudio(const QString &deviceName = QString(),
                          bool save = false);
-    void startAudio();
+    bool startAudio();
     void pauseAudio();
     void resumeAudio();
     void stopAudio();

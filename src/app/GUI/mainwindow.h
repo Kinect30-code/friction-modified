@@ -62,6 +62,10 @@
 #include "widgets/uilayout.h"
 #include "widgets/toolbox.h"
 
+#ifndef Q_OS_MAC
+#include "widgets/persistentmenu.h"
+#endif
+
 class VideoEncoder;
 class RenderWidget;
 class ActionButton;
@@ -291,7 +295,11 @@ private:
     QMenu *mPathMenu;
     QMenu *mEffectsMenu;
     QMenu *mSceneMenu;
+#ifndef Q_OS_MAC
+    Friction::Ui::PersistentMenu *mViewMenu;
+#else
     QMenu *mViewMenu;
+#endif
     QMenu *mPanelsMenu;
     QMenu *mRenderMenu;
 
@@ -393,13 +401,12 @@ private:
     void openRenderQueueWindow();
     void closedRenderQueueWindow();
 
-    void initRenderPresets(const bool reinstall = false);
-    void askInstallRenderPresets();
-    void askInstallExpressionsPresets();
+    void askInstallDefaultPresets();
     void askRestoreFillStrokeDefault();
     void askRestoreDefaultUi();
     bool isTimelineInputContext() const;
     bool isEffectControlsInputContext() const;
+    void askRunQuickSetup();
 
     QAction *mToolBarMainAct;
     QAction *mToolBarColorAct;

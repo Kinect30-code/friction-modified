@@ -109,13 +109,13 @@ bool AeShortcutController::handleToolShortcut(QKeyEvent *event)
         return true;
     }
 
-    if (matches(event, QStringLiteral("pathCreate"), QStringLiteral("G"))) {
+    if (matches(event, QStringLiteral("pathCreate"), QStringLiteral("P"))) {
         mActions.setAddPointMode();
         showStatusMessage(tr("AE: Pen Tool"));
         return true;
     }
 
-    if (matches(event, QStringLiteral("drawPath"), QStringLiteral("Shift+G"))) {
+    if (matches(event, QStringLiteral("drawPath"), QStringLiteral("Shift+P"))) {
         mActions.setDrawPathMode();
         showStatusMessage(tr("AE: Freehand Path Tool"));
         return true;

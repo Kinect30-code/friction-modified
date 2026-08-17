@@ -36,7 +36,6 @@
 #include "Animators/qrealanimator.h"
 #include "Animators/transformanimator.h"
 #include "Boxes/containerbox.h"
-#include "BlendEffects/layermaskeffect.h"
 #include "boxscroller.h"
 #include "GUI/canvaswindow.h"
 #include "GUI/mainwindow.h"
@@ -492,71 +491,6 @@ void BoxScrollWidget::applyMaskRevealToBox(BoundingBox *box)
     setAbstractionExpandedTracked(box->SWT_getAbstractionForWidget(getId()), true);
 
     const auto &siblings = parent->getContainedBoxes();
-
-    box->ca_execOnDescendants([this](Property *prop) {
-        const auto layerMask = enve_cast<LayerMaskEffect*>(prop);
-        if (!layerMask) {
-            return;
-        }
-        setTargetVisibleTracked(layerMask, true);
-        setAbstractionExpandedTracked(layerMask->SWT_getAbstractionForWidget(getId()), true);
-
-        const int childCount = layerMask->ca_getNumberOfChildren();
-        for (int i = 0; i < childCount; ++i) {
-            auto *child = layerMask->ca_getChildAt<Property>(i);
-            if (!child) {
-                continue;
-            }
-            if (child->prp_getName() == QStringLiteral("path")) {
-                continue;
-            }
-            setTargetVisibleTracked(child, true);
-            setAbstractionExpandedTracked(child->SWT_getAbstractionForWidget(getId()), true);
-        }
-
-        auto *maskPath = layerMask->maskPathSource();
-        if (!maskPath) {
-            return;
-        }
-        if (const auto vectorPath = enve_cast<SmartVectorPath*>(maskPath)) {
-            if (auto *pathAnimator = vectorPath->getPathAnimator()) {
-                setTargetVisibleTracked(pathAnimator, true);
-                setAbstractionExpandedTracked(pathAnimator->SWT_getAbstractionForWidget(getId()), true);
-                const int pathChildCount = pathAnimator->ca_getNumberOfChildren();
-                for (int j = 0; j < pathChildCount; ++j) {
-                    auto *pathChild = pathAnimator->ca_getChildAt<Property>(j);
-                    if (!pathChild) {
-                        continue;
-                    }
-                    setTargetVisibleTracked(pathChild, true);
-                    setAbstractionExpandedTracked(pathChild->SWT_getAbstractionForWidget(getId()), true);
-                    if (const auto complexPathChild = enve_cast<ComplexAnimator*>(pathChild)) {
-                        complexPathChild->ca_execOnDescendants([this](Property *pathDesc) {
-                            if (!pathDesc) {
-                                return;
-                            }
-                            setTargetVisibleTracked(pathDesc, true);
-                            setAbstractionExpandedTracked(pathDesc->SWT_getAbstractionForWidget(getId()), true);
-                        });
-                    }
-                }
-            }
-        }
-    });
-
-    for (auto *candidate : siblings) {
-        if (!candidate || candidate == box) {
-            continue;
-        }
-        const bool candidateUsesBox = candidate->getTrackMatteTarget() == box;
-        const bool boxUsesCandidate = box->getTrackMatteTarget() == candidate;
-        if (!candidateUsesBox && !boxUsesCandidate) {
-            continue;
-        }
-
-        setTargetVisibleTracked(candidate, true);
-        setAbstractionExpandedTracked(candidate->SWT_getAbstractionForWidget(getId()), true);
-    }
 }
 
 void BoxScrollWidget::setTargetVisibleTracked(SingleWidgetTarget *target,

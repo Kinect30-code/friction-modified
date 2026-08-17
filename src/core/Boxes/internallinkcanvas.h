@@ -53,6 +53,8 @@ public:
 
     bool clipToCanvas();
     BoolProperty *clipToCanvasProperty() const { return mClipToCanvas.get(); }
+    BoundingBox* getLinkTarget();
+
 private:
     qsptr<BoolProperty> mClipToCanvas =
             enve::make_shared<BoolProperty>("clip");

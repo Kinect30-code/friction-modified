@@ -30,7 +30,6 @@
 #include "Private/document.h"
 #include "Private/esettings.h"
 #include "GUI/dialogsinterface.h"
-#include "../modules/ae_masks/aemaskmodule.h"
 #include "../modules/puppet/puppettoolmodule.h"
 
 #include "Boxes/boundingbox.h"
@@ -72,119 +71,6 @@
 #include <QApplication>
 
 using namespace Friction::Core;
-
-namespace {
-static constexpr const char* kAeMaskStorageName = "Masks";
-static constexpr const char* kAeLegacyMaskStorageName = "__AE_LAYER_MASKS__";
-
-static bool isMaskStorageContainer(ContainerBox* const box) {
-    if(!box) {
-        return false;
-    }
-    const auto name = box->prp_getName();
-    return name == QString::fromLatin1(kAeMaskStorageName) ||
-           name == QString::fromLatin1(kAeLegacyMaskStorageName);
-}
-
-static bool isAeShapeLayer(ContainerBox* const layer) {
-    if(!layer || !layer->isLayer()) {
-        return false;
-    }
-    bool hasShapeChild = false;
-    for(const auto* child : layer->getContainedBoxes()) {
-        if(!child) {
-            continue;
-        }
-        if(const auto childContainer = enve_cast<ContainerBox*>(child)) {
-            if(isMaskStorageContainer(childContainer)) {
-                continue;
-            }
-        }
-        if(enve_cast<PathBox*>(child)) {
-            hasShapeChild = true;
-            continue;
-        }
-        return false;
-    }
-    return hasShapeChild;
-}
-
-static ContainerBox* resolveAeShapeLayer(
-        BoundingBox* const currentBox,
-        const ConnContextObjList<BoundingBox*>& selectedBoxes) {
-    const auto toShapeLayer = [](BoundingBox* const box) -> ContainerBox* {
-        if(!box) {
-            return nullptr;
-        }
-        if(const auto layer = enve_cast<ContainerBox*>(box)) {
-            if(isAeShapeLayer(layer)) {
-                return layer;
-            }
-        }
-        if(const auto path = enve_cast<PathBox*>(box)) {
-            const auto layer = path->getFirstParentLayerOrSelf();
-            if(isAeShapeLayer(layer)) {
-                return layer;
-            }
-        }
-        return nullptr;
-    };
-    if(const auto layer = toShapeLayer(currentBox)) {
-        return layer;
-    }
-    for(const auto& box : selectedBoxes) {
-        if(const auto layer = toShapeLayer(box)) {
-            return layer;
-        }
-    }
-    return nullptr;
-}
-
-static ContainerBox* createAeShapeLayer(ContainerBox* const parent) {
-    if(!parent) {
-        return nullptr;
-    }
-    const auto shapeLayer = enve::make_shared<ContainerBox>(
-                parent->makeNameUniqueForContained(QStringLiteral("Shape Layer")),
-                eBoxType::layer);
-    parent->addContained(shapeLayer);
-    return shapeLayer.get();
-}
-
-template <typename ShapeT>
-static ShapeT* addAeShapeToLayer(ContainerBox* const layer,
-                                 const QString& baseName) {
-    if(!layer) {
-        return nullptr;
-    }
-    const auto shape = enve::make_shared<ShapeT>();
-    shape->prp_setName(layer->makeNameUniqueForContained(baseName));
-    layer->addContained(shape);
-    return shape.get();
-}
-}
-
-bool Canvas::isAeMaskDrawableTarget(BoundingBox * const box)
-{
-    return AeMaskModule::isDrawableTarget(box);
-}
-
-QString Canvas::nextAeMaskName(BoundingBox * const target,
-                              ContainerBox * const parent)
-{
-    return AeMaskModule::nextMaskName(target, parent);
-}
-
-void Canvas::attachLayerMaskEffect(BoundingBox * const target,
-                                  PathBox * const maskPath)
-{
-    AeMaskModule::attachLayerMaskEffect(target, maskPath);
-}
-
-void Canvas::finalizeAeMaskShapePath(PathBox * const maskPath)
-{
-    AeMaskModule::finalizeShapePath(this, maskPath);
-}
 
 void Canvas::handleMovePathMousePressEvent(const eMouseEvent& e)
 {
@@ -428,104 +314,32 @@ void Canvas::handleLeftButtonMousePress(const eMouseEvent& e)
             mDrawPathFirst = getPointAtAbsPos(e.fPos, mCurrentMode, invScale);
             mDrawPathFit = 0;
             drawPathClear();
-            mDrawPathMaskTarget = AeMaskModule::resolveTarget(
-                        mCurrentBox, mSelectedBoxes);
             mDrawPath.lineTo(e.fPos);
         }
     } else if (mCurrentMode == CanvasMode::pickFillStroke ||
                mCurrentMode == CanvasMode::pickFillStrokeEvent) {
         //mPressedBox = getBoxAtFromAllDescendents(e.fPos);
     } else if (mCurrentMode == CanvasMode::circleCreate) {
-        ContainerBox* const shapeLayer = resolveAeShapeLayer(
-                    mCurrentBox, mSelectedBoxes);
-        BoundingBox* maskTarget = AeMaskModule::resolveTarget(
-                    mCurrentBox, mSelectedBoxes);
-        Circle* newPath = nullptr;
-
-        if (maskTarget && !shapeLayer) {
-            const auto shape = enve::make_shared<Circle>();
-            newPath = shape.get();
-            newPath->planCenterPivotPosition();
-            mCurrentContainer->addContained(shape);
-            const QPointF snappedPos = snapEventPos(e, false);
-            newPath->setAbsolutePos(snappedPos);
-            newPath->prp_setName(Canvas::nextAeMaskName(maskTarget, nullptr));
-            Canvas::attachLayerMaskEffect(maskTarget, newPath);
-            DialogsInterface::instance().showStatusMessage(
-                QObject::tr("AE: Created mask for %1")
-                    .arg(maskTarget->prp_getName()));
-        } else {
-            ContainerBox* targetLayer = shapeLayer;
-            if(!targetLayer) {
-                targetLayer = createAeShapeLayer(mCurrentContainer.data());
-                if(!targetLayer) {
-                    return;
-                }
-                targetLayer->setAbsolutePos(QPointF(getCanvasWidth()/2.0,
-                                                    getCanvasHeight()/2.0));
-                targetLayer->planCenterPivotPosition();
-            }
-            newPath = addAeShapeToLayer<Circle>(targetLayer, QStringLiteral("Ellipse"));
-            if(!newPath) {
-                return;
-            }
-            const QPointF snappedPos = snapEventPos(e, false);
-            newPath->setAbsolutePos(snappedPos);
-        }
+        const auto newPath = enve::make_shared<Circle>();
+        newPath->planCenterPivotPosition();
+        mCurrentContainer->addContained(newPath);
+        const QPointF snappedPos = snapEventPos(e, false);
+        newPath->setAbsolutePos(snappedPos);
         clearBoxesSelection();
-        if(maskTarget) {
-            addBoxToSelection(maskTarget);
-        } else {
-            addBoxToSelection(newPath);
-        }
-        mCurrentCircle = newPath;
-        mCreationPressPos = newPath->getAbsolutePos();
+        addBoxToSelection(newPath.get());
+        mCurrentCircle = newPath.get();
+        mCreationPressPos = snappedPos;
         mHasCreationPressPos = true;
     } else if (mCurrentMode == CanvasMode::polygonCreate) {
-        ContainerBox* const shapeLayer = resolveAeShapeLayer(
-                    mCurrentBox, mSelectedBoxes);
-        BoundingBox* maskTarget = AeMaskModule::resolveTarget(
-                    mCurrentBox, mSelectedBoxes);
-        PolygonBox* newPath = nullptr;
-
-        if (maskTarget && !shapeLayer) {
-            const auto shape = enve::make_shared<PolygonBox>();
-            newPath = shape.get();
-            newPath->planCenterPivotPosition();
-            mCurrentContainer->addContained(shape);
-            const QPointF snappedPos = snapEventPos(e, false);
-            newPath->setAbsolutePos(snappedPos);
-            newPath->prp_setName(Canvas::nextAeMaskName(maskTarget, nullptr));
-            Canvas::attachLayerMaskEffect(maskTarget, newPath);
-            DialogsInterface::instance().showStatusMessage(
-                QObject::tr("AE: Created mask for %1")
-                    .arg(maskTarget->prp_getName()));
-        } else {
-            ContainerBox* targetLayer = shapeLayer;
-            if (!targetLayer) {
-                targetLayer = createAeShapeLayer(mCurrentContainer.data());
-                if (!targetLayer) {
-                    return;
-                }
-                targetLayer->setAbsolutePos(QPointF(getCanvasWidth()/2.0,
-                                                    getCanvasHeight()/2.0));
-                targetLayer->planCenterPivotPosition();
-            }
-            newPath = addAeShapeToLayer<PolygonBox>(targetLayer, QStringLiteral("Polygon"));
-            if (!newPath) {
-                return;
-            }
-            const QPointF snappedPos = snapEventPos(e, false);
-            newPath->setAbsolutePos(snappedPos);
-        }
+        const auto newPath = enve::make_shared<PolygonBox>();
+        newPath->planCenterPivotPosition();
+        mCurrentContainer->addContained(newPath);
+        const QPointF snappedPos = snapEventPos(e, false);
+        newPath->setAbsolutePos(snappedPos);
         clearBoxesSelection();
-        if (maskTarget) {
-            addBoxToSelection(maskTarget);
-        } else {
-            addBoxToSelection(newPath);
-        }
-        mCurrentPolygon = newPath;
-        mCreationPressPos = newPath->getAbsolutePos();
+        addBoxToSelection(newPath.get());
+        mCurrentPolygon = newPath.get();
+        mCreationPressPos = snappedPos;
         mHasCreationPressPos = true;
     } else if (mCurrentMode == CanvasMode::nullCreate) {
         const auto newPath = enve::make_shared<NullObject>();
@@ -535,50 +349,15 @@ void Canvas::handleLeftButtonMousePress(const eMouseEvent& e)
         clearBoxesSelection();
         addBoxToSelection(newPath.get());
     } else if (mCurrentMode == CanvasMode::rectCreate) {
-        ContainerBox* const shapeLayer = resolveAeShapeLayer(
-                    mCurrentBox, mSelectedBoxes);
-        BoundingBox* maskTarget = AeMaskModule::resolveTarget(
-                    mCurrentBox, mSelectedBoxes);
-        RectangleBox* newPath = nullptr;
-
-        if (maskTarget && !shapeLayer) {
-            const auto shape = enve::make_shared<RectangleBox>();
-            newPath = shape.get();
-            newPath->planCenterPivotPosition();
-            mCurrentContainer->addContained(shape);
-            const QPointF snappedPos = snapEventPos(e, false);
-            newPath->setAbsolutePos(snappedPos);
-            newPath->prp_setName(Canvas::nextAeMaskName(maskTarget, nullptr));
-            Canvas::attachLayerMaskEffect(maskTarget, newPath);
-            DialogsInterface::instance().showStatusMessage(
-                QObject::tr("AE: Created mask for %1")
-                    .arg(maskTarget->prp_getName()));
-        } else {
-            ContainerBox* targetLayer = shapeLayer;
-            if(!targetLayer) {
-                targetLayer = createAeShapeLayer(mCurrentContainer.data());
-                if(!targetLayer) {
-                    return;
-                }
-                targetLayer->setAbsolutePos(QPointF(getCanvasWidth()/2.0,
-                                                    getCanvasHeight()/2.0));
-                targetLayer->planCenterPivotPosition();
-            }
-            newPath = addAeShapeToLayer<RectangleBox>(targetLayer, QStringLiteral("Rectangle"));
-            if(!newPath) {
-                return;
-            }
-            const QPointF snappedPos = snapEventPos(e, false);
-            newPath->setAbsolutePos(snappedPos);
-        }
+        const auto newPath = enve::make_shared<RectangleBox>();
+        newPath->planCenterPivotPosition();
+        mCurrentContainer->addContained(newPath);
+        const QPointF snappedPos = snapEventPos(e, false);
+        newPath->setAbsolutePos(snappedPos);
         clearBoxesSelection();
-        if(maskTarget) {
-            addBoxToSelection(maskTarget);
-        } else {
-            addBoxToSelection(newPath);
-        }
-        mCurrentRectangle = newPath;
-        mCreationPressPos = newPath->getAbsolutePos();
+        addBoxToSelection(newPath.get());
+        mCurrentRectangle = newPath.get();
+        mCreationPressPos = snappedPos;
         mHasCreationPressPos = true;
     } else if (mCurrentMode == CanvasMode::textCreate) {
         if (enve_cast<TextBox*>(mHoveredBox)) {
@@ -748,7 +527,6 @@ void Canvas::drawPathClear()
     mDrawPathFirst.clear();
     mDrawPath.clear();
     mDrawPathTmp.reset();
-    mDrawPathMaskTarget = nullptr;
 }
 
 void Canvas::drawPathFinish(const qreal invScale)
@@ -812,7 +590,6 @@ void Canvas::drawPathFinish(const qreal invScale)
             drawPathAppend(fitted, endNode);
         } else { createNew = true; }
         if (createNew) {
-            const auto maskTarget = mDrawPathMaskTarget;
             auto * const insertParent = mCurrentContainer.data();
             const auto matrix = insertParent->getTotalTransform();
             const auto invMatrix = matrix.inverted();
@@ -822,19 +599,8 @@ void Canvas::drawPathFinish(const qreal invScale)
             });
             const auto newPath = drawPathNew(fitted);
             insertParent->addContained(newPath);
-            if (maskTarget) {
-                newPath->prp_setName(nextAeMaskName(maskTarget, nullptr));
-                attachLayerMaskEffect(maskTarget, newPath.get());
-                DialogsInterface::instance().showStatusMessage(
-                    QObject::tr("AE: Created mask for %1")
-                        .arg(maskTarget->prp_getName()));
-            }
             clearBoxesSelection();
-            if(maskTarget) {
-                addBoxToSelection(maskTarget);
-            } else {
-                addBoxToSelection(newPath.get());
-            }
+            addBoxToSelection(newPath.get());
         }
     }
 
@@ -1202,6 +968,15 @@ void Canvas::rotateSelected(const eMouseEvent& e)
         else if (mLastDRot - d_rot < -90) { mRotHalfCycles -= 2; }
         mLastDRot = d_rot;
         rot = d_rot + mRotHalfCycles*180;
+    }
+
+    if (!mValueInput.inputEnabled()) {
+        const auto grid = eSettings::instance().fGrid;
+        if (e.ctrlMod() || e.shiftMod()) {
+            const qreal step = e.ctrlMod() ? grid.stepRotCtrl : grid.stepRotShift;
+            qDebug() << step;
+            rot = qRound(rot / step) * step;
+        }
     }
 
     if (mCurrentMode == CanvasMode::boxTransform) {

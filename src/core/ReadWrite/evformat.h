@@ -52,7 +52,7 @@ namespace EvFormat {
         nextVersion = timelineColor
     };
 
-    const int version = nextVersion - 1;
+    const int version = nextVersion;
 }
 
 #endif // EVFORMAT_H

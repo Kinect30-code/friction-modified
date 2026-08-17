@@ -50,8 +50,6 @@
 #include "Animators/customproperties.h"
 #include "GUI/propertynamedialog.h"
 #include "BlendEffects/blendeffectcollection.h"
-#include "BlendEffects/layermaskeffect.h"
-#include "BlendEffects/trackmatteeffect.h"
 #include "actions.h"
 #include "TransformEffects/parenteffect.h"
 #include "TransformEffects/transformeffectcollection.h"
@@ -70,6 +68,44 @@ QList<BoundingBox*> BoundingBox::sDocumentBoxes;
 QHash<int, BoundingBox*> BoundingBox::sDocumentBoxesById;
 int BoundingBox::sNextWriteId;
 QList<const BoundingBox*> BoundingBox::sBoxesWithWriteIds;
+
+const BoundingBox* BoundingBox::resolveFinalLinkTarget(const BoundingBox* box) {
+    if(!box) return nullptr;
+    QSet<const BoundingBox*> visited;
+    while(box) {
+        if(visited.contains(box)) return nullptr;
+        visited.insert(box);
+        const auto target = box->getLinkBoxTarget();
+        if(!target) return box;
+        box = target;
+    }
+    return nullptr;
+}
+
+BoundingBox* BoundingBox::resolveFinalLinkTarget(BoundingBox* box) {
+    if(!box) return nullptr;
+    QSet<const BoundingBox*> visited;
+    while(box) {
+        if(visited.contains(box)) return nullptr;
+        visited.insert(box);
+        const auto target = box->getLinkBoxTarget();
+        if(!target) return box;
+        box = target;
+    }
+    return nullptr;
+}
+
+bool BoundingBox::linkChainContains(const BoundingBox* box, const BoundingBox* target) {
+    if(!box || !target) return false;
+    QSet<const BoundingBox*> visited;
+    while(box) {
+        if(box == target) return true;
+        if(visited.contains(box)) return false;
+        visited.insert(box);
+        box = box->getLinkBoxTarget();
+    }
+    return false;
+}
 
 BoundingBox::BoundingBox(const QString& name, const eBoxType type) :
     eBoxOrSound(name),
@@ -139,9 +175,10 @@ void BoundingBox::writeBoundingBox(eWriteStream& dst) const {
     eBoxOrSound::prp_writeProperty_impl(dst);
     dst << mWriteId;
     dst.write(&mBlendMode, sizeof(SkBlendMode));
-    // Keep EV output compatible with upstream v34 projects.
-    // Timeline color remains a local/runtime feature until a dedicated
-    // compatibility strategy is introduced.
+    // Timeline color is now part of the local EV format (v35+).
+    // Read side guards with EvFormat::timelineColor, so upstream v34
+    // projects remain readable.
+    dst << mTimelineColor;
 }
 
 void BoundingBox::readBoundingBox(eReadStream& src) {
@@ -369,7 +406,6 @@ void BoundingBox::drawPixmapSk(SkCanvas * const canvas,
                                const SkFilterQuality filter) const {
     const qreal opacity = getOpacity(anim_getCurrentRelFrame());
     if(isZero4Dec(opacity) || !mVisibleInScene) return;
-    if(isUsedAsTrackMatteSource()) return;
     mDrawRenderContainer.drawSk(canvas, filter);
 }
 
@@ -720,20 +756,6 @@ void BoundingBox::rebuildCanvasProps() {
     ca_execOnDescendants([&appendCanvasProp](Property * prop) {
         appendCanvasProp(prop);
     });
-    ca_execOnDescendants([&appendCanvasProp](Property * prop) {
-        const auto layerMask = enve_cast<LayerMaskEffect*>(prop);
-        if(!layerMask) {
-            return;
-        }
-        const auto maskPath = layerMask->maskPathSource();
-        if(!maskPath) {
-            return;
-        }
-        appendCanvasProp(maskPath);
-        maskPath->ca_execOnDescendants([&appendCanvasProp](Property* const maskProp) {
-            appendCanvasProp(maskProp);
-        });
-    });
     if(prp_drawsOnCanvas() && !uniqueProps.contains(this)) {
         mCanvasProps.append(this);
     }
@@ -778,6 +800,11 @@ void BoundingBox::planUpdate(const UpdateReason reason,
         if(!causedByDescendant) {
             mRenderDataHandler.clear();
         }
+#ifdef Q_OS_MAC
+        if (const auto canvas = enve_cast<Canvas*>(this)) {
+            canvas->invalidateSceneFramesCache();
+        }
+#endif
         emit stateChanged();
     }
 
@@ -1589,30 +1616,6 @@ ParentEffect *BoundingBox::getParentEffect() const
     return nullptr;
 }
 
-TrackMatteEffect *BoundingBox::resolveTrackMatteEffect() const
-{
-    if(mTrackMatteEffectCache.fStateId == mStateId) {
-        return mTrackMatteEffectCache.fEffect;
-    }
-
-    TrackMatteEffect *trackMatteEffect = nullptr;
-    const int totalEffects = mBlendEffectCollection->ca_getNumberOfChildren();
-    for(int i = 0; i < totalEffects; ++i) {
-        if(auto *effect = enve_cast<TrackMatteEffect*>(mBlendEffectCollection->getChild(i))) {
-            trackMatteEffect = effect;
-            break;
-        }
-    }
-
-    mTrackMatteEffectCache = {mStateId, trackMatteEffect};
-    return trackMatteEffect;
-}
-
-TrackMatteEffect *BoundingBox::getTrackMatteEffect() const
-{
-    return resolveTrackMatteEffect();
-}
-
 BoundingBox *BoundingBox::getParentEffectTarget() const
 {
     if(auto *effect = getParentEffect()) {
@@ -1656,63 +1659,6 @@ void BoundingBox::setParentEffectTarget(BoundingBox *target)
 void BoundingBox::clearParentEffectTarget()
 {
     setParentEffectTarget(nullptr);
-}
-
-BoundingBox *BoundingBox::getTrackMatteTarget() const
-{
-    if(auto *effect = resolveTrackMatteEffect()) {
-        return effect->matteSource();
-    }
-    return nullptr;
-}
-
-TrackMatteMode BoundingBox::getTrackMatteMode() const
-{
-    if(auto *effect = resolveTrackMatteEffect()) {
-        return effect->getMode();
-    }
-    return TrackMatteMode::alphaMatte;
-}
-
-void BoundingBox::setTrackMatteTarget(BoundingBox *target,
-                                      TrackMatteMode mode)
-{
-    auto *effect = getTrackMatteEffect();
-    const auto oldTarget = effect ? effect->matteSource() : nullptr;
-    const auto oldMode = effect ? effect->getMode()
-                                : TrackMatteMode::alphaMatte;
-    if(!target) {
-        if(effect) {
-            effect->setMatteSourceAction(nullptr);
-            if(oldTarget) {
-                emit blendEffectChanged();
-            }
-        }
-        return;
-    }
-
-    if(!effect) {
-        const auto trackMatteEffect = enve::make_shared<TrackMatteEffect>();
-        effect = trackMatteEffect.get();
-        addBlendEffect(trackMatteEffect);
-    }
-    effect->setModeAction(mode);
-    effect->setMatteSourceAction(target);
-    ensureBlendEffectsVisible();
-    if(target != oldTarget || mode != oldMode) {
-        emit blendEffectChanged();
-    }
-}
-
-void BoundingBox::clearTrackMatte()
-{
-    setTrackMatteTarget(nullptr, TrackMatteMode::alphaMatte);
-}
-
-bool BoundingBox::isUsedAsTrackMatteSource() const
-{
-    const auto parent = getParentGroup();
-    return parent && parent->usesTrackMatteSource(this);
 }
 
 //int BoundingBox::prp_getParentFrameShift() const {

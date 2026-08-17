@@ -53,7 +53,19 @@ const QList<PluginInfo>& pluginInfos() {
          QStringLiteral("Animation"),
          QStringLiteral("Three-slider easing curve adjustment for keyframe animation."),
          QStringLiteral("MotionV2PluginEnabled"),
-         true}
+         true},
+        {PluginFeature::aepImport,
+         QStringLiteral("AEP Import"),
+         QStringLiteral("Import"),
+         QStringLiteral("Import Adobe After Effects project files as nested compositions (shapes, transforms, keyframes, precomps)."),
+         QStringLiteral("AepImportPluginEnabled"),
+         false},
+        {PluginFeature::psdImport,
+         QStringLiteral("PSD Import"),
+         QStringLiteral("Import"),
+         QStringLiteral("Import layered Adobe Photoshop files as nested compositions (layers, opacity, blend modes)."),
+         QStringLiteral("PsdImportPluginEnabled"),
+         false}
     };
     return kPlugins;
 }

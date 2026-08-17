@@ -26,28 +26,8 @@
 #include "internallinkcanvas.h"
 #include "linkcanvasrenderdata.h"
 #include "Animators/transformanimator.h"
-#include "CacheHandlers/sceneframecontainer.h"
 #include "canvas.h"
 #include "pointhelpers.h"
-
-namespace {
-
-bool sceneFrameMatches(const SceneFrameContainer * const cont,
-                       const Canvas * const canvasTarget,
-                       const qreal resolution) {
-    return cont &&
-           canvasTarget &&
-           cont->storesDataInMemory() &&
-           cont->fBoxState == canvasTarget->currentStateId() &&
-           isZero6Dec(cont->fResolution - resolution);
-}
-
-bool sceneFrameCoversTarget(const SceneFrameContainer * const cont,
-                            const int targetFrame) {
-    return cont && cont->getRange().inRange(targetFrame);
-}
-
-}
 
 InternalLinkCanvas::InternalLinkCanvas(ContainerBox * const linkTarget,
                                        const bool innerLink) :
@@ -90,78 +70,54 @@ void InternalLinkCanvas::setupRenderData(const qreal relFrame,
                                          const QMatrix& parentM,
                                          BoxRenderData * const data,
                                          Canvas* const scene) {
+    if (!scene) { return; }
     {
         BoundingBox::setupRenderData(relFrame, parentM, data, scene);
         const qreal remapped = mFrameRemapping->frame(relFrame);
-        const auto thisM = getTotalTransformAtFrame(relFrame);
+        const auto thisM = data->fTotalTransform;
         const auto canvasData = static_cast<LinkCanvasRenderData*>(data);
-        ContainerBox* finalTarget = getFinalTarget();
-        const auto canvasTarget = static_cast<Canvas*>(finalTarget);
         if(getParentGroup()->isLink()) {
             const auto ilc = static_cast<InternalLinkCanvas*>(getLinkTarget());
             canvasData->fClipToCanvas = ilc->clipToCanvas();
         } else {
             canvasData->fClipToCanvas = mClipToCanvas->getValue();
         }
-        if(canvasTarget) {
-            const auto targetFrame = qRound(remapped);
-            const auto cachedFrame =
-                    canvasTarget->getSceneFramesHandler().
-                    sharedAtFrame<SceneFrameContainer>(targetFrame);
-            const bool exactCacheUsable =
-                    sceneFrameMatches(cachedFrame.get(), canvasTarget, data->fResolution);
-            SceneFrameContainer *reusableFrame = nullptr;
-            if(canvasData->fClipToCanvas) {
-                const auto currentFrame = canvasTarget->sceneFrame();
-                if(sceneFrameMatches(currentFrame, canvasTarget, data->fResolution) &&
-                   sceneFrameCoversTarget(currentFrame, targetFrame)) {
-                    reusableFrame = currentFrame;
-                } else if(exactCacheUsable) {
-                    reusableFrame = cachedFrame.get();
-                }
-            }
-            if(reusableFrame && !canvasData->fClipToCanvas) {
-                canvasData->setCachedSceneFrame(reusableFrame);
-            } else {
-                if(cachedFrame && !cachedFrame->storesDataInMemory()) {
-                    if(cachedFrame->hasRecoverableData()) {
-                        cachedFrame->scheduleLoadFromTmpFile();
-                    } else {
-                        canvasTarget->getSceneFramesHandler().remove(
-                                    cachedFrame->getRange());
-                    }
-                }
-                const auto loadingFrame = canvasTarget->loadingSceneFrame();
-                if(loadingFrame &&
-                   sceneFrameCoversTarget(loadingFrame, targetFrame) &&
-                   !loadingFrame->storesDataInMemory()) {
-                    if(loadingFrame->hasRecoverableData()) {
-                        loadingFrame->scheduleLoadFromTmpFile();
-                    } else {
-                        canvasTarget->setLoadingSceneFrame(nullptr);
-                    }
-                }
-                processChildrenData(remapped, thisM, data, scene,
-                                    data->fResolution);
-            }
-        } else {
-            processChildrenData(remapped, thisM, data, scene,
-                                data->fResolution);
-        }
+        const auto childrenM = thisM;
+        processChildrenData(remapped, childrenM, data, scene);
     }
 
     ContainerBox* finalTarget = getFinalTarget();
     auto canvasData = static_cast<LinkCanvasRenderData*>(data);
     const auto canvasTarget = static_cast<Canvas*>(finalTarget);
+    if (!canvasTarget) { return; }
+
+    if (!canvasTarget->getBgColorAnimator()) { return; }
     canvasData->fBgColor = toSkColor(canvasTarget->getBgColorAnimator()->
             getColor(relFrame));
-    //qreal res = mParentScene->getResolution();
-    canvasData->fCanvasHeight = canvasTarget->getCanvasHeight();//*res;
-    canvasData->fCanvasWidth = canvasTarget->getCanvasWidth();//*res;
+    canvasData->fCanvasHeight = canvasTarget->getCanvasHeight();
+    canvasData->fCanvasWidth = canvasTarget->getCanvasWidth();
+
+    // Layer mode (non-collapsed / "flattened" precomp): the precomp is
+    // rendered as a cached image of the target scene and drawn as a single
+    // layer. Populate that cached image from the target scene's frame cache
+    // so drawSk can display it. (sceneFrame() is only updated outside
+    // preview/rendering, so read the frame handler directly.)
+    if (canvasData->fClipToCanvas) {
+        const int targetRelFrame = qRound(mFrameRemapping->frame(relFrame));
+        if (auto* frame = canvasTarget->getSceneFramesHandler().
+                atFrame<SceneFrameContainer>(targetRelFrame)) {
+            canvasData->setCachedSceneFrame(frame);
+        }
+    }
 }
 
 bool InternalLinkCanvas::clipToCanvas() {
     return mClipToCanvas->getValue();
+}
+
+BoundingBox *InternalLinkCanvas::getLinkTarget()
+{
+    return mBoxTarget->getTarget();
 }
 
 qsptr<BoundingBox> InternalLinkCanvas::createLink(const bool inner) {

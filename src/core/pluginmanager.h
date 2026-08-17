@@ -14,7 +14,9 @@ enum class PluginFeature {
     particleSystem,
     deepGlow,
     glbViewer,
-    motionV2
+    motionV2,
+    aepImport,
+    psdImport
 };
 
 struct CORE_EXPORT PluginInfo {

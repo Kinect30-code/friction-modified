@@ -27,14 +27,14 @@
 #define LINKCANVASRENDERDATA_H
 #include "canvasrenderdata.h"
 
-class ImageCacheContainer;
+class SceneFrameContainer;
 
 struct CORE_EXPORT LinkCanvasRenderData : public CanvasRenderData {
     LinkCanvasRenderData(BoundingBox * const parentBoxT) :
         CanvasRenderData(parentBoxT) {}
 
     bool fClipToCanvas = false;
-    void setCachedSceneFrame(ImageCacheContainer* const container);
+    void setCachedSceneFrame(SceneFrameContainer* const container);
 protected:
     SkColor eraseColor() const override {
         // In Layer mode (fClipToCanvas), use transparent so the parent
@@ -44,7 +44,6 @@ protected:
 
     void drawSk(SkCanvas * const canvas) override;
     void setupRenderData() override;
-    void afterProcessing() override;
 
     void updateRelBoundingRect() override {
         if(fClipToCanvas) CanvasRenderData::updateRelBoundingRect();
@@ -58,6 +57,7 @@ protected:
 
 private:
     sk_sp<SkImage> mCachedSceneImage;
+    qreal mCachedSceneResolution = 1.;
 };
 
 #endif // LINKCANVASRENDERDATA_H

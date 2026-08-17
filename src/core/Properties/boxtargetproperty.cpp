@@ -58,6 +58,13 @@ void BoxTargetProperty::setTargetAction(BoundingBox* const box)
 void BoxTargetProperty::setTarget(BoundingBox* const box) {
     if(box == mTarget_d) return;
 
+    const auto parentBox = getFirstAncestor<BoundingBox>();
+    if(parentBox && parentBox->isLink()) {
+        if(box == parentBox || BoundingBox::linkChainContains(box, parentBox)) {
+            return;
+        }
+    }
+
     mTarget_d.assign(box);
     if(box) {
         mTarget_d << connect(box, &BoundingBox::prp_ancestorChanged,
@@ -82,6 +89,9 @@ bool BoxTargetProperty::SWT_dropSupport(const QMimeData * const data) {
     if(mValidator && !mValidator(obj)) return false;
     const auto parentBox = getFirstAncestor<BoundingBox>();
     if(parentBox == obj) return false;
+    if(parentBox && parentBox->isLink() && BoundingBox::linkChainContains(obj, parentBox)) {
+        return false;
+    }
     return true;
 }
 

@@ -62,14 +62,21 @@ Actions::Actions(Document &document) : mDocument(document) {
             return static_cast<bool>(mActiveScene);
         };
         const auto deleteSceneActionExec = [this]() {
-            if(!mActiveScene) return false;
+            if (!mActiveScene) { return false; }
             const auto sceneName = mActiveScene->prp_getName();
-            const int buttonId = QMessageBox::question(
-                        nullptr, "Delete " + sceneName,
-                        QString("Are you sure you want to delete "
-                        "%1? This action cannot be undone.").arg(sceneName),
-                        "Cancel", "Delete");
-            if(buttonId == 0) return false;
+            const bool isLinked = mDocument.sceneIsLinked(mActiveScene->ref<Canvas>());
+            if (isLinked) {
+                QMessageBox::information(nullptr,
+                                         tr("Scene is linked"),
+                                         tr("Can't delete %1, it's linked in a different scene.").arg(sceneName));
+                return false;
+            }
+            const int buttonId = QMessageBox::question(nullptr,
+                                                       tr("Delete %1").arg(sceneName),
+                                                       tr("Are you sure you want to delete "
+                                                          "%1? This action cannot be undone.").arg(sceneName),
+                                                       tr("Cancel"), tr("Delete"));
+            if (buttonId == 0) { return false; }
             return mDocument.removeScene(mActiveScene->ref<Canvas>());
         };
         const auto deleteSceneActionText = [this]() {
@@ -716,7 +723,9 @@ eBoxOrSound* Actions::handleDropEvent(QDropEvent * const event,
             auto *target = mActiveScene->getCurrentGroup();
             target->insertContained(0, link);
             if (const auto importedBox = enve_cast<BoundingBox*>(link)) {
+                // 先设置标志，等setRelBoundingRect被调用时再设置锚点
                 importedBox->planCenterPivotPosition();
+                // 移动到目标位置
                 importedBox->startPosTransform();
                 importedBox->moveByAbs(relDropPos);
                 importedBox->finishTransform();
@@ -786,8 +795,17 @@ qsptr<eIndependentSound> createSoundForPath(const QString &path) {
 }
 
 eBoxOrSound *Actions::importFile(const QString &path) {
-    if(!mActiveScene) return nullptr;
-    return importFile(path, mActiveScene->getCurrentGroup());
+    if(!mActiveScene) {
+        // 无活动场景时（欢迎页/全新项目），先创建默认场景承载导入。
+        // AEP/PSD 导入自带合成，尤其需要宿主场景。
+        auto* newScene = mDocument.createNewScene(true);
+        if (!newScene) { return nullptr; }
+        mDocument.setActiveScene(newScene);
+    }
+    // 导入素材时默认放置在画布中心
+    const QPointF canvasCenter(mActiveScene->getCanvasWidth() / 2.0,
+                               mActiveScene->getCanvasHeight() / 2.0);
+    return importFile(path, mActiveScene->getCurrentGroup(), 0, canvasCenter);
 }
 
 eBoxOrSound *Actions::importFile(const QString &path,
@@ -820,7 +838,6 @@ eBoxOrSound *Actions::importFile(const QString &path,
         target->insertContained(insertId, result);
     } else { // is file
         const QString extension = fInfo.suffix();
-        centerPivotOnImport = extension.compare(QStringLiteral("ora"), Qt::CaseInsensitive) != 0;
         if (isSoundExt(extension)) {
             result = createSoundForPath(path);
             target->insertContained(insertId, result);
@@ -847,9 +864,11 @@ eBoxOrSound *Actions::importFile(const QString &path,
         target->prp_pushUndoRedoName(tr("Import File"));
         target->insertContained(insertId, result);
         if (const auto importedBox = enve_cast<BoundingBox*>(result)) {
+            // 先设置标志，等setRelBoundingRect被调用时再设置锚点
             if (centerPivotOnImport) {
                 importedBox->planCenterPivotPosition();
             }
+            // 移动到目标位置
             importedBox->startPosTransform();
             importedBox->moveByAbs(relDropPos);
             importedBox->finishTransform();
@@ -865,7 +884,10 @@ eBoxOrSound *Actions::importFile(const QString &path,
 eBoxOrSound *Actions::importClipboard(const QString &content)
 {
     if (!mActiveScene) { return nullptr; }
-    return importClipboard(content, mActiveScene->getCurrentGroup());
+    // 粘贴素材时默认放置在画布中心
+    const QPointF canvasCenter(mActiveScene->getCanvasWidth() / 2.0,
+                               mActiveScene->getCanvasHeight() / 2.0);
+    return importClipboard(content, mActiveScene->getCurrentGroup(), 0, canvasCenter);
 }
 
 eBoxOrSound *Actions::importClipboard(const QString &content,
@@ -896,7 +918,9 @@ eBoxOrSound *Actions::importClipboard(const QString &content,
         target->prp_pushUndoRedoName(tr("Import from Clipboard"));
         target->insertContained(insertId, result);
         if (const auto importedBox = enve_cast<BoundingBox*>(result)) {
+            // 先设置标志，等setRelBoundingRect被调用时再设置锚点
             importedBox->planCenterPivotPosition();
+            // 移动到目标位置
             importedBox->startPosTransform();
             importedBox->moveByAbs(relDropPos);
             importedBox->finishTransform();

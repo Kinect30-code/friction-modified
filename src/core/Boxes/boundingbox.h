@@ -38,7 +38,6 @@
 #include "TransformEffects/transformeffect.h"
 #include "Tasks/domeletask.h"
 #include <QHash>
-#include <limits>
 
 class Canvas;
 
@@ -61,9 +60,6 @@ class CustomProperties;
 class BlendEffectCollection;
 class TransformEffectCollection;
 class ParentEffect;
-class TrackMatteEffect;
-enum class TrackMatteMode;
-
 class ContainerBox;
 class SmartVectorPath;
 class DurationRectangle;
@@ -139,6 +135,9 @@ public:
     virtual bool isGroup() const { return false; }
     virtual bool isLayer() const { return false; }
     virtual BoundingBox* getLinkBoxTarget() const { return nullptr; }
+    static const BoundingBox* resolveFinalLinkTarget(const BoundingBox* box);
+    static BoundingBox* resolveFinalLinkTarget(BoundingBox* box);
+    static bool linkChainContains(const BoundingBox* box, const BoundingBox* target);
 
     virtual qsptr<BoundingBox> createLink(const bool inner);
 
@@ -360,6 +359,13 @@ public:
     QPointF getAbsolutePos() const;
     bool absPointInsidePath(const QPointF &absPos);
 
+    // Stub functions for backward compatibility (track matte removed)
+    bool isUsedAsTrackMatteSource() const { return false; }
+    bool getTrackMatteTarget() const { return false; }
+    int getTrackMatteMode() const { return 0; }
+    void setTrackMatteTarget(BoundingBox*) {}
+    void clearTrackMatte() {}
+
     void setPivotAbsPos(const QPointF &absPos);
     void setPivotRelPos(const QPointF &relPos);
 
@@ -413,13 +419,6 @@ public:
     BoundingBox *getParentEffectTarget() const;
     void setParentEffectTarget(BoundingBox *target);
     void clearParentEffectTarget();
-    TrackMatteEffect *getTrackMatteEffect() const;
-    BoundingBox *getTrackMatteTarget() const;
-    TrackMatteMode getTrackMatteMode() const;
-    void setTrackMatteTarget(BoundingBox *target,
-                             TrackMatteMode mode);
-    void clearTrackMatte();
-    bool isUsedAsTrackMatteSource() const;
 
     void setBlendModeSk(const SkBlendMode blendMode);
     void setTimelineColor(const QColor &color);
@@ -505,14 +504,8 @@ public:
                                 const FrameRange& parentVisRange,
                                 const QString &maskId = QString()) const;
 private:
-    struct TrackMatteEffectCache {
-        uint fStateId = std::numeric_limits<uint>::max();
-        qptr<TrackMatteEffect> fEffect;
-    };
-
     void planUpdate(const UpdateReason reason,
                     const bool causedByDescendant);
-    TrackMatteEffect *resolveTrackMatteEffect() const;
     bool isCurrentRenderData(const BoxRenderData *renderData) const;
     BoxRenderData *currentRenderDataAtRelFrame(const qreal relFrame) const;
     BoxRenderData *reusableDisplayRenderData(const qreal relFrame,
@@ -550,7 +543,6 @@ protected:
     const qsptr<TransformEffectCollection> mTransformEffectCollection;
     const qsptr<BoxTransformAnimator> mTransformAnimator;
     const qsptr<RasterEffectCollection> mRasterEffectsAnimators;
-    mutable TrackMatteEffectCache mTrackMatteEffectCache;
 private:
     void alignGeometry(const QRectF& geometry,
                        const Qt::Alignment align,

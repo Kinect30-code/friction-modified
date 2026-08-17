@@ -34,10 +34,10 @@ protected:
     NonAnimatedMovablePoint(BasicTransformAnimator * const trans,
                             const MovablePointType type);
 public:
-    QPointF getRelativePos() const;
-    void setRelativePos(const QPointF &relPos);
+    QPointF getRelativePos() const override;
+    void setRelativePos(const QPointF &relPos) override;
 
-    void cancelTransform();
+    void cancelTransform() override;
 
     QPointF getValue() const { return mValue; }
     void setValue(const QPointF& value) { mValue = value; }

@@ -48,9 +48,10 @@ void RenderContainer::drawSkRaw(SkCanvas * const canvas,
 
 void RenderContainer::updatePaintTransformGivenNewTotalTransform(
                                     const QMatrix &totalTransform) {
-    QMatrix paintTransform = mTransform.inverted()*totalTransform;
     const qreal invRes = 1/mResolutionFraction;
+    QMatrix paintTransform;
     paintTransform.scale(invRes, invRes);
+    paintTransform *= mTransform.inverted()*totalTransform;
     mPaintTransformQt = paintTransform;
     mPaintTransform = toSkMatrix(paintTransform);
 }

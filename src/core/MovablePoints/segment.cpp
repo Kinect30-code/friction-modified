@@ -40,7 +40,7 @@ NormalSegment::NormalSegment(SmartNodePoint * const firstNode,
                              SmartNodePoint * const lastNode) :
     mHandler_k(firstNode->getHandler()) {
     mFirstNode = firstNode;
-    if(mFirstNode) mFirstNodeC2 = mFirstNode->getC2Pt();
+    mFirstNodeC2 = mFirstNode->getC2Pt();
     mLastNode = lastNode;
     if(mLastNode) mLastNodeC0 = mLastNode->getC0Pt();
     updateDissolved();
@@ -73,7 +73,7 @@ SmartNodePoint *NormalSegment::getNodeAt(const int id) const {
     if(id < 0 || id >= nodesCount()) return nullptr;
     if(id == 0) return mFirstNode;
     const int innerId = id - 1;
-    if(innerId < mInnerDissolved.count()) mInnerDissolved.at(innerId);
+    if(innerId < mInnerDissolved.count()) return mInnerDissolved.at(innerId);
     return mLastNode;
 }
 

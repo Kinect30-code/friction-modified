@@ -72,6 +72,82 @@ void Expression::sAddDefinitionsTo(const QString& definitionsStr,
     throwIfError(defRet, "Definitions");
 }
 
+namespace {
+QString normalizedScript(QString script)
+{
+    script = script.trimmed();
+    if (!script.contains(QStringLiteral("return")) &&
+        !script.contains(QLatin1Char(';')) &&
+        !script.contains(QLatin1Char('\n'))) {
+        script = QStringLiteral("return %1;").arg(script);
+    }
+    return script;
+}
+
+QString commonExpressionHelpers(const QStringList& bindingVars)
+{
+    QString helpers;
+    if (!bindingVars.contains(QStringLiteral("time"))) {
+        helpers += QStringLiteral(
+            "var time = (typeof frame === 'number' && typeof fps === 'number' && fps !== 0) ? frame / fps : 0;\n");
+    }
+    if (!bindingVars.contains(QStringLiteral("sin"))) {
+        helpers += QStringLiteral("var sin = Math.sin;\n");
+    }
+    if (!bindingVars.contains(QStringLiteral("wiggle"))) {
+        helpers += QStringLiteral(
+            "function _frictionExprHash(n) {\n"
+            "    var x = Math.sin(n * 12.9898) * 43758.5453;\n"
+            "    return (x - Math.floor(x)) * 2 - 1;\n"
+            "}\n"
+            "function _frictionExprNoise(x, seed) {\n"
+            "    var i = Math.floor(x);\n"
+            "    var f = x - i;\n"
+            "    var u = f * f * (3 - 2 * f);\n"
+            "    var a = _frictionExprHash(i + seed * 101.3);\n"
+            "    var b = _frictionExprHash(i + 1 + seed * 101.3);\n"
+            "    return a + (b - a) * u;\n"
+            "}\n"
+            "function wiggle(frequency, amplitude, seed, t, detail) {\n"
+            "    frequency = frequency === undefined ? 1 : frequency;\n"
+            "    amplitude = amplitude === undefined ? 1 : amplitude;\n"
+            "    seed = seed === undefined ? 0 : seed;\n"
+            "    t = t === undefined ? time : t;\n"
+            "    detail = detail === undefined ? 4 : detail;\n"
+            "    var total = 0;\n"
+            "    var amp = amplitude;\n"
+            "    var freq = frequency;\n"
+            "    for (var i = 0; i < detail; i++) {\n"
+            "        total += _frictionExprNoise(t * freq, seed + i) * amp;\n"
+            "        freq *= 2;\n"
+            "        amp *= 0.5;\n"
+            "    }\n"
+            "    return value + total;\n"
+            "}\n");
+    }
+    if (!bindingVars.contains(QStringLiteral("loopOut"))) {
+        helpers += QStringLiteral(
+            "function loopOut(type, duration, amplitude) {\n"
+            "    type = type || 'cycle';\n"
+            "    duration = duration === undefined ? 1 : duration;\n"
+            "    amplitude = amplitude === undefined ? 100 : amplitude;\n"
+            "    if (duration === 0) { return value; }\n"
+            "    var t = time % duration;\n"
+            "    if (t < 0) { t += duration; }\n"
+            "    if (type === 'pingpong') {\n"
+            "        var pt = time % (duration * 2);\n"
+            "        if (pt < 0) { pt += duration * 2; }\n"
+            "        if (pt > duration) { pt = duration * 2 - pt; }\n"
+            "        t = pt;\n"
+            "    }\n"
+            "    if (type === 'continue') { return value + time * amplitude / duration; }\n"
+            "    return value + Math.sin(t * Math.PI * 2 / duration) * amplitude;\n"
+            "}\n");
+    }
+    return helpers;
+}
+}
+
 void Expression::sAddScriptTo(const QString& scriptStr,
                               const PropertyBindingMap& bindings,
                               QJSEngine& e, QJSValue& eEvaluate,
@@ -86,7 +162,8 @@ void Expression::sAddScriptTo(const QString& scriptStr,
     eEvaluate = e.evaluate(
             "var eEvaluate;"
             "eEvaluate = function(" + evalVars + ") {" +
-                scriptStr +
+                commonExpressionHelpers(bindingVars) +
+                normalizedScript(scriptStr) +
             "}");
     throwIfError(eEvaluate, "Script");
     if(!eEvaluate.isCallable())

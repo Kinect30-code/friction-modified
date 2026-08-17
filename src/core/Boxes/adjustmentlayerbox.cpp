@@ -36,7 +36,7 @@ void AdjustmentLayerBox::drawPixmapSk(SkCanvas * const canvas,
                                       int& drawId,
                                       QList<BlendEffect::Delayed> &delayed) const
 {
-    if(!isVisible() || isUsedAsTrackMatteSource()) return;
+    if(!isVisible()) return;
     if(isGroup()) return drawContained(canvas, filter, drawId, delayed);
 
     canvas->save();
